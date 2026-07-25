@@ -106,3 +106,21 @@ This covers `intent.rs`, `chat.rs`, and any related test files in `core`.
 | `chore` | Maintenance tasks |
 | `perf` | Performance improvement |
 | `revert` | Reverting a previous commit |
+
+## Version Bumping
+
+The project version is defined in the root `Cargo.toml` (`[workspace.package] version`). Bump it before every commit based on the commit type in the first line (the subject).
+
+### Rules
+
+| Commit type | Bump | Example |
+|-------------|------|---------|
+| `feat` | Minor | `0.1.0` → `0.2.0` |
+| `fix` | Patch | `0.1.0` → `0.1.1` |
+| `feat!` | Major | `0.1.0` → `1.0.0` |
+| `build`, `ci`, `docs`, `refactor`, `style`, `test`, `chore` | None | no change |
+
+- Only the **subject line** (first line) determines the bump.
+- `feat!` (with `!`) indicates a breaking change and bumps the major version.
+- Never bump the version for non-functional changes (build, ci, docs, etc.).
+- Reset the patch and minor to zero when bumping major: `1.3.7` → `2.0.0`.
