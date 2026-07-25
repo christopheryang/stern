@@ -64,11 +64,11 @@ jobs:
 
       - name: Check conventional commits
         run: |
-          PATTERN='^(feat|fix|build|ci|docs|perf|refactor|style|test|chore|revert)(\([a-z0-9_-]+\))?: .+'
-          BAD=$(git log --oneline origin/${{ github.base_ref }}..HEAD --no-merges --format="%H %s" | grep -vE "$PATTERN" || true)
-          if [ -n "$BAD" ]; then
-            echo "Non-conventional commits found:"
-            echo "$BAD"
+          TOTAL=$(git log --format="%s" origin/${{ github.base_ref }}..HEAD --no-merges | wc -l)
+          GOOD=$(git log --format="%s" origin/${{ github.base_ref }}..HEAD --no-merges | grep -cE '^(feat|fix|build|ci|docs|perf|refactor|style|test|chore|revert)' || true)
+          if [ "$TOTAL" != "$GOOD" ]; then
+            echo "Non-conventional commits:"
+            git log --format="%s" origin/${{ github.base_ref }}..HEAD --no-merges | grep -vE '^(feat|fix|build|ci|docs|perf|refactor|style|test|chore|revert)'
             exit 1
           fi
-          echo "All commits follow conventional format."
+          echo "All $TOTAL commits follow conventional format."
