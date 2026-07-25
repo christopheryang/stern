@@ -1,9 +1,8 @@
 name: CI
 
 on:
-  push:
-    branches: ["**"]
   pull_request:
+    types: [opened, synchronize, reopened]
 
 env:
   CARGO_TERM_COLOR: always
@@ -60,13 +59,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.head_ref || github.ref }}
           fetch-depth: 0
-
-      - name: Fetch all tags
-        run: git fetch --tags --force
 
       - name: Install cocogitto
         run: cargo install cocogitto
 
       - name: Check commits
-        run: cog check --from-latest-tag --ignore-merge-commits --ignore-fixup-commits
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            cog check --from-ref origin/${{ github.base_ref }} --ignore-merge-commits --ignore-fixup-commits
+          else
+            echo "Skipping: only checks conventional commits on pull requests"
+          fi
