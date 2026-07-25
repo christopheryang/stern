@@ -21,9 +21,7 @@ pub enum Intent {
         fields: Vec<(String, String)>,
     },
     ExportVault,
-    ImportVault {
-        path: Option<String>,
-    },
+    ImportVault,
     CreateVault,
     UnlockVault,
     Help,
@@ -236,7 +234,7 @@ fn detect_import(words: &[&str]) -> Option<Intent> {
         return None;
     }
 
-    Some(Intent::ImportVault { path: None })
+    Some(Intent::ImportVault)
 }
 
 fn detect_vault_manage(words: &[&str]) -> Option<Intent> {

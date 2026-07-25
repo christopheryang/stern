@@ -70,6 +70,7 @@ pub struct SendChatRequest {
 pub struct ChatResponse {
     pub message: String,
     pub action: Option<String>,
+    pub user_message_display: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

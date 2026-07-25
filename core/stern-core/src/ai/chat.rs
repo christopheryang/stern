@@ -15,7 +15,16 @@ impl ChatHandler {
     #[must_use]
     pub fn process_message(&self, user_input: &str) -> ChatResponse {
         let intent = classify_intent(user_input);
-        self.intent_to_response(intent)
+        let mut response = self.intent_to_response(intent);
+
+        let is_vault_action = matches!(
+            response.action,
+            Some(Action::CreateVault | Action::UnlockVault | Action::ExportVault | Action::ImportVault)
+        );
+        if is_vault_action {
+            response.user_message_display = None;
+        }
+        response
     }
 
     #[allow(clippy::unused_self, clippy::too_many_lines, clippy::needless_pass_by_value)]
@@ -41,6 +50,7 @@ impl ChatHandler {
                         kind: kind.clone(),
                         fields: fields.clone(),
                     }),
+                    user_message_display: None,
                 }
             }
             Intent::RetrieveSecret { ref name } => ChatResponse {
@@ -50,6 +60,7 @@ impl ChatHandler {
                 action: Some(Action::SearchEntry {
                     query: name.clone(),
                 }),
+                user_message_display: None,
             },
             Intent::ListSecrets { ref category } => {
                 let cat_desc = category
@@ -63,6 +74,7 @@ impl ChatHandler {
                     action: Some(Action::ListEntries {
                         category: category.clone(),
                     }),
+                    user_message_display: None,
                 }
             }
             Intent::DeleteSecret { ref name } => ChatResponse {
@@ -72,6 +84,7 @@ impl ChatHandler {
                 action: Some(Action::ConfirmDelete {
                     name: name.clone(),
                 }),
+                user_message_display: None,
             },
             Intent::UpdateSecret { ref name, ref fields } => {
                 let field_desc = if fields.is_empty() {
@@ -89,23 +102,28 @@ impl ChatHandler {
                         name: name.clone(),
                         fields: fields.clone(),
                     }),
+                    user_message_display: None,
                 }
             }
             Intent::ExportVault => ChatResponse {
                 message: "Opening secure export dialog...".to_string(),
                 action: Some(Action::ExportVault),
+                user_message_display: None,
             },
-            Intent::ImportVault { .. } => ChatResponse {
+            Intent::ImportVault => ChatResponse {
                 message: "Opening secure import dialog...".to_string(),
                 action: Some(Action::ImportVault),
+                user_message_display: None,
             },
             Intent::CreateVault => ChatResponse {
                 message: "Opening secure vault creation dialog...".to_string(),
                 action: Some(Action::CreateVault),
+                user_message_display: None,
             },
             Intent::UnlockVault => ChatResponse {
                 message: "Opening secure unlock dialog...".to_string(),
                 action: Some(Action::UnlockVault),
+                user_message_display: None,
             },
             Intent::Help => ChatResponse {
                 message: "I can help you manage your secrets. Here's what I can do:\n\n\
@@ -119,6 +137,7 @@ impl ChatHandler {
                     Just tell me what you need in natural language."
                     .to_string(),
                 action: None,
+                user_message_display: None,
             },
             Intent::Greeting => ChatResponse {
                 message: "Hey! I'm Stern, your local secrets manager. \
@@ -126,6 +145,7 @@ impl ChatHandler {
                     Ask me to store, find, or manage your secrets."
                     .to_string(),
                 action: None,
+                user_message_display: None,
             },
             Intent::Unknown { ref text } => ChatResponse {
                 message: format!(
@@ -137,6 +157,7 @@ impl ChatHandler {
                     - \"help\""
                 ),
                 action: None,
+                user_message_display: None,
             },
         }
     }
@@ -145,6 +166,7 @@ impl ChatHandler {
 pub struct ChatResponse {
     pub message: String,
     pub action: Option<Action>,
+    pub user_message_display: Option<String>,
 }
 
 pub enum Action {

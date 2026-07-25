@@ -257,6 +257,7 @@ pub async fn send_chat_message(
         None => Ok(ChatResponse {
             message: response.message,
             action: None,
+            user_message_display: None,
         }),
     }
 }
@@ -266,6 +267,7 @@ fn passthrough_response(response: &stern_core::ai::chat::ChatResponse) -> ChatRe
     ChatResponse {
         message: response.message.clone(),
         action: action_str,
+        user_message_display: response.user_message_display.clone(),
     }
 }
 
@@ -299,6 +301,7 @@ fn handle_store_entry(
         return Ok(ChatResponse {
             message: "Vault is locked. Please unlock it first.".to_string(),
             action: Some("locked".to_string()),
+            user_message_display: None,
         });
     }
 
@@ -356,6 +359,7 @@ fn handle_store_entry(
     Ok(ChatResponse {
         message: message.to_string(),
         action: Some("store".to_string()),
+        user_message_display: None,
     })
 }
 
@@ -453,8 +457,25 @@ pub async fn import_vault(
     let kek = *session.kek()?;
     drop(session);
 
+    let path = std::path::PathBuf::from(&request.path);
+    if !path.exists() {
+        return Err(VaultError::Io(format!(
+            "Import file not found: {}",
+            request.path
+        )));
+    }
+    if !path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    {
+        return Err(VaultError::Io(format!(
+            "Import file must be a .json file, got: {}",
+            request.path
+        )));
+    }
+
     let data =
-        std::fs::read(&request.path).map_err(|e| VaultError::Io(e.to_string()))?;
+        std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
 
     let (salt, secret_key, export_file): (
         [u8; VAULT_SALT_LEN],
