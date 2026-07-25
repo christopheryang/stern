@@ -1,0 +1,31 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Stern",
+  "version": "0.1.0",
+  "identifier": "com.stern.app",
+  "build": {
+    "beforeDevCommand": "cd stern-app && trunk serve --port 1420",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "cd stern-app && trunk build --release",
+    "frontendDist": "../stern-app/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Stern",
+        "width": 900,
+        "height": 700,
+        "minWidth": 600,
+        "minHeight": 400,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all"
+  }
+}

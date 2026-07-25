@@ -1,0 +1,41 @@
+[workspace]
+resolver = "3"
+members = [
+    "core/stern-core",
+    "core/stern-ipc",
+    "desktop/stern-tauri",
+    "desktop/stern-app",
+    "desktop/stern-ui",
+]
+
+[workspace.package]
+version = "0.1.0"
+license = "MIT"
+
+[workspace.lints.clippy]
+unwrap_used              = "deny"
+expect_used              = "deny"
+panic                    = "deny"
+unreachable              = "deny"
+unimplemented            = "deny"
+todo                     = "deny"
+indexing_slicing         = "deny"
+unwrap_in_result         = "deny"
+let_underscore_must_use  = "deny"
+mem_forget               = "deny"
+arithmetic_side_effects  = "deny"
+float_arithmetic         = "deny"
+integer_division         = "deny"
+pedantic                 = { level = "warn", priority = -1 }
+nursery                  = { level = "warn", priority = -1 }
+missing_errors_doc       = "allow"
+missing_panics_doc       = "allow"
+module_name_repetitions  = "allow"
+similar_names            = "allow"
+
+[workspace.lints.rust]
+unsafe_code       = "deny"
+unused_must_use   = "deny"
+unused_imports    = "deny"
+unused_variables  = "deny"
+dead_code         = "deny"

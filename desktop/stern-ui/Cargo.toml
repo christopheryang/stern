@@ -1,0 +1,21 @@
+[package]
+name = "stern-ui"
+version.workspace = true
+license.workspace = true
+edition = "2021"
+publish = false
+
+[dependencies]
+leptos = { version = "0.8", features = ["csr"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+web-sys = { version = "0.3", features = ["HtmlElement", "Element", "Window", "Document", "MouseEvent", "EventTarget", "HtmlInputElement"] }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+uuid = { version = "1", features = ["v4", "js"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "wasmbind"] }
+
+[lints]
+workspace = true
