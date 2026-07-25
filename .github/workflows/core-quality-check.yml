@@ -1,0 +1,77 @@
+name: Quality Check - Core
+
+on:
+  pull_request:
+    paths:
+      - "core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    name: Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsqlite3-dev \
+            libssl-dev \
+            libdbus-1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --manifest-path core/stern-core/Cargo.toml --all-targets
+
+      - name: Run IPC tests
+        run: cargo test --manifest-path core/stern-ipc/Cargo.toml --all-targets
+
+  clippy:
+    name: Clippy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libsqlite3-dev \
+            libssl-dev \
+            libdbus-1-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run clippy
+        run: |
+          cargo clippy --manifest-path core/stern-core/Cargo.toml -- -D warnings
+          cargo clippy --manifest-path core/stern-ipc/Cargo.toml -- -D warnings

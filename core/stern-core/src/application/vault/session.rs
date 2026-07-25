@@ -18,11 +18,7 @@ impl VaultSession {
         }
     }
 
-    pub fn unlock(
-        &mut self,
-        kek: [u8; KEK_LEN],
-        verify_hash: [u8; VERIFY_HASH_LEN],
-    ) {
+    pub fn unlock(&mut self, kek: [u8; KEK_LEN], verify_hash: [u8; VERIFY_HASH_LEN]) {
         *self.kek.get_mut() = kek;
         self.verify_hash = verify_hash;
         self.is_unlocked = true;

@@ -1,6 +1,6 @@
 #![allow(unsafe_code)]
 
-use std::alloc::{Layout, alloc_zeroed, dealloc};
+use std::alloc::{alloc_zeroed, dealloc, Layout};
 use std::ptr;
 use zeroize::Zeroize;
 

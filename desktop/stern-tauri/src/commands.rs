@@ -4,14 +4,15 @@ use crate::AppState;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
 use stern_core::domain::vault::aad::entry_aad;
-use stern_core::domain::vault::crypto_constants::{DEK_WRAPPED_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN};
+use stern_core::domain::vault::crypto_constants::{
+    DEK_WRAPPED_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN,
+};
 use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind, EntryPayload, Field};
 use stern_core::domain::vault::errors::VaultError;
 use stern_core::domain::vault::kdf_params::KdfParams;
 use stern_ipc::dto::{
-    ChatResponse, CreateEntryRequest, CreateVaultRequest, EntryDto, ExportRequest,
-    ExportResponse, ImportRequest, ImportResponse, SendChatRequest, UnlockRequest,
-    UpdateEntryRequest, VaultStatus,
+    ChatResponse, CreateEntryRequest, CreateVaultRequest, EntryDto, ExportRequest, ExportResponse,
+    ImportRequest, ImportResponse, SendChatRequest, UnlockRequest, UpdateEntryRequest, VaultStatus,
 };
 use tauri::State;
 
@@ -108,7 +109,9 @@ pub async fn unlock_vault(
     let preprocessed = state
         .kdf
         .preprocess_2skd(request.password.as_bytes(), &meta.secret_key)?;
-    let master_key = state.kdf.derive_master_key(&preprocessed, &meta.salt, &params)?;
+    let master_key = state
+        .kdf
+        .derive_master_key(&preprocessed, &meta.salt, &params)?;
     let kek = state.kdf.derive_kek(&master_key)?;
     let verify = state.kdf.derive_verify_hash(&master_key)?;
 
@@ -169,18 +172,13 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<VaultStatus, Vault
 
 #[tauri::command]
 
-pub async fn list_entries(
-    _state: State<'_, AppState>,
-) -> Result<Vec<EntryDto>, VaultError> {
+pub async fn list_entries(_state: State<'_, AppState>) -> Result<Vec<EntryDto>, VaultError> {
     Ok(vec![])
 }
 
 #[tauri::command]
 
-pub async fn get_entry(
-    _state: State<'_, AppState>,
-    id: String,
-) -> Result<EntryDto, VaultError> {
+pub async fn get_entry(_state: State<'_, AppState>, id: String) -> Result<EntryDto, VaultError> {
     Err(VaultError::EntryNotFound(id))
 }
 
@@ -204,10 +202,7 @@ pub async fn update_entry(
 
 #[tauri::command]
 
-pub async fn delete_entry(
-    _state: State<'_, AppState>,
-    _id: String,
-) -> Result<(), VaultError> {
+pub async fn delete_entry(_state: State<'_, AppState>, _id: String) -> Result<(), VaultError> {
     Err(VaultError::VaultLocked)
 }
 
@@ -386,10 +381,11 @@ pub async fn export_vault(
         let wrapped = <[u8; DEK_WRAPPED_LEN]>::try_from(enc.dek_wrapped.as_slice())
             .map_err(|_| VaultError::DecryptionFailed)?;
         let dek = state.crypto.unwrap_dek(&wrapped, &kek)?;
-        let plaintext =
-            state.crypto.decrypt_entry(&dek, &enc.nonce, &enc.ciphertext, &aad)?;
-        let payload: EntryPayload =
-            serde_json::from_slice(&plaintext).map_err(|e| VaultError::Serialization(e.to_string()))?;
+        let plaintext = state
+            .crypto
+            .decrypt_entry(&dek, &enc.nonce, &enc.ciphertext, &aad)?;
+        let payload: EntryPayload = serde_json::from_slice(&plaintext)
+            .map_err(|e| VaultError::Serialization(e.to_string()))?;
         plaintext_entries.push(payload);
     }
 
@@ -432,8 +428,7 @@ pub async fn export_vault(
     let export_json = serde_json::to_vec_pretty(&(&salt, &*secret_key, &export_file))
         .map_err(|e| VaultError::Serialization(e.to_string()))?;
 
-    std::fs::write(&export_path, &export_json)
-        .map_err(|e| VaultError::Io(e.to_string()))?;
+    std::fs::write(&export_path, &export_json).map_err(|e| VaultError::Io(e.to_string()))?;
 
     Ok(ExportResponse {
         path: export_path.to_string_lossy().to_string(),
@@ -474,15 +469,13 @@ pub async fn import_vault(
         )));
     }
 
-    let data =
-        std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
+    let data = std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
 
     let (salt, secret_key, export_file): (
         [u8; VAULT_SALT_LEN],
         [u8; SECRET_KEY_LEN],
         EncryptedEntry,
-    ) = serde_json::from_slice(&data)
-        .map_err(|e| VaultError::Serialization(e.to_string()))?;
+    ) = serde_json::from_slice(&data).map_err(|e| VaultError::Serialization(e.to_string()))?;
 
     let params = KdfParams::argon2id_default();
     let preprocessed = state
@@ -496,10 +489,12 @@ pub async fn import_vault(
     let dek = state.crypto.unwrap_dek(&wrapped, &export_kek)?;
     let aad = b"stern-export-v1";
     let plaintext =
-        state.crypto.decrypt_entry(&dek, &export_file.nonce, &export_file.ciphertext, aad)?;
+        state
+            .crypto
+            .decrypt_entry(&dek, &export_file.nonce, &export_file.ciphertext, aad)?;
 
-    let entries: Vec<EntryPayload> = serde_json::from_slice(&plaintext)
-        .map_err(|e| VaultError::Serialization(e.to_string()))?;
+    let entries: Vec<EntryPayload> =
+        serde_json::from_slice(&plaintext).map_err(|e| VaultError::Serialization(e.to_string()))?;
 
     let mut imported = 0;
     for payload in entries {
@@ -513,7 +508,9 @@ pub async fn import_vault(
 
         let entry_dek = state.crypto.generate_dek();
         let (nonce, ciphertext) =
-            state.crypto.encrypt_entry(&entry_dek, &payload_json, &entry_aad)?;
+            state
+                .crypto
+                .encrypt_entry(&entry_dek, &payload_json, &entry_aad)?;
         let dek_wrapped = state.crypto.wrap_dek(&entry_dek, &kek)?.to_vec();
 
         let entry = EncryptedEntry {
@@ -536,4 +533,268 @@ pub async fn import_vault(
     Ok(ImportResponse {
         entry_count: imported,
     })
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+    use stern_core::ai::chat::Action as CoreAction;
+    use stern_core::application::vault::session::VaultSession;
+    use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
+    use stern_core::infrastructure::keychain::OsKeychainProvider;
+    use stern_core::infrastructure::sqlite::repository::SqliteRepository;
+
+    #[test]
+    fn action_to_string_store_entry() {
+        let action = CoreAction::StoreEntry {
+            name: "test".into(),
+            kind: "login".into(),
+            fields: vec![],
+        };
+        assert_eq!(action_to_string(&action), "store");
+    }
+
+    #[test]
+    fn action_to_string_search_entry() {
+        let action = CoreAction::SearchEntry {
+            query: "foo".into(),
+        };
+        assert_eq!(action_to_string(&action), "search");
+    }
+
+    #[test]
+    fn action_to_string_list_entries() {
+        let action = CoreAction::ListEntries {
+            category: Some("logins".into()),
+        };
+        assert_eq!(action_to_string(&action), "list");
+    }
+
+    #[test]
+    fn action_to_string_list_entries_no_category() {
+        let action = CoreAction::ListEntries { category: None };
+        assert_eq!(action_to_string(&action), "list");
+    }
+
+    #[test]
+    fn action_to_string_confirm_delete() {
+        let action = CoreAction::ConfirmDelete {
+            name: "my-entry".into(),
+        };
+        assert_eq!(action_to_string(&action), "delete");
+    }
+
+    #[test]
+    fn action_to_string_update_entry() {
+        let action = CoreAction::UpdateEntry {
+            name: "entry".into(),
+            fields: vec![("key".into(), "val".into())],
+        };
+        assert_eq!(action_to_string(&action), "update");
+    }
+
+    #[test]
+    fn action_to_string_export_vault() {
+        assert_eq!(action_to_string(&CoreAction::ExportVault), "export");
+    }
+
+    #[test]
+    fn action_to_string_import_vault() {
+        assert_eq!(action_to_string(&CoreAction::ImportVault), "import");
+    }
+
+    #[test]
+    fn action_to_string_create_vault() {
+        assert_eq!(action_to_string(&CoreAction::CreateVault), "create_vault");
+    }
+
+    #[test]
+    fn action_to_string_unlock_vault() {
+        assert_eq!(action_to_string(&CoreAction::UnlockVault), "unlock_vault");
+    }
+
+    #[test]
+    fn passthrough_response_with_action() {
+        let core_resp = stern_core::ai::chat::ChatResponse {
+            message: "hello".into(),
+            action: Some(CoreAction::ExportVault),
+            user_message_display: Some("display me".into()),
+        };
+        let ipc_resp = passthrough_response(&core_resp);
+        assert_eq!(ipc_resp.message, "hello");
+        assert_eq!(ipc_resp.action.as_deref(), Some("export"));
+        assert_eq!(ipc_resp.user_message_display.as_deref(), Some("display me"));
+    }
+
+    #[test]
+    fn passthrough_response_without_action() {
+        let core_resp = stern_core::ai::chat::ChatResponse {
+            message: "no action".into(),
+            action: None,
+            user_message_display: None,
+        };
+        let ipc_resp = passthrough_response(&core_resp);
+        assert_eq!(ipc_resp.message, "no action");
+        assert!(ipc_resp.action.is_none());
+        assert!(ipc_resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn passthrough_response_all_action_variants() {
+        let variants: Vec<CoreAction> = vec![
+            CoreAction::StoreEntry {
+                name: "n".into(),
+                kind: "login".into(),
+                fields: vec![],
+            },
+            CoreAction::SearchEntry { query: "q".into() },
+            CoreAction::ListEntries { category: None },
+            CoreAction::ConfirmDelete { name: "n".into() },
+            CoreAction::UpdateEntry {
+                name: "n".into(),
+                fields: vec![],
+            },
+            CoreAction::ExportVault,
+            CoreAction::ImportVault,
+            CoreAction::CreateVault,
+            CoreAction::UnlockVault,
+        ];
+
+        let expected = [
+            "store",
+            "search",
+            "list",
+            "delete",
+            "update",
+            "export",
+            "import",
+            "create_vault",
+            "unlock_vault",
+        ];
+
+        for (action, expected_str) in variants.into_iter().zip(expected.iter()) {
+            let core_resp = stern_core::ai::chat::ChatResponse {
+                message: "m".into(),
+                action: Some(action),
+                user_message_display: None,
+            };
+            let ipc_resp = passthrough_response(&core_resp);
+            assert_eq!(ipc_resp.action.as_deref(), Some(*expected_str));
+        }
+    }
+
+    fn make_test_app_state() -> (AppState, tempfile::TempPath) {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.into_temp_path();
+        let db_path = path.to_path_buf();
+        let repository = Arc::new(SqliteRepository::new(&db_path).unwrap());
+        let state = AppState {
+            session: Mutex::new(VaultSession::new()),
+            crypto: Arc::new(XChaCha20CryptoProvider::new()),
+            kdf: Arc::new(Argon2idKdfProvider::new()),
+            keychain: Arc::new(OsKeychainProvider::new()),
+            chat_handler: Arc::new(stern_core::ai::ChatHandler::new(None)),
+            db_path,
+            repository,
+            unlock_lockout: Mutex::new(None),
+        };
+        (state, path)
+    }
+
+    #[test]
+    fn lockout_initial_state_is_none() {
+        let (state, _path) = make_test_app_state();
+        let lockout = state.unlock_lockout.lock().unwrap();
+        assert!(lockout.is_none());
+    }
+
+    #[test]
+    fn lockout_increments_on_failed_attempt() {
+        let (state, _path) = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            let entry = lockout.get_or_insert((0, Instant::now()));
+            entry.0 += 1;
+            entry.1 = Instant::now();
+        }
+        let lockout = state.unlock_lockout.lock().unwrap();
+        let (count, _) = lockout.unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn lockout_blocks_after_max_attempts() {
+        let (state, _path) = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
+        }
+
+        let lockout = state.unlock_lockout.lock().unwrap();
+        if let Some((count, last_attempt)) = *lockout {
+            assert!(count >= MAX_UNLOCK_ATTEMPTS);
+            let remaining = LOCKOUT_DURATION.checked_sub(last_attempt.elapsed());
+            assert!(remaining.is_some(), "should still be in lockout window");
+        } else {
+            panic!("lockout should be set");
+        }
+    }
+
+    #[test]
+    fn lockout_resets_on_success() {
+        let (state, _path) = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
+        }
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            *lockout = None;
+        }
+        let lockout = state.unlock_lockout.lock().unwrap();
+        assert!(lockout.is_none());
+    }
+
+    #[test]
+    fn lockout_clears_after_duration_expires() {
+        let (state, _path) = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            let expired_time = Instant::now() - LOCKOUT_DURATION - Duration::from_secs(1);
+            *lockout = Some((MAX_UNLOCK_ATTEMPTS, expired_time));
+        }
+
+        let lockout = state.unlock_lockout.lock().unwrap();
+        if let Some((count, last_attempt)) = *lockout {
+            if count >= MAX_UNLOCK_ATTEMPTS {
+                let remaining = LOCKOUT_DURATION.checked_sub(last_attempt.elapsed());
+                if remaining.is_some() {
+                    panic!("lockout should have expired");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lockout_counter_accumulates_across_attempts() {
+        let (state, _path) = make_test_app_state();
+        for i in 1..=MAX_UNLOCK_ATTEMPTS {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            let entry = lockout.get_or_insert((0, Instant::now()));
+            entry.0 += 1;
+            entry.1 = Instant::now();
+            let (count, _) = lockout.unwrap();
+            assert_eq!(count, i);
+        }
+    }
+
+    #[test]
+    fn app_state_components_are_initialized() {
+        let (state, _path) = make_test_app_state();
+        assert!(!state.session.lock().unwrap().is_unlocked);
+        assert!(state.unlock_lockout.lock().unwrap().is_none());
+    }
 }

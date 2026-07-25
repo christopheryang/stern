@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag is on main
+        run: |
+          git fetch origin main
+          if ! git merge-base --is-ancestor "${{ github.sha }}" origin/main; then
+            echo "Tag is not on main branch, skipping release"
+            exit 1
+          fi
+
+      - name: Install system dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install trunk
+        run: cargo install trunk --locked
+
+      - name: Install cocogitto
+        run: cargo install cocogitto
+
+      - name: Install Tauri CLI
+        run: cargo install tauri-cli --locked
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build frontend
+        run: cd desktop/stern-app && trunk build --release
+
+      - name: Build Tauri app
+        run: cargo tauri build --target ${{ matrix.target }}
+        working-directory: desktop/stern-tauri
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          PREV_TAG=$(git tag --sort=-v:refname | grep -A1 "^${TAG}$" | tail -1 || echo "")
+          if [ -n "$PREV_TAG" ] && [ "$PREV_TAG" != "$TAG" ]; then
+            NOTES=$(git log --oneline "${PREV_TAG}..${TAG}" --no-merges | while IFS= read -r line; do
+              HASH=$(echo "$line" | cut -d' ' -f1 | cut -c1-7)
+              MSG=$(echo "$line" | cut -d' ' -f2-)
+              echo "- \`${HASH}\` ${MSG}"
+            done)
+          else
+            NOTES=$(git log --oneline --no-merges | head -20 | while IFS= read -r line; do
+              HASH=$(echo "$line" | cut -d' ' -f1 | cut -c1-7)
+              MSG=$(echo "$line" | cut -d' ' -f2-)
+              echo "- \`${HASH}\` ${MSG}"
+            done)
+          fi
+          {
+            echo "## Stern ${TAG}"
+            echo ""
+            echo "### Changes"
+            echo ""
+            echo "${NOTES}"
+            echo ""
+            echo "### Install"
+            echo ""
+            echo "Download the appropriate installer for your platform from the assets below."
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release_notes.md
+          generate_release_notes: false
+          files: |
+            desktop/stern-tauri/target/${{ matrix.target }}/release/bundle/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,15 +1,14 @@
 use aes_kw::{KeyInit as AesKwKeyInit, KwAes256};
 use chacha20poly1305::aead::{Aead, KeyInit as AeadKeyInit, Payload};
 use chacha20poly1305::{XChaCha20Poly1305, XNonce};
-use rand::RngCore;
 use rand::rngs::OsRng;
+use rand::RngCore;
 use subtle::ConstantTimeEq;
 use zeroize::Zeroizing;
 
 use crate::application::vault::ports::crypto::{CryptoProvider, Nonce};
 use crate::domain::vault::crypto_constants::{
-    DEK_LEN, DEK_WRAPPED_LEN, KEK_LEN, NONCE_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN,
-    VERIFY_HASH_LEN,
+    DEK_LEN, DEK_WRAPPED_LEN, KEK_LEN, NONCE_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN, VERIFY_HASH_LEN,
 };
 use crate::domain::vault::errors::VaultError;
 

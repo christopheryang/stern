@@ -21,9 +21,10 @@ impl KeychainProvider for OsKeychainProvider {
         let entry = keyring::Entry::new(service, account)
             .map_err(|e| VaultError::Keychain(e.to_string()))?;
         entry
-            .set_password(
-                &base64::Engine::encode(&base64::engine::general_purpose::STANDARD, key),
-            )
+            .set_password(&base64::Engine::encode(
+                &base64::engine::general_purpose::STANDARD,
+                key,
+            ))
             .map_err(|e| VaultError::Keychain(e.to_string()))?;
         Ok(())
     }
@@ -34,11 +35,8 @@ impl KeychainProvider for OsKeychainProvider {
         let password = entry
             .get_password()
             .map_err(|e| VaultError::Keychain(e.to_string()))?;
-        base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            &password,
-        )
-        .map_err(|e| VaultError::Keychain(e.to_string()))
+        base64::Engine::decode(&base64::engine::general_purpose::STANDARD, &password)
+            .map_err(|e| VaultError::Keychain(e.to_string()))
     }
 
     fn delete_key(&self, service: &str, account: &str) -> Result<(), VaultError> {

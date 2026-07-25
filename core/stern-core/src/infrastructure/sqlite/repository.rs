@@ -13,8 +13,7 @@ pub struct SqliteRepository {
 
 impl SqliteRepository {
     pub fn new(path: &Path) -> Result<Self, VaultError> {
-        let conn =
-            Connection::open(path).map_err(|e| VaultError::Database(e.to_string()))?;
+        let conn = Connection::open(path).map_err(|e| VaultError::Database(e.to_string()))?;
 
         conn.execute_batch(
             "
@@ -170,16 +169,16 @@ impl SqliteRepository {
 
     pub fn count_entries(&self) -> Result<usize, VaultError> {
         self.execute(|conn| {
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
             Ok(usize::try_from(count).unwrap_or(usize::MAX))
         })
     }
 
     pub fn vault_exists(&self) -> Result<bool, VaultError> {
         self.execute(|conn| {
-            let count: i64 = conn
-                .query_row("SELECT COUNT(*) FROM vault_meta", [], |row| row.get(0))?;
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM vault_meta", [], |row| row.get(0))?;
             Ok(count > 0)
         })
     }
