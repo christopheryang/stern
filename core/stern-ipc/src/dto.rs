@@ -72,3 +72,20 @@ pub struct ChatResponse {
     pub message: String,
     pub action: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportRequest {
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportResponse {
+    pub path: String,
+    pub entry_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportRequest {
+    pub password: String,
+    pub path: String,
+}

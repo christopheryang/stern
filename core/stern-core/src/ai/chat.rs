@@ -15,7 +15,10 @@ impl ChatHandler {
     #[must_use]
     pub fn process_message(&self, user_input: &str) -> ChatResponse {
         let intent = classify_intent(user_input);
+        self.intent_to_response(intent)
+    }
 
+    fn intent_to_response(&self, intent: Intent) -> ChatResponse {
         match intent {
             Intent::StoreSecret { ref name, ref kind, ref fields } => {
                 let field_desc = if fields.is_empty() {
@@ -30,7 +33,7 @@ impl ChatHandler {
 
                 ChatResponse {
                     message: format!(
-                        "I'll store your {kind} \"{name}\" in the vault.{field_desc}\n\nReady to save. Click confirm to encrypt and store it locally."
+                        "Stored your {kind} \"{name}\" in the vault.{field_desc}"
                     ),
                     action: Some(Action::StoreEntry {
                         name: name.clone(),
@@ -87,13 +90,67 @@ impl ChatHandler {
                     }),
                 }
             }
+            Intent::ExportVault { ref password } => {
+                if password.is_some() {
+                    ChatResponse {
+                        message: "Exporting your vault...".to_string(),
+                        action: Some(Action::ExportVault { password: password.clone() }),
+                    }
+                } else {
+                    ChatResponse {
+                        message: "Enter your export password. Example: \"export vault password mypassword\"".to_string(),
+                        action: Some(Action::ExportVault { password: None }),
+                    }
+                }
+            },
+            Intent::ImportVault { ref path, ref password } => {
+                if password.is_some() && path.is_some() {
+                    ChatResponse {
+                        message: "Importing your vault...".to_string(),
+                        action: Some(Action::ImportVault { path: path.clone(), password: password.clone() }),
+                    }
+                } else {
+                    ChatResponse {
+                        message: "Enter the backup file path and your import password. Example: \"import vault /path/to/backup.json password mypassword\"".to_string(),
+                        action: Some(Action::ImportVault { path: path.clone(), password: None }),
+                    }
+                }
+            },
+            Intent::CreateVault { ref password } => {
+                if password.is_some() {
+                    ChatResponse {
+                        message: "Creating your vault...".to_string(),
+                        action: Some(Action::CreateVault { password: password.clone() }),
+                    }
+                } else {
+                    ChatResponse {
+                        message: "Choose a master password for your new vault. Example: \"create vault password mypassword\"".to_string(),
+                        action: Some(Action::CreateVault { password: None }),
+                    }
+                }
+            },
+            Intent::UnlockVault { ref password } => {
+                if password.is_some() {
+                    ChatResponse {
+                        message: "Unlocking your vault...".to_string(),
+                        action: Some(Action::UnlockVault { password: password.clone() }),
+                    }
+                } else {
+                    ChatResponse {
+                        message: "Enter your master password. Example: \"unlock vault password mypassword\"".to_string(),
+                        action: Some(Action::UnlockVault { password: None }),
+                    }
+                }
+            },
             Intent::Help => ChatResponse {
                 message: "I can help you manage your secrets. Here's what I can do:\n\n\
                     🔐 Store a secret — \"save my GitHub password\"\n\
                     🔍 Find a secret — \"get my Gmail credentials\"\n\
                     📋 List all — \"show all passwords\"\n\
                     ✏️ Update — \"change my Netflix password\"\n\
-                    🗑️ Delete — \"remove my WiFi password\"\n\n\
+                    🗑️ Delete — \"remove my WiFi password\"\n\
+                    📦 Export — \"export my vault\"\n\
+                    📥 Import — \"import vault from file\"\n\n\
                     Just tell me what you need in natural language."
                     .to_string(),
                 action: None,
@@ -143,5 +200,18 @@ pub enum Action {
     UpdateEntry {
         name: String,
         fields: Vec<(String, String)>,
+    },
+    ExportVault {
+        password: Option<String>,
+    },
+    ImportVault {
+        path: Option<String>,
+        password: Option<String>,
+    },
+    CreateVault {
+        password: Option<String>,
+    },
+    UnlockVault {
+        password: Option<String>,
     },
 }

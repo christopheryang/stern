@@ -13,26 +13,36 @@ struct ChatMsg {
 
 async fn invoke_chat(content: String) -> Result<String, String> {
     let args = serde_json::json!({ "request": { "content": content } });
-    let args_str = serde_json::to_string(&args).map_err(|e| e.to_string())?;
+    let args_js = serde_wasm_bindgen::to_value(&args).map_err(|e| e.to_string())?;
 
-    let script = format!(
-        "window.__TAURI__.core.invoke('send_chat_message', {})",
-        args_str
-    );
-
-    let result = js_sys::eval(&script)
-        .map_err(|e| format!("eval error: {:?}", e))?;
-
-    let promise: js_sys::Promise = result
+    let window = web_sys::window().ok_or("no window")?;
+    let tauri: JsValue =
+        js_sys::Reflect::get(&window, &JsValue::from_str("__TAURI__"))
+            .map_err(|e| format!("no __TAURI__: {e:?}"))?;
+    if tauri.is_undefined() {
+        return Err("window.__TAURI__ is undefined — not running in Tauri?".into());
+    }
+    let core: JsValue = js_sys::Reflect::get(&tauri, &JsValue::from_str("core"))
+        .map_err(|e| format!("no core: {e:?}"))?;
+    if core.is_undefined() {
+        return Err("window.__TAURI__.core is undefined".into());
+    }
+    let invoke_fn = js_sys::Reflect::get(&core, &JsValue::from_str("invoke"))
+        .map_err(|e| format!("no invoke: {e:?}"))?;
+    let invoke_fn: js_sys::Function = invoke_fn
         .dyn_into()
-        .map_err(|_| "result is not a promise")?;
+        .map_err(|_| "invoke is not a function")?;
 
-    let resolved = wasm_bindgen_futures::JsFuture::from(promise)
+    let result = invoke_fn
+        .call2(&core, &JsValue::from_str("send_chat_message"), &args_js)
+        .map_err(|e| format!("invoke error: {e:?}"))?;
+
+    let result = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&result))
         .await
         .map_err(|e| format!("promise error: {:?}", e))?;
 
     let response: serde_json::Value =
-        serde_wasm_bindgen::from_value(resolved).map_err(|e| e.to_string())?;
+        serde_wasm_bindgen::from_value(result).map_err(|e| e.to_string())?;
     response["message"]
         .as_str()
         .map(String::from)

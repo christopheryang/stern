@@ -8,6 +8,7 @@ use stern_core::ai::ChatHandler;
 use stern_core::application::vault::session::VaultSession;
 use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
 use stern_core::infrastructure::keychain::OsKeychainProvider;
+use stern_core::infrastructure::sqlite::repository::SqliteRepository;
 use tauri::Manager;
 
 pub struct AppState {
@@ -17,6 +18,7 @@ pub struct AppState {
     pub keychain: Arc<OsKeychainProvider>,
     pub chat_handler: Arc<ChatHandler>,
     pub db_path: std::path::PathBuf,
+    pub repository: Arc<SqliteRepository>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -34,6 +36,9 @@ pub fn run() {
             std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
 
             let db_path = app_dir.join("stern.db");
+            let repository = Arc::new(
+                SqliteRepository::new(&db_path).expect("failed to open database"),
+            );
 
             let chat_handler = Arc::new(ChatHandler::new(None));
 
@@ -44,6 +49,7 @@ pub fn run() {
                 keychain: Arc::new(OsKeychainProvider::new()),
                 chat_handler,
                 db_path,
+                repository,
             });
 
             Ok(())
@@ -61,6 +67,8 @@ pub fn run() {
             commands::search_entries,
             commands::copy_to_clipboard,
             commands::send_chat_message,
+            commands::export_vault,
+            commands::import_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
