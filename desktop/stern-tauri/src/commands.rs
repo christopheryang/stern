@@ -537,3 +537,257 @@ pub async fn import_vault(
         entry_count: imported,
     })
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use stern_core::ai::chat::Action as CoreAction;
+    use stern_core::application::vault::session::VaultSession;
+    use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
+    use stern_core::infrastructure::keychain::OsKeychainProvider;
+    use stern_core::infrastructure::sqlite::repository::SqliteRepository;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
+
+    #[test]
+    fn action_to_string_store_entry() {
+        let action = CoreAction::StoreEntry {
+            name: "test".into(),
+            kind: "login".into(),
+            fields: vec![],
+        };
+        assert_eq!(action_to_string(&action), "store");
+    }
+
+    #[test]
+    fn action_to_string_search_entry() {
+        let action = CoreAction::SearchEntry {
+            query: "foo".into(),
+        };
+        assert_eq!(action_to_string(&action), "search");
+    }
+
+    #[test]
+    fn action_to_string_list_entries() {
+        let action = CoreAction::ListEntries {
+            category: Some("logins".into()),
+        };
+        assert_eq!(action_to_string(&action), "list");
+    }
+
+    #[test]
+    fn action_to_string_list_entries_no_category() {
+        let action = CoreAction::ListEntries { category: None };
+        assert_eq!(action_to_string(&action), "list");
+    }
+
+    #[test]
+    fn action_to_string_confirm_delete() {
+        let action = CoreAction::ConfirmDelete {
+            name: "my-entry".into(),
+        };
+        assert_eq!(action_to_string(&action), "delete");
+    }
+
+    #[test]
+    fn action_to_string_update_entry() {
+        let action = CoreAction::UpdateEntry {
+            name: "entry".into(),
+            fields: vec![("key".into(), "val".into())],
+        };
+        assert_eq!(action_to_string(&action), "update");
+    }
+
+    #[test]
+    fn action_to_string_export_vault() {
+        assert_eq!(action_to_string(&CoreAction::ExportVault), "export");
+    }
+
+    #[test]
+    fn action_to_string_import_vault() {
+        assert_eq!(action_to_string(&CoreAction::ImportVault), "import");
+    }
+
+    #[test]
+    fn action_to_string_create_vault() {
+        assert_eq!(action_to_string(&CoreAction::CreateVault), "create_vault");
+    }
+
+    #[test]
+    fn action_to_string_unlock_vault() {
+        assert_eq!(action_to_string(&CoreAction::UnlockVault), "unlock_vault");
+    }
+
+    #[test]
+    fn passthrough_response_with_action() {
+        let core_resp = stern_core::ai::chat::ChatResponse {
+            message: "hello".into(),
+            action: Some(CoreAction::ExportVault),
+            user_message_display: Some("display me".into()),
+        };
+        let ipc_resp = passthrough_response(&core_resp);
+        assert_eq!(ipc_resp.message, "hello");
+        assert_eq!(ipc_resp.action.as_deref(), Some("export"));
+        assert_eq!(ipc_resp.user_message_display.as_deref(), Some("display me"));
+    }
+
+    #[test]
+    fn passthrough_response_without_action() {
+        let core_resp = stern_core::ai::chat::ChatResponse {
+            message: "no action".into(),
+            action: None,
+            user_message_display: None,
+        };
+        let ipc_resp = passthrough_response(&core_resp);
+        assert_eq!(ipc_resp.message, "no action");
+        assert!(ipc_resp.action.is_none());
+        assert!(ipc_resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn passthrough_response_all_action_variants() {
+        let variants: Vec<CoreAction> = vec![
+            CoreAction::StoreEntry {
+                name: "n".into(),
+                kind: "login".into(),
+                fields: vec![],
+            },
+            CoreAction::SearchEntry { query: "q".into() },
+            CoreAction::ListEntries {
+                category: None,
+            },
+            CoreAction::ConfirmDelete { name: "n".into() },
+            CoreAction::UpdateEntry {
+                name: "n".into(),
+                fields: vec![],
+            },
+            CoreAction::ExportVault,
+            CoreAction::ImportVault,
+            CoreAction::CreateVault,
+            CoreAction::UnlockVault,
+        ];
+
+        let expected = ["store", "search", "list", "delete", "update", "export", "import", "create_vault", "unlock_vault"];
+
+        for (action, expected_str) in variants.into_iter().zip(expected.iter()) {
+            let core_resp = stern_core::ai::chat::ChatResponse {
+                message: "m".into(),
+                action: Some(action),
+                user_message_display: None,
+            };
+            let ipc_resp = passthrough_response(&core_resp);
+            assert_eq!(ipc_resp.action.as_deref(), Some(*expected_str));
+        }
+    }
+
+    fn make_test_app_state() -> AppState {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let path = tmp.into_temp_path().to_path_buf();
+        let repository = Arc::new(SqliteRepository::new(&path).unwrap());
+        AppState {
+            session: Mutex::new(VaultSession::new()),
+            crypto: Arc::new(XChaCha20CryptoProvider::new()),
+            kdf: Arc::new(Argon2idKdfProvider::new()),
+            keychain: Arc::new(OsKeychainProvider::new()),
+            chat_handler: Arc::new(stern_core::ai::ChatHandler::new(None)),
+            db_path: path,
+            repository,
+            unlock_lockout: Mutex::new(None),
+        }
+    }
+
+    #[test]
+    fn lockout_initial_state_is_none() {
+        let state = make_test_app_state();
+        let lockout = state.unlock_lockout.lock().unwrap();
+        assert!(lockout.is_none());
+    }
+
+    #[test]
+    fn lockout_increments_on_failed_attempt() {
+        let state = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            let entry = lockout.get_or_insert((0, Instant::now()));
+            entry.0 += 1;
+            entry.1 = Instant::now();
+        }
+        let lockout = state.unlock_lockout.lock().unwrap();
+        let (count, _) = lockout.unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn lockout_blocks_after_max_attempts() {
+        let state = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
+        }
+
+        let lockout = state.unlock_lockout.lock().unwrap();
+        if let Some((count, last_attempt)) = *lockout {
+            assert!(count >= MAX_UNLOCK_ATTEMPTS);
+            let remaining = LOCKOUT_DURATION.checked_sub(last_attempt.elapsed());
+            assert!(remaining.is_some(), "should still be in lockout window");
+        } else {
+            panic!("lockout should be set");
+        }
+    }
+
+    #[test]
+    fn lockout_resets_on_success() {
+        let state = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
+        }
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            *lockout = None;
+        }
+        let lockout = state.unlock_lockout.lock().unwrap();
+        assert!(lockout.is_none());
+    }
+
+    #[test]
+    fn lockout_clears_after_duration_expires() {
+        let state = make_test_app_state();
+        {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            let expired_time = Instant::now() - LOCKOUT_DURATION - Duration::from_secs(1);
+            *lockout = Some((MAX_UNLOCK_ATTEMPTS, expired_time));
+        }
+
+        let lockout = state.unlock_lockout.lock().unwrap();
+        if let Some((count, last_attempt)) = *lockout {
+            if count >= MAX_UNLOCK_ATTEMPTS {
+                let remaining = LOCKOUT_DURATION.checked_sub(last_attempt.elapsed());
+                if remaining.is_some() {
+                    panic!("lockout should have expired");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn lockout_counter_accumulates_across_attempts() {
+        let state = make_test_app_state();
+        for i in 1..=MAX_UNLOCK_ATTEMPTS {
+            let mut lockout = state.unlock_lockout.lock().unwrap();
+            let entry = lockout.get_or_insert((0, Instant::now()));
+            entry.0 += 1;
+            entry.1 = Instant::now();
+            let (count, _) = lockout.unwrap();
+            assert_eq!(count, i);
+        }
+    }
+
+    #[test]
+    fn app_state_components_are_initialized() {
+        let state = make_test_app_state();
+        assert!(!state.session.lock().unwrap().is_unlocked);
+        assert!(state.unlock_lockout.lock().unwrap().is_none());
+    }
+}

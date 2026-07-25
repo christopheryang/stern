@@ -67,3 +67,102 @@ impl SecretKey {
         Some(Self { key, checksum })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn encode_decode_roundtrip() {
+        let key = [42u8; 16];
+        let sk = SecretKey::new(key);
+        let encoded = sk.encode();
+        let decoded = SecretKey::decode(&encoded).expect("decode should succeed");
+        assert_eq!(decoded.key, sk.key);
+        assert_eq!(decoded.checksum, sk.checksum);
+    }
+
+    #[test]
+    fn encode_has_prefix() {
+        let sk = SecretKey::new([1u8; 16]);
+        let encoded = sk.encode();
+        assert!(encoded.starts_with("SK1-"), "encoded: {encoded}");
+    }
+
+    #[test]
+    fn decode_wrong_prefix() {
+        assert!(SecretKey::decode("XX1-abc").is_none());
+    }
+
+    #[test]
+    fn decode_no_prefix() {
+        assert!(SecretKey::decode("abc").is_none());
+    }
+
+    #[test]
+    fn decode_truncated_data() {
+        let short = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &[0u8; 5],
+        );
+        assert!(SecretKey::decode(&format!("SK1-{short}")).is_none());
+    }
+
+    #[test]
+    fn decode_too_long_data() {
+        let long = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &[0u8; 30],
+        );
+        assert!(SecretKey::decode(&format!("SK1-{long}")).is_none());
+    }
+
+    #[test]
+    fn decode_wrong_checksum() {
+        let key = [99u8; 16];
+        let mut data = Vec::with_capacity(16 + CHECKSUM_LEN);
+        data.extend_from_slice(&key);
+        data.extend_from_slice(&[0xFF; CHECKSUM_LEN]);
+        let encoded = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            &data,
+        );
+        assert!(SecretKey::decode(&format!("SK1-{encoded}")).is_none());
+    }
+
+    #[test]
+    fn new_computes_checksum() {
+        let key = [1u8; 16];
+        let sk = SecretKey::new(key);
+        let expected = SecretKey::compute_checksum(&key);
+        assert_eq!(sk.checksum, expected);
+    }
+
+    #[test]
+    fn different_keys_different_checksums() {
+        let sk1 = SecretKey::new([1u8; 16]);
+        let sk2 = SecretKey::new([2u8; 16]);
+        assert_ne!(sk1.checksum, sk2.checksum);
+    }
+
+    #[test]
+    fn decode_empty_string() {
+        assert!(SecretKey::decode("").is_none());
+    }
+
+    #[test]
+    fn decode_sk1_only() {
+        assert!(SecretKey::decode("SK1-").is_none());
+    }
+
+    #[test]
+    fn encode_decode_various_keys() {
+        for seed in [0u8, 127, 255] {
+            let key = [seed; 16];
+            let sk = SecretKey::new(key);
+            let encoded = sk.encode();
+            let decoded = SecretKey::decode(&encoded).expect("roundtrip should work");
+            assert_eq!(decoded.key, key);
+        }
+    }
+}

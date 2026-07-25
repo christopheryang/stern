@@ -135,3 +135,146 @@ impl CryptoProvider for XChaCha20CryptoProvider {
         candidate.ct_eq(expected).into()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::vault::ports::crypto::CryptoProvider;
+
+    fn provider() -> XChaCha20CryptoProvider {
+        XChaCha20CryptoProvider::new()
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let p = provider();
+        let dek = *p.generate_dek();
+        let plaintext = b"hello, world!";
+        let aad = b"test-aad";
+
+        let (nonce, ct) = p.encrypt_entry(&dek, plaintext, aad).expect("encrypt");
+        assert_ne!(&ct[..], plaintext);
+        assert_eq!(ct.len(), plaintext.len() + 16);
+
+        let pt = p.decrypt_entry(&dek, &nonce, &ct, aad).expect("decrypt");
+        assert_eq!(&pt[..], plaintext);
+    }
+
+    #[test]
+    fn decrypt_wrong_key_fails() {
+        let p = provider();
+        let dek1 = *p.generate_dek();
+        let dek2 = *p.generate_dek();
+        let plaintext = b"secret data";
+        let aad = b"aad";
+
+        let (nonce, ct) = p.encrypt_entry(&dek1, plaintext, aad).expect("encrypt");
+        let result = p.decrypt_entry(&dek2, &nonce, &ct, aad);
+        assert!(result.is_err(), "decrypt with wrong key should fail");
+    }
+
+    #[test]
+    fn decrypt_wrong_aad_fails() {
+        let p = provider();
+        let dek = *p.generate_dek();
+        let plaintext = b"secret data";
+
+        let (nonce, ct) = p.encrypt_entry(&dek, plaintext, b"aad1").expect("encrypt");
+        let result = p.decrypt_entry(&dek, &nonce, &ct, b"aad2");
+        assert!(result.is_err(), "decrypt with wrong AAD should fail");
+    }
+
+    #[test]
+    fn wrap_unwrap_dek_roundtrip() {
+        let p = provider();
+        let dek = *p.generate_dek();
+        let kek = [0x42u8; KEK_LEN];
+
+        let wrapped = p.wrap_dek(&dek, &kek).expect("wrap");
+        assert_eq!(wrapped.len(), DEK_WRAPPED_LEN);
+
+        let unwrapped = p.unwrap_dek(&wrapped, &kek).expect("unwrap");
+        assert_eq!(*unwrapped, dek);
+    }
+
+    #[test]
+    fn unwrap_dek_wrong_kek_fails() {
+        let p = provider();
+        let dek = *p.generate_dek();
+        let kek1 = [0x11u8; KEK_LEN];
+        let kek2 = [0x22u8; KEK_LEN];
+
+        let wrapped = p.wrap_dek(&dek, &kek1).expect("wrap");
+        let result = p.unwrap_dek(&wrapped, &kek2);
+        assert!(result.is_err(), "unwrap with wrong KEK should fail");
+    }
+
+    #[test]
+    fn generate_dek_correct_length() {
+        let p = provider();
+        let dek = p.generate_dek();
+        assert_eq!(dek.len(), DEK_LEN);
+    }
+
+    #[test]
+    fn generate_nonce_correct_length() {
+        let p = provider();
+        let nonce = p.generate_nonce();
+        assert_eq!(nonce.len(), NONCE_LEN);
+    }
+
+    #[test]
+    fn generate_secret_key_correct_length() {
+        let p = provider();
+        let sk = p.generate_secret_key();
+        assert_eq!(sk.len(), SECRET_KEY_LEN);
+    }
+
+    #[test]
+    fn generate_vault_salt_correct_length() {
+        let p = provider();
+        let salt = p.generate_vault_salt();
+        assert_eq!(salt.len(), VAULT_SALT_LEN);
+    }
+
+    #[test]
+    fn verify_hash_matches_true() {
+        let p = provider();
+        let h = [0xABu8; VERIFY_HASH_LEN];
+        assert!(p.verify_hash_matches(&h, &h));
+    }
+
+    #[test]
+    fn verify_hash_matches_false() {
+        let p = provider();
+        let h1 = [0xABu8; VERIFY_HASH_LEN];
+        let h2 = [0xCDu8; VERIFY_HASH_LEN];
+        assert!(!p.verify_hash_matches(&h1, &h2));
+    }
+
+    #[test]
+    fn encrypt_empty_plaintext() {
+        let p = provider();
+        let dek = *p.generate_dek();
+
+        let (nonce, ct) = p.encrypt_entry(&dek, b"", b"").expect("encrypt empty");
+        let pt = p.decrypt_entry(&dek, &nonce, &ct, b"").expect("decrypt empty");
+        assert!(pt.is_empty());
+    }
+
+    #[test]
+    fn default_impl() {
+        let p = XChaCha20CryptoProvider::default();
+        let dek = p.generate_dek();
+        assert_eq!(dek.len(), DEK_LEN);
+    }
+
+    #[test]
+    fn encrypt_produces_unique_nonces() {
+        let p = provider();
+        let dek = *p.generate_dek();
+        let (n1, _) = p.encrypt_entry(&dek, b"data", b"").expect("encrypt1");
+        let (n2, _) = p.encrypt_entry(&dek, b"data", b"").expect("encrypt2");
+        assert_ne!(n1, n2, "nonces should be random and unique");
+    }
+}

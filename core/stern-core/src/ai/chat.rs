@@ -169,6 +169,179 @@ pub struct ChatResponse {
     pub user_message_display: Option<String>,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn handler() -> ChatHandler {
+        ChatHandler::new(None)
+    }
+
+    #[test]
+    fn greeting_response() {
+        let resp = handler().process_message("hello");
+        assert!(resp.message.contains("Stern"), "message: {}", resp.message);
+        assert!(resp.action.is_none());
+        assert!(resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn help_response() {
+        let resp = handler().process_message("help");
+        assert!(resp.message.contains("secrets"), "message: {}", resp.message);
+        assert!(resp.action.is_none());
+    }
+
+    #[test]
+    fn store_response() {
+        let resp = handler().process_message("save my GitHub password is hunter2");
+        assert!(resp.message.contains("github"), "message: {}", resp.message);
+        match resp.action.expect("should have action") {
+            Action::StoreEntry { name, kind, fields } => {
+                assert!(name.to_lowercase().contains("github"));
+                assert_eq!(kind, "password");
+                assert!(!fields.is_empty());
+            }
+            other => panic!("expected StoreEntry, got: {other:?}"),
+        }
+        assert!(resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn retrieve_response() {
+        let resp = handler().process_message("find my password for GitHub");
+        assert!(resp.message.contains("github"), "message: {}", resp.message);
+        match resp.action.expect("should have action") {
+            Action::SearchEntry { query } => {
+                assert!(!query.is_empty());
+            }
+            other => panic!("expected SearchEntry, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_response() {
+        let resp = handler().process_message("list all passwords");
+        assert!(resp.message.contains("password"), "message: {}", resp.message);
+        match resp.action.expect("should have action") {
+            Action::ListEntries { category } => {
+                assert!(category.is_some());
+            }
+            other => panic!("expected ListEntries, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn list_no_category_response() {
+        let resp = handler().process_message("show all secrets");
+        match resp.action.expect("should have action") {
+            Action::SearchEntry { query } => {
+                assert!(!query.is_empty());
+            }
+            other => panic!("expected SearchEntry, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_response() {
+        let resp = handler().process_message("delete my Netflix password");
+        assert!(resp.message.contains("delete"), "message: {}", resp.message);
+        match resp.action.expect("should have action") {
+            Action::ConfirmDelete { name } => {
+                assert!(!name.is_empty());
+            }
+            other => panic!("expected ConfirmDelete, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_response() {
+        let resp = handler().process_message("update my GitHub username: newuser");
+        assert!(resp.message.contains("github"), "message: {}", resp.message);
+        match resp.action.expect("should have action") {
+            Action::UpdateEntry { name, fields } => {
+                assert!(!name.is_empty());
+                assert!(!fields.is_empty());
+            }
+            other => panic!("expected UpdateEntry, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn update_no_fields_response() {
+        let resp = handler().process_message("change my Netflix login");
+        match resp.action.expect("should have action") {
+            Action::UpdateEntry { .. } => {}
+            other => panic!("expected UpdateEntry, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn export_response() {
+        let resp = handler().process_message("export vault");
+        assert!(resp.message.contains("export"), "message: {}", resp.message);
+        assert!(matches!(resp.action.expect("should have action"), Action::ExportVault));
+        assert!(resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn import_response() {
+        let resp = handler().process_message("import vault");
+        assert!(resp.message.contains("import"), "message: {}", resp.message);
+        assert!(matches!(resp.action.expect("should have action"), Action::ImportVault));
+        assert!(resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn create_vault_response() {
+        let resp = handler().process_message("create vault");
+        assert!(resp.message.contains("vault"), "message: {}", resp.message);
+        match resp.action.expect("should have action") {
+            Action::StoreEntry { name, kind, .. } => {
+                assert_eq!(name, "vault");
+                assert_eq!(kind, "secret");
+            }
+            other => panic!("expected StoreEntry, got: {other:?}"),
+        }
+        assert!(resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn unlock_vault_response() {
+        let resp = handler().process_message("unlock vault");
+        assert!(resp.message.contains("unlock"), "message: {}", resp.message);
+        assert!(matches!(resp.action.expect("should have action"), Action::UnlockVault));
+        assert!(resp.user_message_display.is_none());
+    }
+
+    #[test]
+    fn unknown_response() {
+        let resp = handler().process_message("asdfghjkl");
+        assert!(resp.message.contains("not sure"), "message: {}", resp.message);
+        assert!(resp.action.is_none());
+    }
+
+    #[test]
+    fn vault_actions_clear_display() {
+        for input in &["create vault", "unlock vault", "export vault", "import vault"] {
+            let resp = handler().process_message(input);
+            assert!(
+                resp.user_message_display.is_none(),
+                "user_message_display should be None for vault action: {input}"
+            );
+        }
+    }
+
+    #[test]
+    fn non_vault_actions_have_no_display() {
+        for input in &["hello", "help", "asdfghjkl"] {
+            let resp = handler().process_message(input);
+            assert!(resp.user_message_display.is_none());
+        }
+    }
+}
+
+#[derive(Debug)]
 pub enum Action {
     StoreEntry {
         name: String,

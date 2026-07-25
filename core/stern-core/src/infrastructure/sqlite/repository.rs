@@ -254,3 +254,149 @@ impl SqliteRepository {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::vault::entry::{EncryptedEntry, EntryKind};
+
+    fn temp_repo() -> SqliteRepository {
+        let tmp = tempfile::NamedTempFile::new().expect("create temp file");
+        let path = tmp.into_temp_path();
+        SqliteRepository::new(&path).expect("open repo")
+    }
+
+    #[test]
+    fn new_creates_db() {
+        let repo = temp_repo();
+        let count = repo.count_entries().expect("count");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn insert_and_list_entry() {
+        let repo = temp_repo();
+        let entry = EncryptedEntry {
+            id: "id-1".to_string(),
+            kind: EntryKind::Login,
+            name: "GitHub".to_string(),
+            tags: vec!["dev".to_string()],
+            dek_wrapped: vec![1, 2, 3],
+            nonce: [4u8; crate::domain::vault::crypto_constants::NONCE_LEN],
+            ciphertext: vec![5, 6, 7],
+            version: 1,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        repo.insert_entry(&entry).expect("insert");
+        let entries = repo.list_all_entries().expect("list");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].id, "id-1");
+        assert_eq!(entries[0].name, "GitHub");
+        assert!(matches!(entries[0].kind, EntryKind::Login));
+        assert_eq!(entries[0].tags, vec!["dev"]);
+    }
+
+    #[test]
+    fn count_entries() {
+        let repo = temp_repo();
+        assert_eq!(repo.count_entries().expect("count"), 0);
+
+        let entry = EncryptedEntry {
+            id: "e1".to_string(),
+            kind: EntryKind::Note,
+            name: "Note".to_string(),
+            tags: vec![],
+            dek_wrapped: vec![],
+            nonce: [0u8; crate::domain::vault::crypto_constants::NONCE_LEN],
+            ciphertext: vec![],
+            version: 1,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        repo.insert_entry(&entry).expect("insert");
+        assert_eq!(repo.count_entries().expect("count"), 1);
+    }
+
+    #[test]
+    fn vault_exists_false_initially() {
+        let repo = temp_repo();
+        assert!(!repo.vault_exists().expect("vault_exists"));
+    }
+
+    #[test]
+    fn save_and_load_vault_meta() {
+        let repo = temp_repo();
+        let salt = [1u8; VAULT_SALT_LEN];
+        let verify_hash = [2u8; VERIFY_HASH_LEN];
+        let secret_key = [3u8; SECRET_KEY_LEN];
+        let params = KdfParams::argon2id_default();
+
+        repo.save_vault_meta(&salt, &verify_hash, &secret_key, &params).expect("save");
+        assert!(repo.vault_exists().expect("vault_exists"));
+
+        let meta = repo.load_vault_meta().expect("load").expect("should exist");
+        assert_eq!(meta.salt, salt);
+        assert_eq!(meta.verify_hash, verify_hash);
+        assert_eq!(meta.secret_key, secret_key);
+        assert_eq!(meta.params, params);
+    }
+
+    #[test]
+    fn load_vault_meta_none_when_empty() {
+        let repo = temp_repo();
+        let meta = repo.load_vault_meta().expect("load");
+        assert!(meta.is_none());
+    }
+
+    #[test]
+    fn list_entries_sorted_by_name() {
+        let repo = temp_repo();
+        for (id, name) in [("c", "Charlie"), ("a", "Alice"), ("b", "Bob")] {
+            let entry = EncryptedEntry {
+                id: id.to_string(),
+                kind: EntryKind::Login,
+                name: name.to_string(),
+                tags: vec![],
+                dek_wrapped: vec![],
+                nonce: [0u8; crate::domain::vault::crypto_constants::NONCE_LEN],
+                ciphertext: vec![],
+                version: 1,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            repo.insert_entry(&entry).expect("insert");
+        }
+        let entries = repo.list_all_entries().expect("list");
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0].name, "Alice");
+        assert_eq!(entries[1].name, "Bob");
+        assert_eq!(entries[2].name, "Charlie");
+    }
+
+    #[test]
+    fn insert_all_entry_kinds() {
+        let repo = temp_repo();
+        for (i, kind) in [EntryKind::Login, EntryKind::Note, EntryKind::Document]
+            .into_iter()
+            .enumerate()
+        {
+            let entry = EncryptedEntry {
+                id: format!("e{i}"),
+                kind,
+                name: format!("Entry {i}"),
+                tags: vec![],
+                dek_wrapped: vec![],
+                nonce: [0u8; crate::domain::vault::crypto_constants::NONCE_LEN],
+                ciphertext: vec![],
+                version: 1,
+                created_at: chrono::Utc::now(),
+                updated_at: chrono::Utc::now(),
+            };
+            repo.insert_entry(&entry).expect("insert");
+        }
+        let entries = repo.list_all_entries().expect("list");
+        assert_eq!(entries.len(), 3);
+    }
+}
