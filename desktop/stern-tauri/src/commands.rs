@@ -681,32 +681,34 @@ mod tests {
         }
     }
 
-    fn make_test_app_state() -> AppState {
+    fn make_test_app_state() -> (AppState, tempfile::TempPath) {
         let tmp = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp.into_temp_path().to_path_buf();
-        let repository = Arc::new(SqliteRepository::new(&path).unwrap());
-        AppState {
+        let path = tmp.into_temp_path();
+        let db_path = path.to_path_buf();
+        let repository = Arc::new(SqliteRepository::new(&db_path).unwrap());
+        let state = AppState {
             session: Mutex::new(VaultSession::new()),
             crypto: Arc::new(XChaCha20CryptoProvider::new()),
             kdf: Arc::new(Argon2idKdfProvider::new()),
             keychain: Arc::new(OsKeychainProvider::new()),
             chat_handler: Arc::new(stern_core::ai::ChatHandler::new(None)),
-            db_path: path,
+            db_path,
             repository,
             unlock_lockout: Mutex::new(None),
-        }
+        };
+        (state, path)
     }
 
     #[test]
     fn lockout_initial_state_is_none() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         let lockout = state.unlock_lockout.lock().unwrap();
         assert!(lockout.is_none());
     }
 
     #[test]
     fn lockout_increments_on_failed_attempt() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         {
             let mut lockout = state.unlock_lockout.lock().unwrap();
             let entry = lockout.get_or_insert((0, Instant::now()));
@@ -720,7 +722,7 @@ mod tests {
 
     #[test]
     fn lockout_blocks_after_max_attempts() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         {
             let mut lockout = state.unlock_lockout.lock().unwrap();
             *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
@@ -738,7 +740,7 @@ mod tests {
 
     #[test]
     fn lockout_resets_on_success() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         {
             let mut lockout = state.unlock_lockout.lock().unwrap();
             *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
@@ -753,7 +755,7 @@ mod tests {
 
     #[test]
     fn lockout_clears_after_duration_expires() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         {
             let mut lockout = state.unlock_lockout.lock().unwrap();
             let expired_time = Instant::now() - LOCKOUT_DURATION - Duration::from_secs(1);
@@ -773,7 +775,7 @@ mod tests {
 
     #[test]
     fn lockout_counter_accumulates_across_attempts() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         for i in 1..=MAX_UNLOCK_ATTEMPTS {
             let mut lockout = state.unlock_lockout.lock().unwrap();
             let entry = lockout.get_or_insert((0, Instant::now()));
@@ -786,7 +788,7 @@ mod tests {
 
     #[test]
     fn app_state_components_are_initialized() {
-        let state = make_test_app_state();
+        let (state, _path) = make_test_app_state();
         assert!(!state.session.lock().unwrap().is_unlocked);
         assert!(state.unlock_lockout.lock().unwrap().is_none());
     }

@@ -4,7 +4,6 @@ pub mod dto;
 #[allow(clippy::unwrap_used)]
 mod tests {
     use chrono::{DateTime, Utc};
-    use serde_json;
 
     use crate::dto::*;
 
