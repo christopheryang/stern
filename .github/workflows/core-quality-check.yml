@@ -1,11 +1,6 @@
 name: Core Quality Check
 
 on:
-  push:
-    paths:
-      - "core/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
   pull_request:
     paths:
       - "core/**"

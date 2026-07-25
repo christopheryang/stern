@@ -1,11 +1,6 @@
 name: Desktop Quality Check
 
 on:
-  push:
-    paths:
-      - "desktop/**"
-      - "Cargo.toml"
-      - "Cargo.lock"
   pull_request:
     paths:
       - "desktop/**"
