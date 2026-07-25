@@ -1,0 +1,40 @@
+[package]
+name = "stern-tauri"
+version.workspace = true
+license.workspace = true
+description = "Stern Tauri shell"
+authors = ["you"]
+edition = "2021"
+publish = false
+default-run = "stern-tauri"
+
+[lib]
+name = "stern_tauri_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+stern-core = { path = "../../core/stern-core" }
+stern-ipc = { path = "../../core/stern-ipc" }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["sync", "rt-multi-thread", "macros"] }
+tracing = "0.1"
+thiserror = "2"
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "serde"] }
+secrecy = "0.10"
+zeroize = "1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.11"
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[lints]
+workspace = true
