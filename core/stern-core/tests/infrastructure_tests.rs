@@ -1,13 +1,13 @@
+use std::io::Read;
+use stern_core::application::vault::ports::keychain::KeychainProvider;
+use stern_core::domain::vault::crypto_constants::*;
+use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind};
+use stern_core::domain::vault::errors::VaultError;
+use stern_core::domain::vault::kdf_params::KdfParams;
+use stern_core::infrastructure::backup::BackupProvider;
 #[allow(clippy::unwrap_used)]
 use stern_core::infrastructure::keychain::memory::MemoryKeychainProvider;
-use stern_core::infrastructure::backup::BackupProvider;
 use stern_core::infrastructure::sqlite::repository::SqliteRepository;
-use stern_core::application::vault::ports::keychain::KeychainProvider;
-use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind};
-use stern_core::domain::vault::kdf_params::KdfParams;
-use stern_core::domain::vault::errors::VaultError;
-use stern_core::domain::vault::crypto_constants::*;
-use std::io::Read;
 
 fn kc() -> MemoryKeychainProvider {
     MemoryKeychainProvider::new()
@@ -64,7 +64,8 @@ fn delete_key() {
 #[test]
 fn delete_nonexistent_key_no_error() {
     let kc = kc();
-    kc.delete_key("svc", "nope").expect("delete non-existent should succeed");
+    kc.delete_key("svc", "nope")
+        .expect("delete non-existent should succeed");
 }
 
 #[test]
@@ -106,8 +107,16 @@ fn create_backup_writes_hash_and_data() {
 
     let expected_hash = blake3::hash(data);
     let hash_bytes = expected_hash.as_bytes();
-    assert_eq!(&contents[..hash_bytes.len()], hash_bytes, "first 32 bytes should be blake3 hash");
-    assert_eq!(&contents[hash_bytes.len()..], data, "rest should be original data");
+    assert_eq!(
+        &contents[..hash_bytes.len()],
+        hash_bytes,
+        "first 32 bytes should be blake3 hash"
+    );
+    assert_eq!(
+        &contents[hash_bytes.len()..],
+        data,
+        "rest should be original data"
+    );
 }
 
 #[test]
@@ -210,7 +219,8 @@ fn save_and_load_vault_meta() {
     let secret_key = [3u8; SECRET_KEY_LEN];
     let params = KdfParams::argon2id_default();
 
-    repo.save_vault_meta(&salt, &verify_hash, &secret_key, &params).expect("save");
+    repo.save_vault_meta(&salt, &verify_hash, &secret_key, &params)
+        .expect("save");
     assert!(repo.vault_exists().expect("vault_exists"));
 
     let meta = repo.load_vault_meta().expect("load").expect("should exist");

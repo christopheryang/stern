@@ -7,4 +7,3 @@ pub struct VaultMeta {
     pub secret_key: [u8; SECRET_KEY_LEN],
     pub params: KdfParams,
 }
-

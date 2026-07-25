@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
+use stern_core::ai::chat::{Action, ChatHandler};
 use stern_core::ai::intent::{classify_intent, Intent};
-use stern_core::ai::chat::{ChatHandler, Action};
 
 fn assert_intent(text: &str, expected: Intent) {
     let got = classify_intent(text);
@@ -53,7 +53,10 @@ fn store_explicit_with_password() {
     let intent = classify_intent("save my GitHub password is hunter2");
     match intent {
         Intent::StoreSecret { name, kind, fields } => {
-            assert!(name.to_lowercase().contains("github"), "name should contain github, got: {name}");
+            assert!(
+                name.to_lowercase().contains("github"),
+                "name should contain github, got: {name}"
+            );
             assert_eq!(kind, "password");
             assert!(!fields.is_empty(), "fields should not be empty");
         }
@@ -377,7 +380,11 @@ fn greeting_response() {
 #[test]
 fn help_response() {
     let resp = handler().process_message("help");
-    assert!(resp.message.contains("secrets"), "message: {}", resp.message);
+    assert!(
+        resp.message.contains("secrets"),
+        "message: {}",
+        resp.message
+    );
     assert!(resp.action.is_none());
 }
 
@@ -411,7 +418,11 @@ fn retrieve_response() {
 #[test]
 fn list_response() {
     let resp = handler().process_message("list all passwords");
-    assert!(resp.message.contains("password"), "message: {}", resp.message);
+    assert!(
+        resp.message.contains("password"),
+        "message: {}",
+        resp.message
+    );
     match resp.action.expect("should have action") {
         Action::ListEntries { category } => {
             assert!(category.is_some());
@@ -469,7 +480,10 @@ fn update_no_fields_response() {
 fn export_response() {
     let resp = handler().process_message("export vault");
     assert!(resp.message.contains("export"), "message: {}", resp.message);
-    assert!(matches!(resp.action.expect("should have action"), Action::ExportVault));
+    assert!(matches!(
+        resp.action.expect("should have action"),
+        Action::ExportVault
+    ));
     assert!(resp.user_message_display.is_none());
 }
 
@@ -477,7 +491,10 @@ fn export_response() {
 fn import_response() {
     let resp = handler().process_message("import vault");
     assert!(resp.message.contains("import"), "message: {}", resp.message);
-    assert!(matches!(resp.action.expect("should have action"), Action::ImportVault));
+    assert!(matches!(
+        resp.action.expect("should have action"),
+        Action::ImportVault
+    ));
     assert!(resp.user_message_display.is_none());
 }
 
@@ -499,20 +516,32 @@ fn create_vault_response() {
 fn unlock_vault_response() {
     let resp = handler().process_message("unlock vault");
     assert!(resp.message.contains("unlock"), "message: {}", resp.message);
-    assert!(matches!(resp.action.expect("should have action"), Action::UnlockVault));
+    assert!(matches!(
+        resp.action.expect("should have action"),
+        Action::UnlockVault
+    ));
     assert!(resp.user_message_display.is_none());
 }
 
 #[test]
 fn unknown_response() {
     let resp = handler().process_message("asdfghjkl");
-    assert!(resp.message.contains("not sure"), "message: {}", resp.message);
+    assert!(
+        resp.message.contains("not sure"),
+        "message: {}",
+        resp.message
+    );
     assert!(resp.action.is_none());
 }
 
 #[test]
 fn vault_actions_clear_display() {
-    for input in &["create vault", "unlock vault", "export vault", "import vault"] {
+    for input in &[
+        "create vault",
+        "unlock vault",
+        "export vault",
+        "import vault",
+    ] {
         let resp = handler().process_message(input);
         assert!(
             resp.user_message_display.is_none(),

@@ -32,8 +32,16 @@ pub enum Intent {
 }
 
 const SECRET_TYPES: &[&str] = &[
-    "password", "secret", "credential", "login", "api key",
-    "token", "ssh", "wifi", "note", "document",
+    "password",
+    "secret",
+    "credential",
+    "login",
+    "api key",
+    "token",
+    "ssh",
+    "wifi",
+    "note",
+    "document",
 ];
 
 const RETRIEVE_VERBS: &[&str] = &[
@@ -94,13 +102,23 @@ pub fn classify_intent(text: &str) -> Intent {
 }
 
 fn is_greeting(words: &[&str]) -> bool {
-    let greetings = ["hello", "hi", "hey", "good", "morning", "evening", "afternoon"];
+    let greetings = [
+        "hello",
+        "hi",
+        "hey",
+        "good",
+        "morning",
+        "evening",
+        "afternoon",
+    ];
     words.iter().any(|w| greetings.contains(w))
 }
 
 fn is_help(words: &[&str]) -> bool {
     let has_question = words.iter().any(|w| *w == "help" || *w == "how");
-    let has_you = words.iter().any(|w| *w == "can" || *w == "do" || *w == "you");
+    let has_you = words
+        .iter()
+        .any(|w| *w == "can" || *w == "do" || *w == "you");
     let has_subject = words.iter().any(|w| *w == "i" || *w == "me" || *w == "you");
     (has_subject || has_you) && has_question
 }
@@ -131,7 +149,10 @@ fn is_update_context(words: &[&str]) -> bool {
 
 fn detect_store(words: &[&str], full_text: &str) -> Option<Intent> {
     let has_store_verb = words.iter().any(|w| {
-        ["store", "save", "add", "create", "new", "remember", "keep", "note"].contains(w)
+        [
+            "store", "save", "add", "create", "new", "remember", "keep", "note",
+        ]
+        .contains(w)
     });
 
     let implicit_store = has_secret_type(full_text)
@@ -162,8 +183,10 @@ fn detect_retrieve(words: &[&str], full_text: &str) -> Option<Intent> {
     }
 
     let has_secret = has_secret_type(full_text);
-    let has_name_hint = full_text.contains(" for ") || full_text.contains(" called ")
-        || full_text.contains(" named ") || full_text.contains("'s");
+    let has_name_hint = full_text.contains(" for ")
+        || full_text.contains(" called ")
+        || full_text.contains(" named ")
+        || full_text.contains("'s");
 
     if !has_secret && !has_name_hint && !words.iter().any(|w| ["my", "me"].contains(w)) {
         return None;
@@ -200,9 +223,7 @@ fn detect_delete(words: &[&str]) -> Option<Intent> {
     if !is_delete_context(words) {
         return None;
     }
-    let name = extract_retrieve_name(
-        &words.to_vec().join(" "),
-    );
+    let name = extract_retrieve_name(&words.to_vec().join(" "));
     if name.is_empty() {
         return None;
     }
@@ -294,14 +315,20 @@ fn extract_store_name(full_text: &str) -> String {
 
     if let Some(pos) = lower.find("'s ") {
         let after = &full_text[pos + 3..];
-        let rest: String = after.chars()
+        let rest: String = after
+            .chars()
             .take_while(|c| *c != ',' && *c != '.' && *c != '!')
             .collect();
         let rest = rest.trim();
         if !rest.is_empty() {
-            let word: String = full_text[..pos].chars().rev()
+            let word: String = full_text[..pos]
+                .chars()
+                .rev()
                 .take_while(|c| !c.is_whitespace())
-                .collect::<Vec<_>>().into_iter().rev().collect();
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect();
             if !word.is_empty() {
                 return format!("{word} {rest}");
             }
@@ -309,9 +336,8 @@ fn extract_store_name(full_text: &str) -> String {
     }
 
     let skip_words = [
-        "my", "the", "a", "an", "store", "save", "add", "create", "new",
-        "please", "can", "you", "want", "to", "and", "it", "me", "remember",
-        "keep", "note", "for", "with",
+        "my", "the", "a", "an", "store", "save", "add", "create", "new", "please", "can", "you",
+        "want", "to", "and", "it", "me", "remember", "keep", "note", "for", "with",
     ];
 
     let secret_words: Vec<&str> = SECRET_TYPES.to_vec();
@@ -328,8 +354,7 @@ fn extract_store_name(full_text: &str) -> String {
         .split_whitespace()
         .filter(|w| {
             let lw = w.to_lowercase();
-            !skip_words.contains(&lw.as_str())
-                && !secret_words.contains(&lw.as_str())
+            !skip_words.contains(&lw.as_str()) && !secret_words.contains(&lw.as_str())
         })
         .collect();
 
@@ -341,8 +366,7 @@ fn extract_store_name(full_text: &str) -> String {
         .split_whitespace()
         .filter(|w| {
             let lw = w.to_lowercase();
-            !skip_words.contains(&lw.as_str())
-                && !secret_words.contains(&lw.as_str())
+            !skip_words.contains(&lw.as_str()) && !secret_words.contains(&lw.as_str())
         })
         .collect::<Vec<_>>()
         .join(" ")
@@ -443,10 +467,35 @@ fn extract_retrieve_name(full_text: &str) -> String {
     }
 
     let skip_words = [
-        "find", "get", "retrieve", "search", "show", "what", "where",
-        "my", "the", "a", "an", "all", "list", "display", "forgot",
-        "password", "secret", "credential", "login", "api", "key",
-        "token", "ssh", "wifi", "note", "document", "do", "you", "have",
+        "find",
+        "get",
+        "retrieve",
+        "search",
+        "show",
+        "what",
+        "where",
+        "my",
+        "the",
+        "a",
+        "an",
+        "all",
+        "list",
+        "display",
+        "forgot",
+        "password",
+        "secret",
+        "credential",
+        "login",
+        "api",
+        "key",
+        "token",
+        "ssh",
+        "wifi",
+        "note",
+        "document",
+        "do",
+        "you",
+        "have",
     ];
 
     let name_words: Vec<&str> = full_text
@@ -470,10 +519,7 @@ fn extract_key_value_pairs(text: &str) -> Vec<(String, String)> {
         if let Some(pos) = text.find(key) {
             let after = &text[pos + key.len()..];
             let after = after.trim_start_matches([':', '=', ' ']);
-            let value: String = after
-                .chars()
-                .take_while(|c| !c.is_whitespace())
-                .collect();
+            let value: String = after.chars().take_while(|c| !c.is_whitespace()).collect();
             if !value.is_empty() {
                 pairs.push((key.to_string(), value));
             }

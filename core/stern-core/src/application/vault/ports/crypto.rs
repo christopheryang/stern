@@ -1,6 +1,5 @@
 use crate::domain::vault::crypto_constants::{
-    DEK_LEN, DEK_WRAPPED_LEN, KEK_LEN, NONCE_LEN, SECRET_KEY_LEN,
-    VAULT_SALT_LEN, VERIFY_HASH_LEN,
+    DEK_LEN, DEK_WRAPPED_LEN, KEK_LEN, NONCE_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN, VERIFY_HASH_LEN,
 };
 use crate::domain::vault::errors::VaultError;
 use zeroize::Zeroizing;

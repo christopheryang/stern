@@ -1,8 +1,8 @@
-use leptos::prelude::*;
 use leptos::ev::SubmitEvent;
-use wasm_bindgen_futures::spawn_local;
-use wasm_bindgen::prelude::*;
+use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::spawn_local;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct ChatMsg {
@@ -17,9 +17,8 @@ async fn invoke_chat(content: String) -> Result<String, String> {
     let args_js = serde_wasm_bindgen::to_value(&args).map_err(|e| e.to_string())?;
 
     let window = web_sys::window().ok_or("no window")?;
-    let tauri: JsValue =
-        js_sys::Reflect::get(&window, &JsValue::from_str("__TAURI__"))
-            .map_err(|e| format!("no __TAURI__: {e:?}"))?;
+    let tauri: JsValue = js_sys::Reflect::get(&window, &JsValue::from_str("__TAURI__"))
+        .map_err(|e| format!("no __TAURI__: {e:?}"))?;
     if tauri.is_undefined() {
         return Err("window.__TAURI__ is undefined — not running in Tauri?".into());
     }
@@ -74,9 +73,9 @@ pub fn ChatView() -> impl IntoView {
         set_loading.set(true);
 
         spawn_local(async move {
-            let response_text = invoke_chat(text).await.unwrap_or_else(|e| {
-                format!("Error: {e}")
-            });
+            let response_text = invoke_chat(text)
+                .await
+                .unwrap_or_else(|e| format!("Error: {e}"));
 
             let assistant_msg = ChatMsg {
                 id: uuid::Uuid::new_v4().to_string(),

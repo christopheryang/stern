@@ -1,4 +1,4 @@
-use crate::ai::intent::{Intent, classify_intent};
+use crate::ai::intent::{classify_intent, Intent};
 use crate::ai::model::AiModel;
 use std::sync::Arc;
 
@@ -19,7 +19,12 @@ impl ChatHandler {
 
         let is_vault_action = matches!(
             response.action,
-            Some(Action::CreateVault | Action::UnlockVault | Action::ExportVault | Action::ImportVault)
+            Some(
+                Action::CreateVault
+                    | Action::UnlockVault
+                    | Action::ExportVault
+                    | Action::ImportVault
+            )
         );
         if is_vault_action {
             response.user_message_display = None;
@@ -27,24 +32,28 @@ impl ChatHandler {
         response
     }
 
-    #[allow(clippy::unused_self, clippy::too_many_lines, clippy::needless_pass_by_value)]
+    #[allow(
+        clippy::unused_self,
+        clippy::too_many_lines,
+        clippy::needless_pass_by_value
+    )]
     fn intent_to_response(&self, intent: Intent) -> ChatResponse {
         match intent {
-            Intent::StoreSecret { ref name, ref kind, ref fields } => {
+            Intent::StoreSecret {
+                ref name,
+                ref kind,
+                ref fields,
+            } => {
                 let field_desc = if fields.is_empty() {
                     String::new()
                 } else {
-                    let items: Vec<String> = fields
-                        .iter()
-                        .map(|(k, v)| format!("  {k}: {v}"))
-                        .collect();
+                    let items: Vec<String> =
+                        fields.iter().map(|(k, v)| format!("  {k}: {v}")).collect();
                     format!("\nWith fields:\n{}", items.join("\n"))
                 };
 
                 ChatResponse {
-                    message: format!(
-                        "Stored your {kind} \"{name}\" in the vault.{field_desc}"
-                    ),
+                    message: format!("Stored your {kind} \"{name}\" in the vault.{field_desc}"),
                     action: Some(Action::StoreEntry {
                         name: name.clone(),
                         kind: kind.clone(),
@@ -54,9 +63,7 @@ impl ChatHandler {
                 }
             }
             Intent::RetrieveSecret { ref name } => ChatResponse {
-                message: format!(
-                    "Searching for \"{name}\" in your vault..."
-                ),
+                message: format!("Searching for \"{name}\" in your vault..."),
                 action: Some(Action::SearchEntry {
                     query: name.clone(),
                 }),
@@ -68,9 +75,7 @@ impl ChatHandler {
                     .map(|c| format!(" of type \"{c}\""))
                     .unwrap_or_default();
                 ChatResponse {
-                    message: format!(
-                        "Here are all your secrets{cat_desc}:"
-                    ),
+                    message: format!("Here are all your secrets{cat_desc}:"),
                     action: Some(Action::ListEntries {
                         category: category.clone(),
                     }),
@@ -81,12 +86,13 @@ impl ChatHandler {
                 message: format!(
                     "Are you sure you want to delete \"{name}\"? This cannot be undone."
                 ),
-                action: Some(Action::ConfirmDelete {
-                    name: name.clone(),
-                }),
+                action: Some(Action::ConfirmDelete { name: name.clone() }),
                 user_message_display: None,
             },
-            Intent::UpdateSecret { ref name, ref fields } => {
+            Intent::UpdateSecret {
+                ref name,
+                ref fields,
+            } => {
                 let field_desc = if fields.is_empty() {
                     "What would you like to update?".to_string()
                 } else {

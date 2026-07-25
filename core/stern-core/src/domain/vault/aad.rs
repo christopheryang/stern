@@ -17,4 +17,3 @@ pub fn blob_aad(entry_id: &str) -> Vec<u8> {
     aad.extend_from_slice(BLOB_AAD_SUFFIX);
     aad
 }
-

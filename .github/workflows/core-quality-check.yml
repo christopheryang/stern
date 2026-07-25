@@ -1,4 +1,4 @@
-name: Core Quality Check
+name: Quality Check - Core
 
 on:
   pull_request:

@@ -1,11 +1,11 @@
-#[allow(clippy::unwrap_used)]
-use stern_core::infrastructure::crypto::xchacha20::XChaCha20CryptoProvider;
-use stern_core::infrastructure::crypto::argon2_kdf::Argon2idKdfProvider;
-use stern_core::infrastructure::crypto::secret_mem::SecretMem;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
-use stern_core::domain::vault::kdf_params::KdfParams;
 use stern_core::domain::vault::crypto_constants::*;
+use stern_core::domain::vault::kdf_params::KdfParams;
+use stern_core::infrastructure::crypto::argon2_kdf::Argon2idKdfProvider;
+use stern_core::infrastructure::crypto::secret_mem::SecretMem;
+#[allow(clippy::unwrap_used)]
+use stern_core::infrastructure::crypto::xchacha20::XChaCha20CryptoProvider;
 fn provider() -> XChaCha20CryptoProvider {
     XChaCha20CryptoProvider::new()
 }
@@ -127,7 +127,9 @@ fn encrypt_empty_plaintext() {
     let dek = *p.generate_dek();
 
     let (nonce, ct) = p.encrypt_entry(&dek, b"", b"").expect("encrypt empty");
-    let pt = p.decrypt_entry(&dek, &nonce, &ct, b"").expect("decrypt empty");
+    let pt = p
+        .decrypt_entry(&dek, &nonce, &ct, b"")
+        .expect("decrypt empty");
     assert!(pt.is_empty());
 }
 
@@ -153,8 +155,12 @@ fn preprocess_2skd_deterministic() {
     let password = b"test-password";
     let secret_key = [42u8; SECRET_KEY_LEN];
 
-    let r1 = kdf.preprocess_2skd(password, &secret_key).expect("preprocess 1");
-    let r2 = kdf.preprocess_2skd(password, &secret_key).expect("preprocess 2");
+    let r1 = kdf
+        .preprocess_2skd(password, &secret_key)
+        .expect("preprocess 1");
+    let r2 = kdf
+        .preprocess_2skd(password, &secret_key)
+        .expect("preprocess 2");
     assert_eq!(*r1, *r2, "preprocess_2skd should be deterministic");
 }
 
@@ -182,7 +188,9 @@ fn derive_master_key_succeeds() {
     let salt = [2u8; VAULT_SALT_LEN];
     let params = KdfParams::fast();
 
-    let key = kdf.derive_master_key(&input, &salt, &params).expect("derive_master_key");
+    let key = kdf
+        .derive_master_key(&input, &salt, &params)
+        .expect("derive_master_key");
     assert_eq!(key.len(), MASTER_KEY_LEN);
 }
 
@@ -223,7 +231,9 @@ fn derive_kek_deterministic() {
 fn derive_verify_hash_correct_length() {
     let kdf = kdf();
     let master_key = [7u8; MASTER_KEY_LEN];
-    let vh = kdf.derive_verify_hash(&master_key).expect("derive_verify_hash");
+    let vh = kdf
+        .derive_verify_hash(&master_key)
+        .expect("derive_verify_hash");
     assert_eq!(vh.len(), VERIFY_HASH_LEN);
 }
 
@@ -244,12 +254,18 @@ fn full_chain_consistency() {
     let salt = [0xBBu8; VAULT_SALT_LEN];
     let params = KdfParams::fast();
 
-    let input = *kdf.preprocess_2skd(password, &secret_key).expect("preprocess");
-    let mk = *kdf.derive_master_key(&input, &salt, &params).expect("master key");
+    let input = *kdf
+        .preprocess_2skd(password, &secret_key)
+        .expect("preprocess");
+    let mk = *kdf
+        .derive_master_key(&input, &salt, &params)
+        .expect("master key");
     let kek1 = *kdf.derive_kek(&mk).expect("kek");
     let vh1 = kdf.derive_verify_hash(&mk).expect("verify hash");
 
-    let mk2 = *kdf.derive_master_key(&input, &salt, &params).expect("master key 2");
+    let mk2 = *kdf
+        .derive_master_key(&input, &salt, &params)
+        .expect("master key 2");
     let kek2 = *kdf.derive_kek(&mk2).expect("kek 2");
     let vh2 = kdf.derive_verify_hash(&mk2).expect("verify hash 2");
 

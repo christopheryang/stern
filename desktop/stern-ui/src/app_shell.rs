@@ -1,6 +1,6 @@
-use leptos::prelude::*;
-use crate::components::sidebar::Sidebar;
 use crate::components::chat::ChatView;
+use crate::components::sidebar::Sidebar;
+use leptos::prelude::*;
 
 #[component]
 pub fn AppShell() -> impl IntoView {

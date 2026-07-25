@@ -14,13 +14,13 @@ impl MigrationTrait for Migration {
                     .col(ColumnDef::new(VaultMeta::Id).text().primary_key())
                     .col(ColumnDef::new(VaultMeta::VaultSalt).binary().not_null())
                     .col(ColumnDef::new(VaultMeta::VerifyHash).binary().not_null())
-                    .col(ColumnDef::new(VaultMeta::EncryptedIndex).binary().not_null())
-                    .col(ColumnDef::new(VaultMeta::KdfParams).text().not_null())
                     .col(
-                        ColumnDef::new(VaultMeta::CreatedAt)
-                            .text()
+                        ColumnDef::new(VaultMeta::EncryptedIndex)
+                            .binary()
                             .not_null(),
                     )
+                    .col(ColumnDef::new(VaultMeta::KdfParams).text().not_null())
+                    .col(ColumnDef::new(VaultMeta::CreatedAt).text().not_null())
                     .to_owned(),
             )
             .await?;
@@ -43,16 +43,8 @@ impl MigrationTrait for Migration {
                             .not_null()
                             .default(1),
                     )
-                    .col(
-                        ColumnDef::new(Entries::CreatedAt)
-                            .text()
-                            .not_null(),
-                    )
-                    .col(
-                        ColumnDef::new(Entries::UpdatedAt)
-                            .text()
-                            .not_null(),
-                    )
+                    .col(ColumnDef::new(Entries::CreatedAt).text().not_null())
+                    .col(ColumnDef::new(Entries::UpdatedAt).text().not_null())
                     .to_owned(),
             )
             .await?;

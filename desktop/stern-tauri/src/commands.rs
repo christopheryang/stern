@@ -4,14 +4,15 @@ use crate::AppState;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
 use stern_core::domain::vault::aad::entry_aad;
-use stern_core::domain::vault::crypto_constants::{DEK_WRAPPED_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN};
+use stern_core::domain::vault::crypto_constants::{
+    DEK_WRAPPED_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN,
+};
 use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind, EntryPayload, Field};
 use stern_core::domain::vault::errors::VaultError;
 use stern_core::domain::vault::kdf_params::KdfParams;
 use stern_ipc::dto::{
-    ChatResponse, CreateEntryRequest, CreateVaultRequest, EntryDto, ExportRequest,
-    ExportResponse, ImportRequest, ImportResponse, SendChatRequest, UnlockRequest,
-    UpdateEntryRequest, VaultStatus,
+    ChatResponse, CreateEntryRequest, CreateVaultRequest, EntryDto, ExportRequest, ExportResponse,
+    ImportRequest, ImportResponse, SendChatRequest, UnlockRequest, UpdateEntryRequest, VaultStatus,
 };
 use tauri::State;
 
@@ -108,7 +109,9 @@ pub async fn unlock_vault(
     let preprocessed = state
         .kdf
         .preprocess_2skd(request.password.as_bytes(), &meta.secret_key)?;
-    let master_key = state.kdf.derive_master_key(&preprocessed, &meta.salt, &params)?;
+    let master_key = state
+        .kdf
+        .derive_master_key(&preprocessed, &meta.salt, &params)?;
     let kek = state.kdf.derive_kek(&master_key)?;
     let verify = state.kdf.derive_verify_hash(&master_key)?;
 
@@ -169,18 +172,13 @@ pub async fn lock_vault(state: State<'_, AppState>) -> Result<VaultStatus, Vault
 
 #[tauri::command]
 
-pub async fn list_entries(
-    _state: State<'_, AppState>,
-) -> Result<Vec<EntryDto>, VaultError> {
+pub async fn list_entries(_state: State<'_, AppState>) -> Result<Vec<EntryDto>, VaultError> {
     Ok(vec![])
 }
 
 #[tauri::command]
 
-pub async fn get_entry(
-    _state: State<'_, AppState>,
-    id: String,
-) -> Result<EntryDto, VaultError> {
+pub async fn get_entry(_state: State<'_, AppState>, id: String) -> Result<EntryDto, VaultError> {
     Err(VaultError::EntryNotFound(id))
 }
 
@@ -204,10 +202,7 @@ pub async fn update_entry(
 
 #[tauri::command]
 
-pub async fn delete_entry(
-    _state: State<'_, AppState>,
-    _id: String,
-) -> Result<(), VaultError> {
+pub async fn delete_entry(_state: State<'_, AppState>, _id: String) -> Result<(), VaultError> {
     Err(VaultError::VaultLocked)
 }
 
@@ -386,10 +381,11 @@ pub async fn export_vault(
         let wrapped = <[u8; DEK_WRAPPED_LEN]>::try_from(enc.dek_wrapped.as_slice())
             .map_err(|_| VaultError::DecryptionFailed)?;
         let dek = state.crypto.unwrap_dek(&wrapped, &kek)?;
-        let plaintext =
-            state.crypto.decrypt_entry(&dek, &enc.nonce, &enc.ciphertext, &aad)?;
-        let payload: EntryPayload =
-            serde_json::from_slice(&plaintext).map_err(|e| VaultError::Serialization(e.to_string()))?;
+        let plaintext = state
+            .crypto
+            .decrypt_entry(&dek, &enc.nonce, &enc.ciphertext, &aad)?;
+        let payload: EntryPayload = serde_json::from_slice(&plaintext)
+            .map_err(|e| VaultError::Serialization(e.to_string()))?;
         plaintext_entries.push(payload);
     }
 
@@ -432,8 +428,7 @@ pub async fn export_vault(
     let export_json = serde_json::to_vec_pretty(&(&salt, &*secret_key, &export_file))
         .map_err(|e| VaultError::Serialization(e.to_string()))?;
 
-    std::fs::write(&export_path, &export_json)
-        .map_err(|e| VaultError::Io(e.to_string()))?;
+    std::fs::write(&export_path, &export_json).map_err(|e| VaultError::Io(e.to_string()))?;
 
     Ok(ExportResponse {
         path: export_path.to_string_lossy().to_string(),
@@ -474,15 +469,13 @@ pub async fn import_vault(
         )));
     }
 
-    let data =
-        std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
+    let data = std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
 
     let (salt, secret_key, export_file): (
         [u8; VAULT_SALT_LEN],
         [u8; SECRET_KEY_LEN],
         EncryptedEntry,
-    ) = serde_json::from_slice(&data)
-        .map_err(|e| VaultError::Serialization(e.to_string()))?;
+    ) = serde_json::from_slice(&data).map_err(|e| VaultError::Serialization(e.to_string()))?;
 
     let params = KdfParams::argon2id_default();
     let preprocessed = state
@@ -496,10 +489,12 @@ pub async fn import_vault(
     let dek = state.crypto.unwrap_dek(&wrapped, &export_kek)?;
     let aad = b"stern-export-v1";
     let plaintext =
-        state.crypto.decrypt_entry(&dek, &export_file.nonce, &export_file.ciphertext, aad)?;
+        state
+            .crypto
+            .decrypt_entry(&dek, &export_file.nonce, &export_file.ciphertext, aad)?;
 
-    let entries: Vec<EntryPayload> = serde_json::from_slice(&plaintext)
-        .map_err(|e| VaultError::Serialization(e.to_string()))?;
+    let entries: Vec<EntryPayload> =
+        serde_json::from_slice(&plaintext).map_err(|e| VaultError::Serialization(e.to_string()))?;
 
     let mut imported = 0;
     for payload in entries {
@@ -513,7 +508,9 @@ pub async fn import_vault(
 
         let entry_dek = state.crypto.generate_dek();
         let (nonce, ciphertext) =
-            state.crypto.encrypt_entry(&entry_dek, &payload_json, &entry_aad)?;
+            state
+                .crypto
+                .encrypt_entry(&entry_dek, &payload_json, &entry_aad)?;
         let dek_wrapped = state.crypto.wrap_dek(&entry_dek, &kek)?.to_vec();
 
         let entry = EncryptedEntry {
@@ -542,13 +539,13 @@ pub async fn import_vault(
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use super::*;
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
     use stern_core::ai::chat::Action as CoreAction;
     use stern_core::application::vault::session::VaultSession;
     use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
     use stern_core::infrastructure::keychain::OsKeychainProvider;
     use stern_core::infrastructure::sqlite::repository::SqliteRepository;
-    use std::sync::{Arc, Mutex};
-    use std::time::Instant;
 
     #[test]
     fn action_to_string_store_entry() {
@@ -654,9 +651,7 @@ mod tests {
                 fields: vec![],
             },
             CoreAction::SearchEntry { query: "q".into() },
-            CoreAction::ListEntries {
-                category: None,
-            },
+            CoreAction::ListEntries { category: None },
             CoreAction::ConfirmDelete { name: "n".into() },
             CoreAction::UpdateEntry {
                 name: "n".into(),
@@ -668,7 +663,17 @@ mod tests {
             CoreAction::UnlockVault,
         ];
 
-        let expected = ["store", "search", "list", "delete", "update", "export", "import", "create_vault", "unlock_vault"];
+        let expected = [
+            "store",
+            "search",
+            "list",
+            "delete",
+            "update",
+            "export",
+            "import",
+            "create_vault",
+            "unlock_vault",
+        ];
 
         for (action, expected_str) in variants.into_iter().zip(expected.iter()) {
             let core_resp = stern_core::ai::chat::ChatResponse {

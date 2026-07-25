@@ -1,5 +1,5 @@
 use crate::domain::vault::errors::VaultError;
-use ort::session::{Session, builder::GraphOptimizationLevel};
+use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -10,8 +10,7 @@ pub struct AiModel {
 
 impl AiModel {
     pub fn new(model_path: &Path) -> Result<Self, VaultError> {
-        let _env = ort::environment::init()
-            .with_name("stern-ai");
+        let _env = ort::environment::init().with_name("stern-ai");
 
         let session = Session::builder()
             .map_err(|e| VaultError::KeyDerivationFailed(format!("builder: {e}")))?
@@ -38,19 +37,16 @@ impl AiModel {
         input_ids: &[i64],
         attention_mask: &[i64],
     ) -> Result<Vec<f32>, VaultError> {
-        let input_ids_tensor = Tensor::from_array((
-            vec![1usize, input_ids.len()],
-            input_ids.to_vec(),
-        ))
-        .map_err(|e| VaultError::KeyDerivationFailed(format!("tensor: {e}")))?;
+        let input_ids_tensor =
+            Tensor::from_array((vec![1usize, input_ids.len()], input_ids.to_vec()))
+                .map_err(|e| VaultError::KeyDerivationFailed(format!("tensor: {e}")))?;
 
-        let attention_mask_tensor = Tensor::from_array((
-            vec![1usize, attention_mask.len()],
-            attention_mask.to_vec(),
-        ))
-        .map_err(|e| VaultError::KeyDerivationFailed(format!("tensor: {e}")))?;
+        let attention_mask_tensor =
+            Tensor::from_array((vec![1usize, attention_mask.len()], attention_mask.to_vec()))
+                .map_err(|e| VaultError::KeyDerivationFailed(format!("tensor: {e}")))?;
 
-        let mut session = self.session
+        let mut session = self
+            .session
             .lock()
             .map_err(|e| VaultError::KeyDerivationFailed(format!("lock: {e}")))?;
 
@@ -77,17 +73,70 @@ impl SimpleTokenizer {
         let mut vocab = std::collections::HashMap::new();
 
         let special_tokens = [
-            "[PAD]", "[UNK]", "[CLS]", "[SEP]", "[MASK]",
-            "store", "save", "add", "create", "new",
-            "find", "get", "retrieve", "search", "show", "list", "display",
-            "delete", "remove", "destroy",
-            "password", "secret", "credential", "login", "api", "key", "token",
-            "document", "file", "note", "text", "spreadsheet", "csv", "pdf",
-            "update", "change", "modify", "edit",
-            "help", "what", "how", "can",
-            "my", "the", "a", "an", "for", "with", "to", "is",
-            "github", "gmail", "netflix", "ssh", "wifi", "bank", "email",
-            "username", "user", "pass", "url", "website", "server", "database",
+            "[PAD]",
+            "[UNK]",
+            "[CLS]",
+            "[SEP]",
+            "[MASK]",
+            "store",
+            "save",
+            "add",
+            "create",
+            "new",
+            "find",
+            "get",
+            "retrieve",
+            "search",
+            "show",
+            "list",
+            "display",
+            "delete",
+            "remove",
+            "destroy",
+            "password",
+            "secret",
+            "credential",
+            "login",
+            "api",
+            "key",
+            "token",
+            "document",
+            "file",
+            "note",
+            "text",
+            "spreadsheet",
+            "csv",
+            "pdf",
+            "update",
+            "change",
+            "modify",
+            "edit",
+            "help",
+            "what",
+            "how",
+            "can",
+            "my",
+            "the",
+            "a",
+            "an",
+            "for",
+            "with",
+            "to",
+            "is",
+            "github",
+            "gmail",
+            "netflix",
+            "ssh",
+            "wifi",
+            "bank",
+            "email",
+            "username",
+            "user",
+            "pass",
+            "url",
+            "website",
+            "server",
+            "database",
         ];
 
         for (i, token) in special_tokens.iter().enumerate() {
@@ -105,12 +154,7 @@ impl SimpleTokenizer {
         let tokens: Vec<i64> = text
             .to_lowercase()
             .split_whitespace()
-            .map(|word| {
-                *self
-                    .vocab
-                    .get(word)
-                    .unwrap_or(&self.unk_token_id)
-            })
+            .map(|word| *self.vocab.get(word).unwrap_or(&self.unk_token_id))
             .collect();
 
         let attention_mask = vec![1i64; tokens.len()];

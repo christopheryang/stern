@@ -62,7 +62,6 @@ impl Drop for EntryPayload {
     }
 }
 
-
 impl Drop for DecryptedEntry {
     fn drop(&mut self) {
         self.name.zeroize();

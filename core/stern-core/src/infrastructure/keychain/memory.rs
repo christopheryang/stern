@@ -60,4 +60,3 @@ impl KeychainProvider for MemoryKeychainProvider {
             .is_ok_and(|s| s.contains_key(&format!("{service}:{account}")))
     }
 }
-

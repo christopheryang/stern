@@ -1,5 +1,5 @@
-use hmac::{Hmac, Mac};
 use hmac::digest::KeyInit;
+use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -36,10 +36,7 @@ impl SecretKey {
         let mut data = Vec::with_capacity(16 + CHECKSUM_LEN);
         data.extend_from_slice(&self.key);
         data.extend_from_slice(&self.checksum);
-        let encoded = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        );
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
         format!("SK1-{encoded}")
     }
 
@@ -47,10 +44,7 @@ impl SecretKey {
     #[allow(clippy::indexing_slicing)]
     pub fn decode(s: &str) -> Option<Self> {
         let s = s.strip_prefix("SK1-")?;
-        let data = base64::Engine::decode(
-            &base64::engine::general_purpose::STANDARD,
-            s,
-        ).ok()?;
+        let data = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, s).ok()?;
         if data.len() != 16 + CHECKSUM_LEN {
             return None;
         }
@@ -101,19 +95,13 @@ mod tests {
 
     #[test]
     fn decode_truncated_data() {
-        let short = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &[0u8; 5],
-        );
+        let short = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &[0u8; 5]);
         assert!(SecretKey::decode(&format!("SK1-{short}")).is_none());
     }
 
     #[test]
     fn decode_too_long_data() {
-        let long = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &[0u8; 30],
-        );
+        let long = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &[0u8; 30]);
         assert!(SecretKey::decode(&format!("SK1-{long}")).is_none());
     }
 
@@ -123,10 +111,7 @@ mod tests {
         let mut data = Vec::with_capacity(16 + CHECKSUM_LEN);
         data.extend_from_slice(&key);
         data.extend_from_slice(&[0xFF; CHECKSUM_LEN]);
-        let encoded = base64::Engine::encode(
-            &base64::engine::general_purpose::STANDARD,
-            &data,
-        );
+        let encoded = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &data);
         assert!(SecretKey::decode(&format!("SK1-{encoded}")).is_none());
     }
 

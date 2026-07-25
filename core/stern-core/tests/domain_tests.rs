@@ -1,7 +1,12 @@
 // Tests moved from domain modules
 #![allow(clippy::unwrap_used)]
 
-use stern_core::domain::vault::aad::{entry_aad, tag_aad, blob_aad};
+use std::error::Error;
+use stern_core::domain::shared::ids::{EntryId, TagId, VaultId};
+use stern_core::domain::vault::aad::{blob_aad, entry_aad, tag_aad};
+use stern_core::domain::vault::crypto_constants::{
+    BLOB_AAD_SUFFIX, NONCE_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN, VERIFY_HASH_LEN,
+};
 use stern_core::domain::vault::entry::{
     DecryptedEntry, EncryptedEntry, EntryKind, EntryPayload, Field,
 };
@@ -9,11 +14,6 @@ use stern_core::domain::vault::errors::VaultError;
 use stern_core::domain::vault::index::{IndexEntry, VaultIndex};
 use stern_core::domain::vault::kdf_params::KdfParams;
 use stern_core::domain::vault::vault_meta::VaultMeta;
-use stern_core::domain::vault::crypto_constants::{
-    BLOB_AAD_SUFFIX, NONCE_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN, VERIFY_HASH_LEN,
-};
-use stern_core::domain::shared::ids::{EntryId, TagId, VaultId};
-use std::error::Error;
 
 // ---------------------------------------------------------------------------
 // aad tests

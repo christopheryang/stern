@@ -34,7 +34,6 @@ pub enum VaultError {
     Serialization(String),
 }
 
-
 impl Serialize for VaultError {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where

@@ -1,4 +1,4 @@
-name: Desktop Quality Check
+name: Quality Check - Desktop
 
 on:
   pull_request:

@@ -14,7 +14,11 @@ fn roundtrip<T: serde::Serialize + serde::de::DeserializeOwned>(val: &T) -> T {
 
 #[test]
 fn vault_status_roundtrip_true() {
-    let v = VaultStatus { is_initialized: true, is_unlocked: true, entry_count: 42 };
+    let v = VaultStatus {
+        is_initialized: true,
+        is_unlocked: true,
+        entry_count: 42,
+    };
     let r = roundtrip(&v);
     assert!(r.is_initialized);
     assert!(r.is_unlocked);
@@ -23,7 +27,11 @@ fn vault_status_roundtrip_true() {
 
 #[test]
 fn vault_status_roundtrip_false() {
-    let v = VaultStatus { is_initialized: false, is_unlocked: false, entry_count: 0 };
+    let v = VaultStatus {
+        is_initialized: false,
+        is_unlocked: false,
+        entry_count: 0,
+    };
     let r = roundtrip(&v);
     assert!(!r.is_initialized);
     assert!(!r.is_unlocked);
@@ -34,7 +42,11 @@ fn vault_status_roundtrip_false() {
 
 #[test]
 fn field_dto_roundtrip_normal() {
-    let f = FieldDto { key: "user".into(), value: "admin".into(), hidden: true };
+    let f = FieldDto {
+        key: "user".into(),
+        value: "admin".into(),
+        hidden: true,
+    };
     let r = roundtrip(&f);
     assert_eq!(r.key, "user");
     assert_eq!(r.value, "admin");
@@ -43,7 +55,11 @@ fn field_dto_roundtrip_normal() {
 
 #[test]
 fn field_dto_empty_strings() {
-    let f = FieldDto { key: String::new(), value: String::new(), hidden: false };
+    let f = FieldDto {
+        key: String::new(),
+        value: String::new(),
+        hidden: false,
+    };
     let r = roundtrip(&f);
     assert!(r.key.is_empty());
     assert!(r.value.is_empty());
@@ -51,7 +67,11 @@ fn field_dto_empty_strings() {
 
 #[test]
 fn field_dto_unicode() {
-    let f = FieldDto { key: "日本語".into(), value: "🔐🔑".into(), hidden: false };
+    let f = FieldDto {
+        key: "日本語".into(),
+        value: "🔐🔑".into(),
+        hidden: false,
+    };
     let r = roundtrip(&f);
     assert_eq!(r.key, "日本語");
     assert_eq!(r.value, "🔐🔑");
@@ -67,8 +87,16 @@ fn entry_dto_roundtrip_populated() {
         name: "GitHub".into(),
         tags: vec!["dev".into(), "work".into()],
         fields: vec![
-            FieldDto { key: "url".into(), value: "https://github.com".into(), hidden: false },
-            FieldDto { key: "pass".into(), value: "s3cret".into(), hidden: true },
+            FieldDto {
+                key: "url".into(),
+                value: "https://github.com".into(),
+                hidden: false,
+            },
+            FieldDto {
+                key: "pass".into(),
+                value: "s3cret".into(),
+                hidden: true,
+            },
         ],
         version: 3,
         created_at: ts(),
@@ -123,7 +151,11 @@ fn create_entry_request_roundtrip() {
         kind: "note".into(),
         name: "My Note".into(),
         tags: vec!["personal".into()],
-        fields: vec![FieldDto { key: "body".into(), value: "hello".into(), hidden: false }],
+        fields: vec![FieldDto {
+            key: "body".into(),
+            value: "hello".into(),
+            hidden: false,
+        }],
     };
     let r = roundtrip(&c);
     assert_eq!(r.kind, "note");
@@ -132,7 +164,12 @@ fn create_entry_request_roundtrip() {
 
 #[test]
 fn create_entry_request_empty() {
-    let c = CreateEntryRequest { kind: String::new(), name: String::new(), tags: vec![], fields: vec![] };
+    let c = CreateEntryRequest {
+        kind: String::new(),
+        name: String::new(),
+        tags: vec![],
+        fields: vec![],
+    };
     let r = roundtrip(&c);
     assert!(r.tags.is_empty());
     assert!(r.fields.is_empty());
@@ -146,7 +183,11 @@ fn update_entry_request_all_some() {
         id: "id-1".into(),
         name: Some("New Name".into()),
         tags: Some(vec!["a".into()]),
-        fields: Some(vec![FieldDto { key: "k".into(), value: "v".into(), hidden: false }]),
+        fields: Some(vec![FieldDto {
+            key: "k".into(),
+            value: "v".into(),
+            hidden: false,
+        }]),
     };
     let r = roundtrip(&u);
     assert_eq!(r.id, "id-1");
@@ -157,7 +198,12 @@ fn update_entry_request_all_some() {
 
 #[test]
 fn update_entry_request_all_none() {
-    let u = UpdateEntryRequest { id: "id-2".into(), name: None, tags: None, fields: None };
+    let u = UpdateEntryRequest {
+        id: "id-2".into(),
+        name: None,
+        tags: None,
+        fields: None,
+    };
     let r = roundtrip(&u);
     assert!(r.name.is_none());
     assert!(r.tags.is_none());
@@ -182,21 +228,27 @@ fn update_entry_request_empty_optionals() {
 
 #[test]
 fn unlock_request_roundtrip() {
-    let u = UnlockRequest { password: "hunter2".into() };
+    let u = UnlockRequest {
+        password: "hunter2".into(),
+    };
     let r = roundtrip(&u);
     assert_eq!(r.password, "hunter2");
 }
 
 #[test]
 fn unlock_request_empty() {
-    let u = UnlockRequest { password: String::new() };
+    let u = UnlockRequest {
+        password: String::new(),
+    };
     let r = roundtrip(&u);
     assert!(r.password.is_empty());
 }
 
 #[test]
 fn unlock_request_unicode() {
-    let u = UnlockRequest { password: "パスワード🔐".into() };
+    let u = UnlockRequest {
+        password: "パスワード🔐".into(),
+    };
     let r = roundtrip(&u);
     assert_eq!(r.password, "パスワード🔐");
 }
@@ -205,14 +257,18 @@ fn unlock_request_unicode() {
 
 #[test]
 fn create_vault_request_roundtrip() {
-    let c = CreateVaultRequest { password: "pass123".into() };
+    let c = CreateVaultRequest {
+        password: "pass123".into(),
+    };
     let r = roundtrip(&c);
     assert_eq!(r.password, "pass123");
 }
 
 #[test]
 fn create_vault_request_empty() {
-    let c = CreateVaultRequest { password: String::new() };
+    let c = CreateVaultRequest {
+        password: String::new(),
+    };
     let r = roundtrip(&c);
     assert!(r.password.is_empty());
 }
@@ -263,14 +319,18 @@ fn chat_message_empty() {
 
 #[test]
 fn send_chat_request_roundtrip() {
-    let s = SendChatRequest { content: "tell me a joke".into() };
+    let s = SendChatRequest {
+        content: "tell me a joke".into(),
+    };
     let r = roundtrip(&s);
     assert_eq!(r.content, "tell me a joke");
 }
 
 #[test]
 fn send_chat_request_empty() {
-    let s = SendChatRequest { content: String::new() };
+    let s = SendChatRequest {
+        content: String::new(),
+    };
     let r = roundtrip(&s);
     assert!(r.content.is_empty());
 }
@@ -292,7 +352,11 @@ fn chat_response_all_some() {
 
 #[test]
 fn chat_response_all_none() {
-    let c = ChatResponse { message: String::new(), action: None, user_message_display: None };
+    let c = ChatResponse {
+        message: String::new(),
+        action: None,
+        user_message_display: None,
+    };
     let r = roundtrip(&c);
     assert!(r.action.is_none());
     assert!(r.user_message_display.is_none());
@@ -314,14 +378,18 @@ fn chat_response_mixed_options() {
 
 #[test]
 fn export_request_roundtrip() {
-    let e = ExportRequest { password: "export_pass".into() };
+    let e = ExportRequest {
+        password: "export_pass".into(),
+    };
     let r = roundtrip(&e);
     assert_eq!(r.password, "export_pass");
 }
 
 #[test]
 fn export_request_empty() {
-    let e = ExportRequest { password: String::new() };
+    let e = ExportRequest {
+        password: String::new(),
+    };
     let r = roundtrip(&e);
     assert!(r.password.is_empty());
 }
@@ -330,7 +398,10 @@ fn export_request_empty() {
 
 #[test]
 fn export_response_roundtrip() {
-    let e = ExportResponse { path: "/tmp/backup.json".into(), entry_count: 10 };
+    let e = ExportResponse {
+        path: "/tmp/backup.json".into(),
+        entry_count: 10,
+    };
     let r = roundtrip(&e);
     assert_eq!(r.path, "/tmp/backup.json");
     assert_eq!(r.entry_count, 10);
@@ -338,7 +409,10 @@ fn export_response_roundtrip() {
 
 #[test]
 fn export_response_empty_path_zero_count() {
-    let e = ExportResponse { path: String::new(), entry_count: 0 };
+    let e = ExportResponse {
+        path: String::new(),
+        entry_count: 0,
+    };
     let r = roundtrip(&e);
     assert!(r.path.is_empty());
     assert_eq!(r.entry_count, 0);
@@ -348,7 +422,10 @@ fn export_response_empty_path_zero_count() {
 
 #[test]
 fn import_request_roundtrip() {
-    let i = ImportRequest { password: "import_pass".into(), path: "/tmp/backup.json".into() };
+    let i = ImportRequest {
+        password: "import_pass".into(),
+        path: "/tmp/backup.json".into(),
+    };
     let r = roundtrip(&i);
     assert_eq!(r.password, "import_pass");
     assert_eq!(r.path, "/tmp/backup.json");
@@ -356,7 +433,10 @@ fn import_request_roundtrip() {
 
 #[test]
 fn import_request_empty() {
-    let i = ImportRequest { password: String::new(), path: String::new() };
+    let i = ImportRequest {
+        password: String::new(),
+        path: String::new(),
+    };
     let r = roundtrip(&i);
     assert!(r.password.is_empty());
     assert!(r.path.is_empty());
@@ -412,7 +492,11 @@ fn json_invalid_syntax_fails() {
 
 #[test]
 fn vault_status_debug_and_clone() {
-    let v = VaultStatus { is_initialized: true, is_unlocked: false, entry_count: 1 };
+    let v = VaultStatus {
+        is_initialized: true,
+        is_unlocked: false,
+        entry_count: 1,
+    };
     let debug_str = format!("{:?}", v);
     assert!(debug_str.contains("VaultStatus"));
     let cloned = v.clone();
@@ -452,7 +536,11 @@ fn chat_message_debug() {
 
 #[test]
 fn vault_status_json_keys() {
-    let v = VaultStatus { is_initialized: true, is_unlocked: false, entry_count: 5 };
+    let v = VaultStatus {
+        is_initialized: true,
+        is_unlocked: false,
+        entry_count: 5,
+    };
     let json = serde_json::to_value(&v).unwrap();
     assert!(json.get("is_initialized").is_some());
     assert!(json.get("is_unlocked").is_some());
@@ -463,7 +551,11 @@ fn vault_status_json_keys() {
 
 #[test]
 fn field_dto_json_keys() {
-    let f = FieldDto { key: "k".into(), value: "v".into(), hidden: true };
+    let f = FieldDto {
+        key: "k".into(),
+        value: "v".into(),
+        hidden: true,
+    };
     let json = serde_json::to_value(&f).unwrap();
     assert_eq!(json["key"], "k");
     assert_eq!(json["value"], "v");
@@ -492,7 +584,11 @@ fn large_vec_entry() {
 
 #[test]
 fn usize_max_values() {
-    let v = VaultStatus { is_initialized: false, is_unlocked: false, entry_count: usize::MAX };
+    let v = VaultStatus {
+        is_initialized: false,
+        is_unlocked: false,
+        entry_count: usize::MAX,
+    };
     let r = roundtrip(&v);
     assert_eq!(r.entry_count, usize::MAX);
 }
@@ -501,7 +597,9 @@ fn usize_max_values() {
 
 #[test]
 fn string_with_newlines_and_tabs() {
-    let s = SendChatRequest { content: "line1\nline2\ttab\"quoted\\".into() };
+    let s = SendChatRequest {
+        content: "line1\nline2\ttab\"quoted\\".into(),
+    };
     let r = roundtrip(&s);
     assert_eq!(r.content, "line1\nline2\ttab\"quoted\\");
 }

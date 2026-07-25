@@ -85,4 +85,3 @@ impl KeyDerivationProvider for Argon2idKdfProvider {
         hkdf_expand::<VERIFY_HASH_LEN>(master_key, HKDF_INFO_VERIFY)
     }
 }
-
