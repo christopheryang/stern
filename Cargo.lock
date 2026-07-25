@@ -5501,7 +5501,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stern-app"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "js-sys",
  "leptos",
@@ -5520,7 +5520,7 @@ dependencies = [
 
 [[package]]
 name = "stern-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes",
  "aes-kw",
@@ -5560,7 +5560,7 @@ dependencies = [
 
 [[package]]
 name = "stern-ipc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5571,7 +5571,7 @@ dependencies = [
 
 [[package]]
 name = "stern-tauri"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5594,7 +5594,7 @@ dependencies = [
 
 [[package]]
 name = "stern-ui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "chrono",
  "js-sys",
