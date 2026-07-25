@@ -28,10 +28,11 @@ impl AiModel {
     }
 
     #[must_use]
-    pub fn is_available(&self) -> bool {
+    pub const fn is_available(&self) -> bool {
         true
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     pub fn run_inference(
         &self,
         input_ids: &[i64],
@@ -71,6 +72,7 @@ pub struct SimpleTokenizer {
 
 impl SimpleTokenizer {
     #[must_use]
+    #[allow(clippy::cast_possible_wrap)]
     pub fn new() -> Self {
         let mut vocab = std::collections::HashMap::new();
 

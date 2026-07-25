@@ -9,6 +9,7 @@ pub struct VaultSession {
 }
 
 impl VaultSession {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             kek: SecretMem::new([0u8; KEK_LEN]),
@@ -34,7 +35,8 @@ impl VaultSession {
         Ok(self.kek.get())
     }
 
-    pub fn verify_hash(&self) -> &[u8; VERIFY_HASH_LEN] {
+    #[must_use]
+    pub const fn verify_hash(&self) -> &[u8; VERIFY_HASH_LEN] {
         &self.verify_hash
     }
 

@@ -2,16 +2,10 @@ use crate::domain::vault::crypto_constants::{SECRET_KEY_LEN, VAULT_SALT_LEN, VER
 use crate::domain::vault::entry::EncryptedEntry;
 use crate::domain::vault::errors::VaultError;
 use crate::domain::vault::kdf_params::KdfParams;
+use crate::domain::vault::vault_meta::VaultMeta;
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::Mutex;
-
-pub struct VaultMeta {
-    pub salt: [u8; VAULT_SALT_LEN],
-    pub verify_hash: [u8; VERIFY_HASH_LEN],
-    pub secret_key: [u8; SECRET_KEY_LEN],
-    pub params: KdfParams,
-}
 
 pub struct SqliteRepository {
     conn: Mutex<Connection>,
@@ -31,7 +25,7 @@ impl SqliteRepository {
                 id TEXT PRIMARY KEY,
                 vault_salt BLOB NOT NULL,
                 verify_hash BLOB NOT NULL,
-                encrypted_index BLOB NOT NULL,
+                secret_key BLOB NOT NULL,
                 kdf_params TEXT NOT NULL,
                 created_at TEXT NOT NULL
             );
@@ -51,6 +45,29 @@ impl SqliteRepository {
             ",
         )
         .map_err(|e| VaultError::Database(e.to_string()))?;
+
+        // Migration: rename legacy 'encrypted_index' column to 'secret_key' if it exists.
+        let has_old_col: bool = conn
+            .prepare("PRAGMA table_info(vault_meta)")
+            .and_then(|mut stmt| {
+                let rows = stmt.query_map([], |row| {
+                    let name: String = row.get(1)?;
+                    Ok(name)
+                })?;
+                for row in rows {
+                    if row? == "encrypted_index" {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })
+            .unwrap_or(false);
+        if has_old_col {
+            conn.execute_batch(
+                "ALTER TABLE vault_meta RENAME COLUMN encrypted_index TO secret_key",
+            )
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        }
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -96,6 +113,7 @@ impl SqliteRepository {
         })
     }
 
+    #[allow(clippy::indexing_slicing)]
     pub fn list_all_entries(&self) -> Result<Vec<EncryptedEntry>, VaultError> {
         self.execute(|conn| {
             let mut stmt = conn.prepare(
@@ -136,11 +154,9 @@ impl SqliteRepository {
                     ciphertext,
                     version,
                     created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                        .unwrap_or_else(|_| chrono::Utc::now()),
+                        .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
                     updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at)
-                        .map(|dt| dt.with_timezone(&chrono::Utc))
-                        .unwrap_or_else(|_| chrono::Utc::now()),
+                        .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc)),
                 })
             })?;
 
@@ -156,7 +172,7 @@ impl SqliteRepository {
         self.execute(|conn| {
             let count: i64 = conn
                 .query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
-            Ok(count as usize)
+            Ok(usize::try_from(count).unwrap_or(usize::MAX))
         })
     }
 
@@ -179,12 +195,12 @@ impl SqliteRepository {
             let params_json = serde_json::to_string(params)
                 .map_err(|e| rusqlite::Error::InvalidParameterName(e.to_string()))?;
             conn.execute(
-                "INSERT OR REPLACE INTO vault_meta (id, vault_salt, verify_hash, encrypted_index, kdf_params, created_at)
+                "INSERT OR REPLACE INTO vault_meta (id, vault_salt, verify_hash, secret_key, kdf_params, created_at)
                  VALUES ('default', ?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![
-                    salt.as_slice(),
-                    verify_hash.as_slice(),
-                    secret_key.as_slice(),
+                    &salt[..],
+                    &verify_hash[..],
+                    &secret_key[..],
                     params_json,
                     chrono::Utc::now().to_rfc3339(),
                 ],
@@ -193,10 +209,11 @@ impl SqliteRepository {
         })
     }
 
+    #[allow(clippy::indexing_slicing)]
     pub fn load_vault_meta(&self) -> Result<Option<VaultMeta>, VaultError> {
         self.execute(|conn| {
             let result = conn.query_row(
-                "SELECT vault_salt, verify_hash, encrypted_index, kdf_params FROM vault_meta WHERE id = 'default'",
+                "SELECT vault_salt, verify_hash, secret_key, kdf_params FROM vault_meta WHERE id = 'default'",
                 [],
                 |row| {
                     let salt: Vec<u8> = row.get(0)?;

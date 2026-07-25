@@ -26,10 +26,12 @@ impl VaultIndex {
         self.entries.shift_remove(id)
     }
 
+    #[must_use]
     pub fn get(&self, id: &str) -> Option<&IndexEntry> {
         self.entries.get(id)
     }
 
+    #[must_use]
     pub fn search(&self, query: &str) -> Vec<&IndexEntry> {
         let q = query.to_lowercase();
         self.entries

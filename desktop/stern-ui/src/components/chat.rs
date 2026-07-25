@@ -11,6 +11,7 @@ struct ChatMsg {
     content: String,
 }
 
+#[allow(clippy::future_not_send)]
 async fn invoke_chat(content: String) -> Result<String, String> {
     let args = serde_json::json!({ "request": { "content": content } });
     let args_js = serde_wasm_bindgen::to_value(&args).map_err(|e| e.to_string())?;
@@ -39,12 +40,13 @@ async fn invoke_chat(content: String) -> Result<String, String> {
 
     let result = wasm_bindgen_futures::JsFuture::from(js_sys::Promise::resolve(&result))
         .await
-        .map_err(|e| format!("promise error: {:?}", e))?;
+        .map_err(|e| format!("promise error: {e:?}"))?;
 
     let response: serde_json::Value =
         serde_wasm_bindgen::from_value(result).map_err(|e| e.to_string())?;
-    response["message"]
-        .as_str()
+    response
+        .get("message")
+        .and_then(|v| v.as_str())
         .map(String::from)
         .ok_or_else(|| "no message in response".to_string())
 }
@@ -104,12 +106,10 @@ pub fn ChatView() -> impl IntoView {
             let align = if is_user { "flex-end" } else { "flex-start" };
             let label = if is_user { "You" } else { "Stern" };
             let container_style = format!(
-                "display:flex;flex-direction:column;margin-bottom:16px;max-width:80%;align-items:{};",
-                align
+                "display:flex;flex-direction:column;margin-bottom:16px;max-width:80%;align-items:{align}"
             );
             let bubble_style = format!(
-                "padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.5;white-space:pre-wrap;background:{};color:{};border:{};",
-                bg, color, border
+                "padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.5;white-space:pre-wrap;background:{bg};color:{color};border:{border}"
             );
             view! {
                 <div style=container_style>

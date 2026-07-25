@@ -5,3 +5,4 @@ pub mod errors;
 pub mod index;
 pub mod kdf_params;
 pub mod secret_key;
+pub mod vault_meta;

@@ -1,0 +1,60 @@
+[advisories]
+version = 2
+ignore = [
+    # gtk-rs GTK3 bindings — all transitive deps of Tauri, no fix available
+    { id = "RUSTSEC-2024-0411", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0412", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0413", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0414", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0415", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0416", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0417", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0418", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0419", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0420", reason = "transitive dep of tauri" },
+    { id = "RUSTSEC-2024-0436", reason = "transitive dep of tauri" },
+    # proc-macro-error unmaintained — transitive dep
+    { id = "RUSTSEC-2024-0370", reason = "unmaintained, transitive dep" },
+    { id = "RUSTSEC-2026-0173", reason = "unmaintained, transitive dep" },
+    # rust-unic unmaintained — transitive deps of ort/onnxruntime
+    { id = "RUSTSEC-2025-0075", reason = "unmaintained, transitive dep of ort" },
+    { id = "RUSTSEC-2025-0080", reason = "unmaintained, transitive dep of ort" },
+    { id = "RUSTSEC-2025-0081", reason = "unmaintained, transitive dep of ort" },
+    { id = "RUSTSEC-2025-0098", reason = "unmaintained, transitive dep of ort" },
+    { id = "RUSTSEC-2025-0100", reason = "unmaintained, transitive dep of ort" },
+]
+
+[licenses]
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "ISC",
+    "Unicode-DFS-2016",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "Zlib",
+    "BSL-1.0",
+    "OpenSSL",
+    "Unicode-3.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "MPL-2.0",
+]
+confidence-threshold = 0.8
+
+[licenses.private]
+ignore = false
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+highlight = "all"
+skip = []
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

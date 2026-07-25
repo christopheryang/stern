@@ -13,11 +13,14 @@ pub struct SecretKey {
 }
 
 impl SecretKey {
+    #[must_use]
+    #[allow(clippy::expect_used)]
     pub fn new(key: [u8; 16]) -> Self {
         let checksum = Self::compute_checksum(&key);
         Self { key, checksum }
     }
 
+    #[allow(clippy::expect_used, clippy::indexing_slicing)]
     fn compute_checksum(key: &[u8; 16]) -> [u8; CHECKSUM_LEN] {
         let mut mac = HmacSha256::new_from_slice(b"stern-secret-key-checksum")
             .expect("HMAC can take key of any size");
@@ -28,6 +31,7 @@ impl SecretKey {
         checksum
     }
 
+    #[must_use]
     pub fn encode(&self) -> String {
         let mut data = Vec::with_capacity(16 + CHECKSUM_LEN);
         data.extend_from_slice(&self.key);
@@ -36,9 +40,11 @@ impl SecretKey {
             &base64::engine::general_purpose::STANDARD,
             &data,
         );
-        format!("SK1-{}", encoded)
+        format!("SK1-{encoded}")
     }
 
+    #[must_use]
+    #[allow(clippy::indexing_slicing)]
     pub fn decode(s: &str) -> Option<Self> {
         let s = s.strip_prefix("SK1-")?;
         let data = base64::Engine::decode(
