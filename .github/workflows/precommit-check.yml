@@ -59,16 +59,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref || github.ref }}
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
 
-      - name: Install cocogitto
-        run: cargo install cocogitto
-
-      - name: Check commits
+      - name: Check conventional commits
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            cog check --from-ref origin/${{ github.base_ref }} --ignore-merge-commits --ignore-fixup-commits
-          else
-            echo "Skipping: only checks conventional commits on pull requests"
+          PATTERN='^(feat|fix|build|ci|docs|perf|refactor|style|test|chore|revert)(\([a-z0-9_-]+\))?: .+'
+          BAD=$(git log --oneline origin/${{ github.base_ref }}..HEAD --no-merges --format="%H %s" | grep -vE "$PATTERN" || true)
+          if [ -n "$BAD" ]; then
+            echo "Non-conventional commits found:"
+            echo "$BAD"
+            exit 1
           fi
+          echo "All commits follow conventional format."
