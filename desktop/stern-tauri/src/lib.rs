@@ -1,3 +1,10 @@
+// Security notes:
+// - tauri.conf.json CSP uses 'unsafe-inline' for script-src because Leptos WASM hydration
+//   requires inline scripts and cannot use nonces. connect-src allows the Tauri IPC bridge
+//   and the dev server (localhost:1420).
+// - withGlobalTauri is enabled because Leptos WASM builds cannot use @tauri-apps/api;
+//   the frontend accesses window.__TAURI__ directly for IPC invocations.
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 #![recursion_limit = "256"]
 
@@ -11,14 +18,18 @@ use stern_core::infrastructure::keychain::OsKeychainProvider;
 use stern_core::infrastructure::sqlite::repository::SqliteRepository;
 use tauri::Manager;
 
+use std::sync::Mutex;
+use std::time::Instant;
+
 pub struct AppState {
-    pub session: std::sync::Mutex<VaultSession>,
+    pub session: Mutex<VaultSession>,
     pub crypto: Arc<XChaCha20CryptoProvider>,
     pub kdf: Arc<Argon2idKdfProvider>,
     pub keychain: Arc<OsKeychainProvider>,
     pub chat_handler: Arc<ChatHandler>,
     pub db_path: std::path::PathBuf,
     pub repository: Arc<SqliteRepository>,
+    pub unlock_lockout: Mutex<Option<(u32, Instant)>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -32,24 +43,27 @@ pub fn run() {
             let app_dir = app
                 .path()
                 .app_data_dir()
-                .expect("failed to resolve app data dir");
-            std::fs::create_dir_all(&app_dir).expect("failed to create app data dir");
+                .map_err(|e| format!("failed to resolve app data dir: {e}"))?;
+            std::fs::create_dir_all(&app_dir)
+                .map_err(|e| format!("failed to create app data dir: {e}"))?;
 
             let db_path = app_dir.join("stern.db");
             let repository = Arc::new(
-                SqliteRepository::new(&db_path).expect("failed to open database"),
+                SqliteRepository::new(&db_path)
+                    .map_err(|e| format!("failed to open database: {e}"))?,
             );
 
             let chat_handler = Arc::new(ChatHandler::new(None));
 
             app.manage(AppState {
-                session: std::sync::Mutex::new(VaultSession::new()),
+                session: Mutex::new(VaultSession::new()),
                 crypto: Arc::new(XChaCha20CryptoProvider::new()),
                 kdf: Arc::new(Argon2idKdfProvider::new()),
                 keychain: Arc::new(OsKeychainProvider::new()),
                 chat_handler,
                 db_path,
                 repository,
+                unlock_lockout: Mutex::new(None),
             });
 
             Ok(())
@@ -71,5 +85,8 @@ pub fn run() {
             commands::import_vault,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .unwrap_or_else(|e| {
+            eprintln!("error while running tauri application: {e}");
+            std::process::exit(1);
+        });
 }

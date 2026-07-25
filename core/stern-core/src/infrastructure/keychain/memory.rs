@@ -8,6 +8,7 @@ pub struct MemoryKeychainProvider {
 }
 
 impl MemoryKeychainProvider {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             store: Mutex::new(HashMap::new()),
@@ -22,6 +23,7 @@ impl Default for MemoryKeychainProvider {
 }
 
 impl KeychainProvider for MemoryKeychainProvider {
+    #[allow(clippy::significant_drop_tightening)]
     fn store_key(&self, service: &str, account: &str, key: &[u8]) -> Result<(), VaultError> {
         let mut store = self
             .store
@@ -42,6 +44,7 @@ impl KeychainProvider for MemoryKeychainProvider {
             .ok_or_else(|| VaultError::Keychain("key not found".to_owned()))
     }
 
+    #[allow(clippy::significant_drop_tightening)]
     fn delete_key(&self, service: &str, account: &str) -> Result<(), VaultError> {
         let mut store = self
             .store
@@ -54,7 +57,6 @@ impl KeychainProvider for MemoryKeychainProvider {
     fn has_key(&self, service: &str, account: &str) -> bool {
         self.store
             .lock()
-            .map(|s| s.contains_key(&format!("{service}:{account}")))
-            .unwrap_or(false)
+            .is_ok_and(|s| s.contains_key(&format!("{service}:{account}")))
     }
 }

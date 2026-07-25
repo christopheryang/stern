@@ -20,19 +20,10 @@ pub enum Intent {
         name: String,
         fields: Vec<(String, String)>,
     },
-    ExportVault {
-        password: Option<String>,
-    },
-    ImportVault {
-        path: Option<String>,
-        password: Option<String>,
-    },
-    CreateVault {
-        password: Option<String>,
-    },
-    UnlockVault {
-        password: Option<String>,
-    },
+    ExportVault,
+    ImportVault,
+    CreateVault,
+    UnlockVault,
     Help,
     Greeting,
     Unknown {
@@ -52,6 +43,7 @@ const LIST_VERBS: &[&str] = &["list", "show", "display", "all"];
 const DELETE_VERBS: &[&str] = &["delete", "remove", "destroy", "drop"];
 const UPDATE_VERBS: &[&str] = &["update", "change", "modify", "edit"];
 
+#[must_use]
 pub fn classify_intent(text: &str) -> Intent {
     let lower = text.to_lowercase();
     let words: Vec<&str> = lower.split_whitespace().collect();
@@ -59,6 +51,7 @@ pub fn classify_intent(text: &str) -> Intent {
     if is_greeting(&words) {
         return Intent::Greeting;
     }
+
     if is_help(&words) {
         return Intent::Help;
     }
@@ -66,25 +59,32 @@ pub fn classify_intent(text: &str) -> Intent {
     if let Some(intent) = detect_store(&words, &lower) {
         return intent;
     }
+
     if let Some(intent) = detect_retrieve(&words, &lower) {
         return intent;
     }
+
     if let Some(intent) = detect_list(&words, &lower) {
         return intent;
     }
+
     if let Some(intent) = detect_delete(&words) {
         return intent;
     }
+
     if let Some(intent) = detect_update(&words, &lower) {
         return intent;
     }
-    if let Some(intent) = detect_export(&words, &lower) {
+
+    if let Some(intent) = detect_export(&words) {
         return intent;
     }
-    if let Some(intent) = detect_import(&words, &lower) {
+
+    if let Some(intent) = detect_import(&words) {
         return intent;
     }
-    if let Some(intent) = detect_vault_manage(&words, &lower) {
+
+    if let Some(intent) = detect_vault_manage(&words) {
         return intent;
     }
 
@@ -99,9 +99,10 @@ fn is_greeting(words: &[&str]) -> bool {
 }
 
 fn is_help(words: &[&str]) -> bool {
-    let has_question = words.iter().any(|w| *w == "help" || *w == "how" || *w == "what");
+    let has_question = words.iter().any(|w| *w == "help" || *w == "how");
     let has_you = words.iter().any(|w| *w == "can" || *w == "do" || *w == "you");
-    has_question || (has_you && words.iter().any(|w| *w == "i" || *w == "me"))
+    let has_subject = words.iter().any(|w| *w == "i" || *w == "me" || *w == "you");
+    (has_subject || has_you) && has_question
 }
 
 fn has_secret_type(text: &str) -> bool {
@@ -147,8 +148,7 @@ fn detect_store(words: &[&str], full_text: &str) -> Option<Intent> {
     let kind = SECRET_TYPES
         .iter()
         .find(|t| full_text.contains(*t))
-        .map(|t| (*t).to_string())
-        .unwrap_or_else(|| "secret".to_string());
+        .map_or_else(|| "secret".to_string(), |t| (*t).to_string());
 
     let name = extract_store_name(full_text);
     let fields = extract_store_value(full_text, &kind);
@@ -180,7 +180,7 @@ fn detect_list(words: &[&str], full_text: &str) -> Option<Intent> {
     if !is_list_context(words) {
         return None;
     }
-    let has_all = words.iter().any(|w| *w == "all" || *w == "every" || *w == "every");
+    let has_all = words.iter().any(|w| *w == "all" || *w == "every");
     let has_secret = has_secret_type(full_text);
     let has_list_verb = words.iter().any(|w| LIST_VERBS.contains(w));
 
@@ -201,7 +201,7 @@ fn detect_delete(words: &[&str]) -> Option<Intent> {
         return None;
     }
     let name = extract_retrieve_name(
-        &words.iter().copied().collect::<Vec<_>>().join(" "),
+        &words.to_vec().join(" "),
     );
     if name.is_empty() {
         return None;
@@ -218,6 +218,46 @@ fn detect_update(words: &[&str], full_text: &str) -> Option<Intent> {
     Some(Intent::UpdateSecret { name, fields })
 }
 
+fn detect_export(words: &[&str]) -> Option<Intent> {
+    let export_words = ["export", "backup", "back up", "transfer", "migrate"];
+    if !words.iter().any(|w| export_words.contains(w)) {
+        return None;
+    }
+
+    Some(Intent::ExportVault)
+}
+
+fn detect_import(words: &[&str]) -> Option<Intent> {
+    let import_words = ["import", "restore", "load"];
+    let has_import = words.iter().any(|w| import_words.contains(w));
+    if !has_import {
+        return None;
+    }
+
+    Some(Intent::ImportVault)
+}
+
+fn detect_vault_manage(words: &[&str]) -> Option<Intent> {
+    let has_vault = words.contains(&"vault");
+
+    let create_words = ["create", "new", "set up", "setup", "initialize", "init"];
+    let has_create = words.iter().any(|w| create_words.contains(w));
+
+    let unlock_words = ["unlock", "open", "decrypt", "access"];
+    let has_unlock = words.iter().any(|w| unlock_words.contains(w));
+
+    if has_create && has_vault {
+        return Some(Intent::CreateVault);
+    }
+
+    if has_unlock && has_vault {
+        return Some(Intent::UnlockVault);
+    }
+
+    None
+}
+
+#[allow(clippy::arithmetic_side_effects, clippy::option_if_let_else)]
 fn extract_store_name(full_text: &str) -> String {
     let lower = full_text.to_lowercase();
 
@@ -263,7 +303,7 @@ fn extract_store_name(full_text: &str) -> String {
                 .take_while(|c| !c.is_whitespace())
                 .collect::<Vec<_>>().into_iter().rev().collect();
             if !word.is_empty() {
-                return format!("{} {}", word, rest);
+                return format!("{word} {rest}");
             }
         }
     }
@@ -274,7 +314,7 @@ fn extract_store_name(full_text: &str) -> String {
         "keep", "note", "for", "with",
     ];
 
-    let secret_words: Vec<&str> = SECRET_TYPES.iter().copied().collect();
+    let secret_words: Vec<&str> = SECRET_TYPES.to_vec();
 
     let before_is = if let Some(pos) = lower.find(" is ") {
         &full_text[..pos]
@@ -308,39 +348,39 @@ fn extract_store_name(full_text: &str) -> String {
         .join(" ")
 }
 
+#[allow(clippy::arithmetic_side_effects)]
 fn extract_store_value(full_text: &str, kind: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     let lower = full_text.to_lowercase();
 
-    for (suffix, field_key) in &[
-        ("password is:", "password"),
-        ("password is ", "password"),
-        ("secret is:", "secret"),
-        ("secret is ", "secret"),
-        ("credential is:", "credential"),
-        ("credential is ", "credential"),
-        ("token is:", "token"),
-        ("token is ", "token"),
-        ("api key is:", "api key"),
-        ("api key is ", "api key"),
-        ("wifi password is:", "wifi"),
-        ("wifi password is ", "wifi"),
-    ] {
-        if let Some(pos) = lower.find(suffix) {
-            let after = &full_text[pos + suffix.len()..];
-            let value: String = after
-                .chars()
-                .take_while(|c| *c != ',' && *c != '.' && *c != '!' && *c != '?')
-                .collect();
-            let value = value.trim().to_string();
-            if !value.is_empty() {
-                pairs.push((field_key.to_string(), value));
-                return pairs;
+    let kv_patterns: &[(&[&str], &str)] = &[
+        (&["password is:", "password is "], "password"),
+        (&["secret is:", "secret is "], "secret"),
+        (&["credential is:", "credential is "], "credential"),
+        (&["token is:", "token is "], "token"),
+        (&["api key is:", "api key is "], "api key"),
+        (&["wifi password is:", "wifi password is "], "wifi"),
+    ];
+
+    for (suffixes, field_key) in kv_patterns {
+        for suffix in *suffixes {
+            if let Some(pos) = lower.find(suffix) {
+                let after = &full_text[pos + suffix.len()..];
+                let value: String = after
+                    .chars()
+                    .take_while(|c| *c != ',' && *c != '.' && *c != '!' && *c != '?')
+                    .collect();
+                let value = value.trim().to_string();
+                if !value.is_empty() {
+                    pairs.push((field_key.to_string(), value));
+                    return pairs;
+                }
             }
         }
     }
 
-    for pattern in &["password:", "secret:", "credential:", "token:", "api key:"] {
+    let colon_patterns: &[&str] = &["password:", "secret:", "credential:", "token:", "api key:"];
+    for pattern in colon_patterns {
         if let Some(pos) = lower.find(pattern) {
             let after = &full_text[pos + pattern.len()..];
             let value: String = after
@@ -384,6 +424,7 @@ fn extract_store_value(full_text: &str, kind: &str) -> Vec<(String, String)> {
     pairs
 }
 
+#[allow(clippy::arithmetic_side_effects)]
 fn extract_retrieve_name(full_text: &str) -> String {
     let lower = full_text.to_lowercase();
 
@@ -420,6 +461,7 @@ fn extract_retrieve_name(full_text: &str) -> String {
     full_text.to_string()
 }
 
+#[allow(clippy::arithmetic_side_effects)]
 fn extract_key_value_pairs(text: &str) -> Vec<(String, String)> {
     let mut pairs = Vec::new();
     let patterns = ["username", "user", "url", "token", "api key"];
@@ -427,7 +469,7 @@ fn extract_key_value_pairs(text: &str) -> Vec<(String, String)> {
     for key in &patterns {
         if let Some(pos) = text.find(key) {
             let after = &text[pos + key.len()..];
-            let after = after.trim_start_matches(|c: char| c == ':' || c == '=' || c == ' ');
+            let after = after.trim_start_matches([':', '=', ' ']);
             let value: String = after
                 .chars()
                 .take_while(|c| !c.is_whitespace())
@@ -439,77 +481,4 @@ fn extract_key_value_pairs(text: &str) -> Vec<(String, String)> {
     }
 
     pairs
-}
-
-fn detect_export(words: &[&str], full_text: &str) -> Option<Intent> {
-    let export_words = ["export", "backup", "back up", "copy", "transfer", "migrate"];
-    if !words.iter().any(|w| export_words.contains(w)) {
-        return None;
-    }
-
-    let password = extract_password(full_text);
-    Some(Intent::ExportVault { password })
-}
-
-fn detect_import(words: &[&str], full_text: &str) -> Option<Intent> {
-    let import_words = ["import", "restore", "load", "transfer"];
-    let has_import = words.iter().any(|w| import_words.contains(w));
-    if !has_import {
-        return None;
-    }
-
-    let path = if let Some(pos) = full_text.find(".json") {
-        let before = &full_text[..pos + 5];
-        let start = before.rfind(|c: char| c == '/' || c == '\\' || c == ' ')
-            .map(|p| p + 1)
-            .unwrap_or(0);
-        Some(before[start..].to_string())
-    } else {
-        None
-    };
-
-    let password = extract_password(full_text);
-    Some(Intent::ImportVault { path, password })
-}
-
-fn extract_password(text: &str) -> Option<String> {
-    let lower = text.to_lowercase();
-
-    for pattern in &["password ", "pass ", "pwd ", "with password ", "using password "] {
-        if let Some(pos) = lower.find(pattern) {
-            let after = &text[pos + pattern.len()..];
-            let pw: String = after
-                .chars()
-                .take_while(|c| *c != ',' && *c != '.' && *c != '!' && *c != '?')
-                .collect();
-            let pw = pw.trim().to_string();
-            if !pw.is_empty() {
-                return Some(pw);
-            }
-        }
-    }
-
-    None
-}
-
-fn detect_vault_manage(words: &[&str], full_text: &str) -> Option<Intent> {
-    let has_vault = words.iter().any(|w| *w == "vault");
-
-    let create_words = ["create", "new", "set up", "setup", "initialize", "init"];
-    let has_create = words.iter().any(|w| create_words.contains(w));
-
-    let unlock_words = ["unlock", "open", "decrypt", "access"];
-    let has_unlock = words.iter().any(|w| unlock_words.contains(w));
-
-    if has_create && has_vault {
-        let password = extract_password(full_text);
-        return Some(Intent::CreateVault { password });
-    }
-
-    if has_unlock && has_vault {
-        let password = extract_password(full_text);
-        return Some(Intent::UnlockVault { password });
-    }
-
-    None
 }

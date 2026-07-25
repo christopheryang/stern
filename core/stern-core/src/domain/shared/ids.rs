@@ -5,6 +5,7 @@ use std::fmt;
 pub struct EntryId(pub String);
 
 impl EntryId {
+    #[must_use]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
@@ -26,6 +27,7 @@ impl fmt::Display for EntryId {
 pub struct TagId(pub String);
 
 impl TagId {
+    #[must_use]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }
@@ -41,6 +43,7 @@ impl Default for TagId {
 pub struct VaultId(pub String);
 
 impl VaultId {
+    #[must_use]
     pub fn new() -> Self {
         Self(uuid::Uuid::new_v4().to_string())
     }

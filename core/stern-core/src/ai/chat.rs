@@ -8,16 +8,26 @@ pub struct ChatHandler {
 
 impl ChatHandler {
     #[must_use]
-    pub fn new(model: Option<Arc<AiModel>>) -> Self {
+    pub const fn new(model: Option<Arc<AiModel>>) -> Self {
         Self { _model: model }
     }
 
     #[must_use]
     pub fn process_message(&self, user_input: &str) -> ChatResponse {
         let intent = classify_intent(user_input);
-        self.intent_to_response(intent)
+        let mut response = self.intent_to_response(intent);
+
+        let is_vault_action = matches!(
+            response.action,
+            Some(Action::CreateVault | Action::UnlockVault | Action::ExportVault | Action::ImportVault)
+        );
+        if is_vault_action {
+            response.user_message_display = None;
+        }
+        response
     }
 
+    #[allow(clippy::unused_self, clippy::too_many_lines, clippy::needless_pass_by_value)]
     fn intent_to_response(&self, intent: Intent) -> ChatResponse {
         match intent {
             Intent::StoreSecret { ref name, ref kind, ref fields } => {
@@ -40,6 +50,7 @@ impl ChatHandler {
                         kind: kind.clone(),
                         fields: fields.clone(),
                     }),
+                    user_message_display: None,
                 }
             }
             Intent::RetrieveSecret { ref name } => ChatResponse {
@@ -49,6 +60,7 @@ impl ChatHandler {
                 action: Some(Action::SearchEntry {
                     query: name.clone(),
                 }),
+                user_message_display: None,
             },
             Intent::ListSecrets { ref category } => {
                 let cat_desc = category
@@ -62,6 +74,7 @@ impl ChatHandler {
                     action: Some(Action::ListEntries {
                         category: category.clone(),
                     }),
+                    user_message_display: None,
                 }
             }
             Intent::DeleteSecret { ref name } => ChatResponse {
@@ -71,6 +84,7 @@ impl ChatHandler {
                 action: Some(Action::ConfirmDelete {
                     name: name.clone(),
                 }),
+                user_message_display: None,
             },
             Intent::UpdateSecret { ref name, ref fields } => {
                 let field_desc = if fields.is_empty() {
@@ -78,7 +92,7 @@ impl ChatHandler {
                 } else {
                     let items: Vec<String> = fields
                         .iter()
-                        .map(|(k, v)| format!("  {k} → {v}"))
+                        .map(|(k, v)| format!("  {k} -> {v}"))
                         .collect();
                     format!("Updating:\n{}", items.join("\n"))
                 };
@@ -88,72 +102,42 @@ impl ChatHandler {
                         name: name.clone(),
                         fields: fields.clone(),
                     }),
+                    user_message_display: None,
                 }
             }
-            Intent::ExportVault { ref password } => {
-                if password.is_some() {
-                    ChatResponse {
-                        message: "Exporting your vault...".to_string(),
-                        action: Some(Action::ExportVault { password: password.clone() }),
-                    }
-                } else {
-                    ChatResponse {
-                        message: "Enter your export password. Example: \"export vault password mypassword\"".to_string(),
-                        action: Some(Action::ExportVault { password: None }),
-                    }
-                }
+            Intent::ExportVault => ChatResponse {
+                message: "Opening secure export dialog...".to_string(),
+                action: Some(Action::ExportVault),
+                user_message_display: None,
             },
-            Intent::ImportVault { ref path, ref password } => {
-                if password.is_some() && path.is_some() {
-                    ChatResponse {
-                        message: "Importing your vault...".to_string(),
-                        action: Some(Action::ImportVault { path: path.clone(), password: password.clone() }),
-                    }
-                } else {
-                    ChatResponse {
-                        message: "Enter the backup file path and your import password. Example: \"import vault /path/to/backup.json password mypassword\"".to_string(),
-                        action: Some(Action::ImportVault { path: path.clone(), password: None }),
-                    }
-                }
+            Intent::ImportVault => ChatResponse {
+                message: "Opening secure import dialog...".to_string(),
+                action: Some(Action::ImportVault),
+                user_message_display: None,
             },
-            Intent::CreateVault { ref password } => {
-                if password.is_some() {
-                    ChatResponse {
-                        message: "Creating your vault...".to_string(),
-                        action: Some(Action::CreateVault { password: password.clone() }),
-                    }
-                } else {
-                    ChatResponse {
-                        message: "Choose a master password for your new vault. Example: \"create vault password mypassword\"".to_string(),
-                        action: Some(Action::CreateVault { password: None }),
-                    }
-                }
+            Intent::CreateVault => ChatResponse {
+                message: "Opening secure vault creation dialog...".to_string(),
+                action: Some(Action::CreateVault),
+                user_message_display: None,
             },
-            Intent::UnlockVault { ref password } => {
-                if password.is_some() {
-                    ChatResponse {
-                        message: "Unlocking your vault...".to_string(),
-                        action: Some(Action::UnlockVault { password: password.clone() }),
-                    }
-                } else {
-                    ChatResponse {
-                        message: "Enter your master password. Example: \"unlock vault password mypassword\"".to_string(),
-                        action: Some(Action::UnlockVault { password: None }),
-                    }
-                }
+            Intent::UnlockVault => ChatResponse {
+                message: "Opening secure unlock dialog...".to_string(),
+                action: Some(Action::UnlockVault),
+                user_message_display: None,
             },
             Intent::Help => ChatResponse {
                 message: "I can help you manage your secrets. Here's what I can do:\n\n\
-                    🔐 Store a secret — \"save my GitHub password\"\n\
-                    🔍 Find a secret — \"get my Gmail credentials\"\n\
-                    📋 List all — \"show all passwords\"\n\
-                    ✏️ Update — \"change my Netflix password\"\n\
-                    🗑️ Delete — \"remove my WiFi password\"\n\
-                    📦 Export — \"export my vault\"\n\
-                    📥 Import — \"import vault from file\"\n\n\
+                    \u{1f510} Store a secret -- \"save my GitHub password\"\n\
+                    \u{1f50d} Find a secret -- \"get my Gmail credentials\"\n\
+                    \u{1f4cb} List all -- \"show all passwords\"\n\
+                    \u{270f}\u{fe0f} Update -- \"change my Netflix password\"\n\
+                    \u{1f5d1}\u{fe0f} Delete -- \"remove my WiFi password\"\n\
+                    \u{1f4e6} Export -- \"export my vault\"\n\
+                    \u{1f4e5} Import -- \"import vault\"\n\n\
                     Just tell me what you need in natural language."
                     .to_string(),
                 action: None,
+                user_message_display: None,
             },
             Intent::Greeting => ChatResponse {
                 message: "Hey! I'm Stern, your local secrets manager. \
@@ -161,6 +145,7 @@ impl ChatHandler {
                     Ask me to store, find, or manage your secrets."
                     .to_string(),
                 action: None,
+                user_message_display: None,
             },
             Intent::Unknown { ref text } => ChatResponse {
                 message: format!(
@@ -172,6 +157,7 @@ impl ChatHandler {
                     - \"help\""
                 ),
                 action: None,
+                user_message_display: None,
             },
         }
     }
@@ -180,6 +166,7 @@ impl ChatHandler {
 pub struct ChatResponse {
     pub message: String,
     pub action: Option<Action>,
+    pub user_message_display: Option<String>,
 }
 
 pub enum Action {
@@ -201,17 +188,8 @@ pub enum Action {
         name: String,
         fields: Vec<(String, String)>,
     },
-    ExportVault {
-        password: Option<String>,
-    },
-    ImportVault {
-        path: Option<String>,
-        password: Option<String>,
-    },
-    CreateVault {
-        password: Option<String>,
-    },
-    UnlockVault {
-        password: Option<String>,
-    },
+    ExportVault,
+    ImportVault,
+    CreateVault,
+    UnlockVault,
 }

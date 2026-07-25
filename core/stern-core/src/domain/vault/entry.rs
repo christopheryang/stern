@@ -1,7 +1,8 @@
 use crate::domain::vault::crypto_constants::NONCE_LEN;
 use serde::{Deserialize, Serialize};
+use zeroize::Zeroize;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum EntryKind {
     Login,
     Note,
@@ -49,11 +50,26 @@ pub struct DecryptedEntry {
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-impl Drop for DecryptedEntry {
+impl Drop for EntryPayload {
     fn drop(&mut self) {
-        use zeroize::Zeroize;
+        self.name.zeroize();
         for field in &mut self.fields {
             field.value.zeroize();
+        }
+        for tag in &mut self.tags {
+            tag.zeroize();
+        }
+    }
+}
+
+impl Drop for DecryptedEntry {
+    fn drop(&mut self) {
+        self.name.zeroize();
+        for field in &mut self.fields {
+            field.value.zeroize();
+        }
+        for tag in &mut self.tags {
+            tag.zeroize();
         }
     }
 }

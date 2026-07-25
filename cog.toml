@@ -1,0 +1,39 @@
+# Cocogitto configuration — conventional commit enforcement for stern
+# https://docs.cocogitto.io/reference/config.html
+
+from_latest_tag = true
+ignore_merge_commits = true
+ignore_fixup_commits = true
+
+# ── Allowed scopes ──────────────────────────────────────────────────
+# Derived from the Cargo workspace crates and functional areas.
+scopes = [
+    # Crate-level
+    "core",    # stern-core (domain, application, infrastructure)
+    "ipc",     # stern-ipc (shared IPC message types)
+    "tauri",   # stern-tauri (Tauri desktop shell)
+    "app",     # stern-app (Leptos WASM frontend)
+    "ui",      # stern-ui (Leptos component library)
+
+    # Functional areas
+    "crypto",  # Encryption, key derivation, secrets handling
+    "ai",      # AI/ML inference, ONNX runtime
+    "vault",   # Vault management, keyring integration
+    "db",      # SQLite, SeaORM, database schema
+    "build",   # Cargo workspace, Justfile, Trunk, Tauri config
+    "ci",      # GitHub Actions, PR templates, CI config
+    "docs",    # Documentation
+    "deps",    # Dependency updates
+]
+
+# ── Changelog ───────────────────────────────────────────────────────
+[changelog]
+path = "CHANGELOG.md"
+template = "remote"
+remote = "github.com"
+owner = "christopheryang"
+repository = "stern"
+
+# ── Git hooks ───────────────────────────────────────────────────────
+[git_hooks.commit-msg]
+script = "cog verify --file $1"

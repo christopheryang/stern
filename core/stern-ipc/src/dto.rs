@@ -46,7 +46,6 @@ pub struct UpdateEntryRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnlockRequest {
     pub password: String,
-    pub secret_key: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +70,7 @@ pub struct SendChatRequest {
 pub struct ChatResponse {
     pub message: String,
     pub action: Option<String>,
+    pub user_message_display: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,4 +88,9 @@ pub struct ExportResponse {
 pub struct ImportRequest {
     pub password: String,
     pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportResponse {
+    pub entry_count: usize,
 }

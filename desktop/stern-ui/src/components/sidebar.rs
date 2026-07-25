@@ -19,7 +19,7 @@ pub fn Sidebar(
             <ul style="list-style:none;padding:8px;">
                 {tabs.into_iter().map(move |(id, label)| {
                     let id_for_style = id.clone();
-                    let id_for_click = id.clone();
+                    let id_for_click = id;
                     view! {
                         <li>
                             <button
