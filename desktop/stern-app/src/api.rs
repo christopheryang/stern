@@ -1,6 +1,7 @@
 use wasm_bindgen::prelude::*;
 
 #[allow(dead_code)]
+#[allow(clippy::future_not_send)]
 pub async fn invoke(cmd: &str, args: serde_json::Value) -> Result<serde_json::Value, String> {
     let args_js = serde_wasm_bindgen::to_value(&args).map_err(|e| e.to_string())?;
 
