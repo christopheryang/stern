@@ -1,0 +1,33 @@
+name: PR Agent
+
+# Automated AI code review (PR-Agent, open source, Apache-2.0:
+# github.com/The-PR-Agent/pr-agent), self-hosted in Actions with our
+# own model key. Reviews, describes, and suggests improvements on new
+# pull requests; /review, /improve, /ask, and /describe also work as
+# PR comments. Requires the OPENAI_KEY repository secret.
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+  issue_comment:
+    types: [created]
+
+jobs:
+  pr_agent:
+    if: ${{ github.event.sender.type != 'Bot' }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: write
+      contents: read
+    name: Run PR Agent
+    steps:
+      - name: PR Agent action step
+        id: pragent
+        uses: The-PR-Agent/pr-agent@v0.50.0
+        env:
+          OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          github_action_config.auto_review: "true"
+          github_action_config.auto_describe: "true"
+          github_action_config.auto_improve: "true"

@@ -129,6 +129,9 @@ catalog.
 - `codeql.yml` — CodeQL code scanning (actions + rust) on pushes and
   pull requests to main plus a weekly schedule; findings land in the
   repo's Security tab.
+- `pr-agent.yml` — PR-Agent (open source) AI code review on new pull
+  requests, plus /review, /improve, /ask, and /describe in PR
+  comments; needs the OPENAI_KEY repository secret.
 - `release.yml` — on `v*` tags on `main`: builds macOS (Apple Silicon)
   and Linux (x86_64) bundles and attaches them to a GitHub Release.
   Signing/notarization are not configured.
