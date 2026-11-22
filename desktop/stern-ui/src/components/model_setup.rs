@@ -13,6 +13,8 @@
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
@@ -88,14 +90,28 @@ async fn sleep_ms(ms: i32) {
 
 /// Poll `model_status` while any download runs, mirroring progress into
 /// the models signal. Stops when the download finishes, when it never
-/// started (the download invoke reports that error itself), or after
-/// ~30 minutes.
+/// started (the download invoke reports that error itself), after
+/// ~30 minutes, when the owning action's invoke returns (`stop` is set
+/// by `run_action` the moment its `invoke_cmd` settles — so a fast
+/// failure leaves no lingering poller behind to overlap a retry), or
+/// when the component unmounts (`cancelled` is set by `on_cleanup`, so
+/// no write ever lands on a disposed signal).
 #[allow(clippy::future_not_send)]
-async fn poll_download_progress(set_models: WriteSignal<Vec<ModelStatus>>) {
+async fn poll_download_progress(
+    set_models: WriteSignal<Vec<ModelStatus>>,
+    cancelled: ReadSignal<bool>,
+    stop: Rc<Cell<bool>>,
+) {
     let mut seen_downloading = false;
     let mut iterations: u32 = 0;
     loop {
+        if cancelled.get_untracked() || stop.get() {
+            break;
+        }
         sleep_ms(400).await;
+        if cancelled.get_untracked() || stop.get() {
+            break;
+        }
         iterations = iterations.saturating_add(1);
         match fetch_status().await {
             Ok(models) => {
@@ -104,6 +120,9 @@ async fn poll_download_progress(set_models: WriteSignal<Vec<ModelStatus>>) {
                     seen_downloading = true;
                 }
                 let finished = seen_downloading && !downloading;
+                if cancelled.get_untracked() {
+                    break;
+                }
                 set_models.set(models);
                 if finished || iterations > 4500 {
                     break;
@@ -113,6 +132,40 @@ async fn poll_download_progress(set_models: WriteSignal<Vec<ModelStatus>>) {
         }
         if !seen_downloading && iterations > 25 {
             break;
+        }
+    }
+}
+
+/// First load on mount: fetch the status, and resume polling if a
+/// download started before this mount (e.g. the user navigated away and
+/// back while it was running on the backend).
+#[allow(clippy::future_not_send)]
+async fn load_initial_status(
+    set_models: WriteSignal<Vec<ModelStatus>>,
+    set_error: WriteSignal<Option<String>>,
+    cancelled: ReadSignal<bool>,
+) {
+    match fetch_status().await {
+        Ok(list) => {
+            if cancelled.get_untracked() {
+                return;
+            }
+            let resume = list.iter().any(|m| m.is_downloading);
+            set_models.set(list);
+            if resume {
+                // No owning action on this mount: the stop flag is never
+                // set, and the poller ends on finish/cancel as before.
+                spawn_local(poll_download_progress(
+                    set_models,
+                    cancelled,
+                    Rc::new(Cell::new(false)),
+                ));
+            }
+        }
+        Err(e) => {
+            if !cancelled.get_untracked() {
+                set_error.set(Some(e));
+            }
         }
     }
 }
@@ -253,38 +306,56 @@ fn ModelRow(
 pub fn ModelSetup() -> impl IntoView {
     let (models, set_models) = signal(Vec::<ModelStatus>::new());
     let (error, set_error) = signal(Option::<String>::None);
+    let (action_in_flight, set_action_in_flight) = signal(false);
 
-    spawn_local(async move {
-        match fetch_status().await {
-            Ok(list) => set_models.set(list),
-            Err(e) => set_error.set(Some(e)),
-        }
-    });
+    // Set by `on_cleanup` when the card unmounts (e.g. navigation), so
+    // in-flight polling/fetches stop and never write to disposed signals.
+    let (cancelled, set_cancelled) = signal(false);
+    on_cleanup(move || set_cancelled.set(true));
+
+    spawn_local(load_initial_status(set_models, set_error, cancelled));
 
     let run_action = move |cmd: &'static str, model_id: String, poll: bool| {
+        // One in-flight guard for *every* action — not just downloads —
+        // so repeated clicks cannot fire overlapping select/remove IPCs.
+        if action_in_flight.get_untracked() {
+            return;
+        }
+        set_action_in_flight.set(true);
         set_error.set(None);
+        // Per-action stop flag for this action's poller: set the moment
+        // the invoke settles, so even a fast failure leaves no poller
+        // running to overlap a retry.
+        let stop = Rc::new(Cell::new(false));
         spawn_local(async move {
             if poll {
-                spawn_local(poll_download_progress(set_models));
+                spawn_local(poll_download_progress(set_models, cancelled, stop.clone()));
             }
-            match invoke_cmd(cmd, serde_json::json!({ "modelId": model_id })).await {
-                Ok(value) => {
-                    if let Ok(list) = serde_json::from_value::<Vec<ModelStatus>>(value) {
-                        set_models.set(list);
+            let result = invoke_cmd(cmd, serde_json::json!({ "modelId": model_id })).await;
+            stop.set(true);
+            if !cancelled.get_untracked() {
+                match result {
+                    Ok(value) => {
+                        if let Ok(list) = serde_json::from_value::<Vec<ModelStatus>>(value) {
+                            set_models.set(list);
+                        }
+                    }
+                    Err(e) => {
+                        let label = if poll {
+                            format!("Download failed: {e}")
+                        } else {
+                            e
+                        };
+                        set_error.set(Some(label));
+                        if let Ok(list) = fetch_status().await {
+                            if !cancelled.get_untracked() {
+                                set_models.set(list);
+                            }
+                        }
                     }
                 }
-                Err(e) => {
-                    let label = if poll {
-                        format!("Download failed: {e}")
-                    } else {
-                        e
-                    };
-                    set_error.set(Some(label));
-                    if let Ok(list) = fetch_status().await {
-                        set_models.set(list);
-                    }
-                }
             }
+            set_action_in_flight.set(false);
         });
     };
 
@@ -302,7 +373,10 @@ pub fn ModelSetup() -> impl IntoView {
                 if list.is_empty() {
                     return view! { <div></div> }.into_any();
                 }
-                let any_downloading = list.iter().any(|m| m.is_downloading);
+                // Buttons hide while a download *or any other action* is
+                // in flight, matching the guard in `run_action`.
+                let any_downloading =
+                    list.iter().any(|m| m.is_downloading) || action_in_flight.get();
                 let rows = list
                     .into_iter()
                     .map(|m| {

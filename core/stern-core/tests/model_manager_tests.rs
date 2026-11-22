@@ -285,4 +285,40 @@ fn version_comparison() {
     // Unparseable versions fall back to inequality.
     assert!(version_is_newer("v2", "v1"));
     assert!(!version_is_newer("v1", "v1"));
+    // Zero-padding: trailing zero segments do not make a version newer.
+    assert!(!version_is_newer("1.0.0", "1.0"));
+    assert!(!version_is_newer("1.0", "1.0.0"));
+    // Pre-release suffixes sort before the release, never as an update
+    // over it, and a release is newer than its own pre-releases.
+    assert!(!version_is_newer("1.0.0-rc1", "1.0.0"));
+    assert!(version_is_newer("1.0.0", "1.0.0-rc1"));
+    assert!(version_is_newer("1.0.0-rc2", "1.0.0-rc1"));
+    assert!(!version_is_newer("1.0.0-rc1", "1.0.0-rc2"));
+}
+
+#[test]
+fn set_active_fails_when_the_model_file_was_deleted_externally() {
+    let (_dir, manager) = manager();
+    let bytes = fixture_bytes();
+    let descriptor = descriptor_for(&bytes, "1.0.0");
+    install(&manager, &descriptor, &bytes);
+    assert!(manager.installed_model_path("test-model").is_some());
+
+    // Delete the .onnx behind the manifest's back: the record remains,
+    // but activation must now fail instead of pointing chat at nothing.
+    let path = manager.active_model_path().unwrap();
+    std::fs::remove_file(&path).unwrap();
+    assert!(manager.installed_model_path("test-model").is_none());
+    assert!(manager.set_active_model("test-model").is_err());
+}
+
+#[test]
+fn remove_model_rejects_path_traversal_and_unknown_ids() {
+    let (_dir, manager) = manager();
+    for bad in ["..", "../outside", "a/b", "a\\b", "", "no-such-model"] {
+        assert!(
+            manager.remove_model(bad).is_err(),
+            "remove_model({bad:?}) must fail"
+        );
+    }
 }

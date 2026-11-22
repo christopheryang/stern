@@ -849,18 +849,45 @@ fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
         .collect()
 }
 
-/// Point the chat handler at the manifest's active model (or none).
-fn sync_chat_model(state: &AppState) {
+/// Clears the download-progress slot when dropped — including when the
+/// download command is cancelled or panics — so a stuck `Some(...)` can
+/// never block every later download.
+struct DownloadProgressGuard {
+    progress: Arc<std::sync::Mutex<Option<(String, u64, u64)>>>,
+}
+
+impl Drop for DownloadProgressGuard {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.progress.lock() {
+            *guard = None;
+        }
+    }
+}
+
+/// Load one model file on the blocking pool. Loading a 100–500 MB model
+/// must never run on a Tokio worker, and a failure is returned to the
+/// caller (and shown in the UI) instead of being swallowed.
+async fn load_model_at(path: std::path::PathBuf) -> Result<Arc<AiModel>, VaultError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        AiModel::new(&path)
+            .map(Arc::new)
+            .map_err(|e| VaultError::Model(format!("model {} failed to load: {e}", path.display())))
+    })
+    .await
+    .map_err(|e| VaultError::Model(format!("model load task failed: {e}")))?
+}
+
+/// Point the chat handler at the manifest's active model (or none),
+/// loading it fresh from disk.
+async fn sync_chat_model(state: &AppState) -> Result<(), VaultError> {
     match state.model_manager.active_model_path() {
-        Some(path) => match AiModel::new(&path) {
-            Ok(model) => state.chat_handler.set_model(Some(Arc::new(model))),
-            Err(e) => {
-                eprintln!("stern: active model failed to load: {e}");
-                state.chat_handler.set_model(None);
-            }
-        },
+        Some(path) => {
+            let model = load_model_at(path).await?;
+            state.chat_handler.set_model(Some(model));
+        }
         None => state.chat_handler.set_model(None),
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -877,8 +904,12 @@ pub async fn download_model(
         .copied()
         .ok_or_else(|| VaultError::Model(format!("unknown model: {model_id}")))?;
 
+    // Reserve the progress slot *before* dropping the lock: checking and
+    // reserving in the same critical section closes the TOCTOU window in
+    // which two rapid calls could both pass the check and download to the
+    // same `.part` file concurrently.
     {
-        let guard = state
+        let mut guard = state
             .download_progress
             .lock()
             .map_err(|e| VaultError::Model(e.to_string()))?;
@@ -887,7 +918,13 @@ pub async fn download_model(
                 "a model download is already in progress".to_string(),
             ));
         }
+        *guard = Some((model_id.clone(), 0, descriptor.size_bytes));
     }
+    // RAII: the slot is cleared when this guard drops, on every exit path
+    // below (success, error, cancellation, panic).
+    let _progress_guard = DownloadProgressGuard {
+        progress: state.download_progress.clone(),
+    };
 
     let manager = state.model_manager.clone();
     let progress = state.download_progress.clone();
@@ -902,10 +939,6 @@ pub async fn download_model(
     })
     .await;
 
-    if let Ok(mut guard) = state.download_progress.lock() {
-        *guard = None;
-    }
-
     match result {
         Ok(Ok(_installed)) => {}
         Ok(Err(e)) => return Err(e),
@@ -916,9 +949,16 @@ pub async fn download_model(
         }
     }
 
-    // If the downloaded model is the active one (first install, or an
-    // update of the active model), hot-load it so chat picks it up.
-    sync_chat_model(&state);
+    // Hot-load only when the downloaded model is the active one (first
+    // install, or an update of the active model). Downloading a
+    // non-active model must not reload the active model from disk.
+    let is_active = state
+        .model_manager
+        .active_model()
+        .is_some_and(|active| active.model_id == descriptor.id);
+    if is_active {
+        sync_chat_model(&state).await?;
+    }
     Ok(model_status_dtos(&state))
 }
 
@@ -927,8 +967,20 @@ pub async fn select_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    // Load *before* persisting the selection: if the load fails, the
+    // manifest, the UI's active badge, and the chat handler all stay on
+    // the previously active model instead of desyncing.
+    let path = state
+        .model_manager
+        .installed_model_path(&model_id)
+        .ok_or_else(|| {
+            VaultError::Model(format!(
+                "model {model_id} is not installed or its file is missing"
+            ))
+        })?;
+    let model = load_model_at(path).await?;
     state.model_manager.set_active_model(&model_id)?;
-    sync_chat_model(&state);
+    state.chat_handler.set_model(Some(model));
     Ok(model_status_dtos(&state))
 }
 
@@ -937,7 +989,16 @@ pub async fn remove_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    let was_active = state
+        .model_manager
+        .active_model()
+        .is_some_and(|active| active.model_id == model_id);
     state.model_manager.remove_model(&model_id)?;
-    sync_chat_model(&state);
+    // Only the removal of the active model affects the chat handler
+    // (it becomes model-less); removing any other model leaves the
+    // loaded model untouched instead of reloading it from disk.
+    if was_active {
+        sync_chat_model(&state).await?;
+    }
     Ok(model_status_dtos(&state))
 }

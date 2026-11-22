@@ -31,6 +31,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::Duration;
 
 /// A downloadable AI model known to this build of Stern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -172,12 +174,55 @@ pub struct ModelStatusInfo {
 /// (the Tauri shell passes `<app_data_dir>/models`).
 pub struct ModelManager {
     models_dir: PathBuf,
+    /// Serializes every manifest read-modify-write cycle (and the matching
+    /// filesystem changes) so concurrent installs, removals, and active-model
+    /// changes cannot interleave and leave `installed.json` out of sync
+    /// with the model directories on disk.
+    manifest_lock: Mutex<()>,
 }
 
 impl ModelManager {
     #[must_use]
     pub const fn new(models_dir: PathBuf) -> Self {
-        Self { models_dir }
+        Self {
+            models_dir,
+            manifest_lock: Mutex::new(()),
+        }
+    }
+
+    /// Lock the manifest for a read-modify-write cycle, recovering the
+    /// guard if a previous holder panicked while holding it.
+    fn lock_manifest(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.manifest_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Reject a caller-supplied model id that is not safe to use as a
+    /// path component: it must be a model this build's catalog knows, or
+    /// one already recorded in the manifest, and it must never contain
+    /// path separators or traversal segments.
+    fn validate_stored_model_id(&self, model_id: &str) -> Result<(), VaultError> {
+        if model_id.is_empty()
+            || model_id == "."
+            || model_id == ".."
+            || model_id.contains('/')
+            || model_id.contains('\\')
+            || model_id.contains("..")
+        {
+            return Err(VaultError::Model(format!("invalid model id: {model_id}")));
+        }
+        let known = catalog_model(model_id).is_some()
+            || self
+                .manifest()
+                .models
+                .iter()
+                .any(|m| m.model_id == model_id);
+        if known {
+            Ok(())
+        } else {
+            Err(VaultError::Model(format!("unknown model: {model_id}")))
+        }
     }
 
     #[must_use]
@@ -263,12 +308,37 @@ impl ModelManager {
         path.exists().then_some(path)
     }
 
-    /// Make an installed model the active one.
+    /// Path of one installed model's verified file, if it is recorded in
+    /// the manifest *and* still present on disk. This is the checked view
+    /// [`ModelManager::status_for`] and [`ModelManager::active_model_path`]
+    /// use; a manifest record whose file was deleted externally yields
+    /// `None` here.
+    #[must_use]
+    pub fn installed_model_path(&self, model_id: &str) -> Option<PathBuf> {
+        let installed = self.installed_model(model_id)?;
+        let path = self.installed_file_path(&installed);
+        path.exists().then_some(path)
+    }
+
+    /// Make an installed model the active one. The model's file must
+    /// still be present on disk — a manifest record alone (e.g. after the
+    /// `.onnx` was deleted externally) is not enough.
     pub fn set_active_model(&self, model_id: &str) -> Result<(), VaultError> {
+        let _guard = self.lock_manifest();
         let mut manifest = self.manifest();
-        if !manifest.models.iter().any(|m| m.model_id == model_id) {
+        let Some(installed) = manifest
+            .models
+            .iter()
+            .find(|m| m.model_id == model_id)
+            .cloned()
+        else {
             return Err(VaultError::Model(format!(
                 "model {model_id} is not installed"
+            )));
+        };
+        if !self.installed_file_path(&installed).exists() {
+            return Err(VaultError::Model(format!(
+                "model {model_id} is recorded as installed but its file is missing"
             )));
         }
         manifest.active_model_id = Some(model_id.to_string());
@@ -324,7 +394,19 @@ impl ModelManager {
         descriptor: &ModelDescriptor,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<InstalledModel, VaultError> {
-        let response = ureq::get(descriptor.download_url)
+        // Explicit timeouts so a stalled download fails instead of hanging
+        // forever: connecting and receiving the response headers are
+        // short, and `timeout_per_read` restarts on every read, so a large
+        // model on a slow link is fine as long as bytes keep arriving —
+        // 60 seconds without a single successful read aborts the download.
+        let agent: ureq::Agent = ureq::Agent::config_builder()
+            .timeout_connect(Some(Duration::from_secs(15)))
+            .timeout_recv_response(Some(Duration::from_secs(30)))
+            .timeout_per_read(Some(Duration::from_mins(1)))
+            .build()
+            .into();
+        let response = agent
+            .get(descriptor.download_url)
             .call()
             .map_err(|e| VaultError::Model(format!("model download failed: {e}")))?;
 
@@ -384,6 +466,7 @@ impl ModelManager {
             }
         };
 
+        let _guard = self.lock_manifest();
         let mut manifest = self.manifest();
         manifest.models.retain(|m| m.model_id != installed.model_id);
         manifest.models.push(installed.clone());
@@ -453,11 +536,26 @@ impl ModelManager {
             .map_err(|e| VaultError::Model(format!("create models dir: {e}")))?;
         let json = serde_json::to_vec_pretty(manifest)
             .map_err(|e| VaultError::Serialization(e.to_string()))?;
-        let tmp_path = self.models_dir.join("installed.json.tmp");
-        fs::write(&tmp_path, &json)
-            .map_err(|e| VaultError::Model(format!("write model manifest: {e}")))?;
-        fs::rename(&tmp_path, self.manifest_path())
-            .map_err(|e| VaultError::Model(format!("replace model manifest: {e}")))?;
+        // Unique per process, so two Stern processes cannot clobber each
+        // other's temp file; within one process the manifest lock already
+        // serializes writers.
+        let tmp_path = self
+            .models_dir
+            .join(format!("installed.json.{}.tmp", std::process::id()));
+        fs::write(&tmp_path, &json).map_err(|e| {
+            // Best-effort cleanup so a failed write leaves no temp file.
+            if let Err(cleanup) = fs::remove_file(&tmp_path) {
+                tracing::warn!("failed to remove manifest temp file: {cleanup}");
+            }
+            VaultError::Model(format!("write model manifest: {e}"))
+        })?;
+        fs::rename(&tmp_path, self.manifest_path()).map_err(|e| {
+            // A failed rename must not leave the temp file behind either.
+            if let Err(cleanup) = fs::remove_file(&tmp_path) {
+                tracing::warn!("failed to remove manifest temp file: {cleanup}");
+            }
+            VaultError::Model(format!("replace model manifest: {e}"))
+        })?;
         Ok(())
     }
 
@@ -484,6 +582,12 @@ impl ModelManager {
     /// Remove one installed model (all its versions) and its manifest
     /// record. If it was the active model, no model is active afterwards.
     pub fn remove_model(&self, model_id: &str) -> Result<(), VaultError> {
+        // Validate before touching the filesystem: `model_id` comes from
+        // the UI/IPC layer, and joining an unchecked id (e.g. one with
+        // `..` or a path separator) would let `remove_dir_all` escape
+        // the models directory.
+        self.validate_stored_model_id(model_id)?;
+        let _guard = self.lock_manifest();
         let model_dir = self.models_dir.join(model_id);
         if model_dir.exists() {
             fs::remove_dir_all(&model_dir)
@@ -508,14 +612,42 @@ impl ModelManager {
 }
 
 /// Is `latest` a strictly newer dotted-numeric version than `installed`?
-/// Unparseable versions fall back to plain inequality.
+///
+/// The numeric core is compared segment by segment with the shorter side
+/// zero-padded, so `1.0` and `1.0.0` are equal — neither is newer. A
+/// `-suffix` (e.g. `-rc1`) marks a pre-release: it sorts *before* the same
+/// core without a suffix, and two suffixes on the same core compare
+/// lexically. That keeps a downgrade (including release → pre-release of
+/// the same core) from ever reading as an update. Versions whose core is
+/// not dotted-numeric at all fall back to plain inequality.
 #[must_use]
 pub fn version_is_newer(latest: &str, installed: &str) -> bool {
-    fn parse(v: &str) -> Option<Vec<u64>> {
-        v.split('.').map(|part| part.parse::<u64>().ok()).collect()
+    fn parse(v: &str) -> Option<(Vec<u64>, Option<&str>)> {
+        let (core, suffix) = match v.split_once('-') {
+            Some((core, suffix)) => (core, Some(suffix)),
+            None => (v, None),
+        };
+        let segments: Option<Vec<u64>> = core
+            .split('.')
+            .map(|part| part.parse::<u64>().ok())
+            .collect();
+        segments.map(|segments| (segments, suffix))
     }
     match (parse(latest), parse(installed)) {
-        (Some(l), Some(i)) => l > i,
+        (Some((mut l, l_suffix)), Some((mut i, i_suffix))) => {
+            let len = l.len().max(i.len());
+            l.resize(len, 0);
+            i.resize(len, 0);
+            match l.cmp(&i) {
+                std::cmp::Ordering::Greater => true,
+                std::cmp::Ordering::Less => false,
+                std::cmp::Ordering::Equal => match (l_suffix, i_suffix) {
+                    (None, Some(_)) => true,
+                    (Some(l), Some(i)) => l > i,
+                    _ => false,
+                },
+            }
+        }
         _ => latest != installed,
     }
 }

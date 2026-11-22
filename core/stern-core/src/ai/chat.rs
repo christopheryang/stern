@@ -16,17 +16,30 @@ impl ChatHandler {
 
     /// Replace the loaded model. Called when a model download completes (or
     /// the model is removed) so the change takes effect without a restart.
+    ///
+    /// A poisoned lock is recovered (with a warning) rather than silently
+    /// ignored: ignoring it would leave a stale model active with no trace
+    /// of why the replacement never happened.
     pub fn set_model(&self, model: Option<Arc<AiModel>>) {
-        if let Ok(mut guard) = self.model.write() {
-            *guard = model;
-        }
+        let mut guard = self.model.write().unwrap_or_else(|poisoned| {
+            tracing::warn!("chat model lock was poisoned; recovering it to replace the model");
+            poisoned.into_inner()
+        });
+        *guard = model;
     }
 
     /// Whether an AI model is currently loaded. Intent classification falls
     /// back to the rule-based classifier when no model is present.
+    ///
+    /// Like [`ChatHandler::set_model`], a poisoned lock is recovered rather
+    /// than misreporting `false` for a model that is actually loaded.
     #[must_use]
     pub fn has_model(&self) -> bool {
-        self.model.read().is_ok_and(|guard| guard.is_some())
+        let guard = self
+            .model
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        guard.is_some()
     }
 
     #[must_use]
