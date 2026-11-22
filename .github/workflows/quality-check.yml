@@ -125,3 +125,26 @@ jobs:
 
       - name: Build frontend
         run: cd desktop/stern-app && trunk build --release
+
+  cargo-audit:
+    name: Cargo audit (dependencies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+
+      - name: Audit dependencies against the RustSec advisory database
+        run: cargo audit
+
+  gitleaks:
+    name: Gitleaks (secret scan)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan the pull request history for leaked secrets
+        uses: gitleaks/gitleaks-action@v2
