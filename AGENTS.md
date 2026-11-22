@@ -123,8 +123,12 @@ catalog.
   tests for the two halves of the workspace.
 - `precommit-check.yml` — workspace clippy, cargo-deny, commit messages.
 - `quality-check.yml` — the always-on PR gate: fmt, workspace clippy,
-  stern-ui clippy for wasm32, all test suites, and the Trunk frontend
-  build, on every pull request with no path filters.
+  stern-ui clippy for wasm32, all test suites, the Trunk frontend
+  build, a cargo-audit pass over Cargo.lock (RustSec advisories), and
+  a gitleaks secret scan, on every pull request with no path filters.
+- `codeql.yml` — CodeQL code scanning (actions + rust) on pushes and
+  pull requests to main plus a weekly schedule; findings land in the
+  repo's Security tab.
 - `release.yml` — on `v*` tags on `main`: builds macOS (Apple Silicon)
   and Linux (x86_64) bundles and attaches them to a GitHub Release.
   Signing/notarization are not configured.
