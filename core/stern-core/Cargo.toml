@@ -36,6 +36,7 @@ blake3 = "1"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync", "time", "macros"] }
 ort = "2.0.0-rc.12"
+ureq = "3"
 ndarray = "0.16"
 data-encoding = "2"
 

@@ -1,15 +1,32 @@
 use crate::ai::intent::{classify_intent, Intent};
 use crate::ai::model::AiModel;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 pub struct ChatHandler {
-    _model: Option<Arc<AiModel>>,
+    model: RwLock<Option<Arc<AiModel>>>,
 }
 
 impl ChatHandler {
     #[must_use]
     pub const fn new(model: Option<Arc<AiModel>>) -> Self {
-        Self { _model: model }
+        Self {
+            model: RwLock::new(model),
+        }
+    }
+
+    /// Replace the loaded model. Called when a model download completes (or
+    /// the model is removed) so the change takes effect without a restart.
+    pub fn set_model(&self, model: Option<Arc<AiModel>>) {
+        if let Ok(mut guard) = self.model.write() {
+            *guard = model;
+        }
+    }
+
+    /// Whether an AI model is currently loaded. Intent classification falls
+    /// back to the rule-based classifier when no model is present.
+    #[must_use]
+    pub fn has_model(&self) -> bool {
+        self.model.read().is_ok_and(|guard| guard.is_some())
     }
 
     #[must_use]

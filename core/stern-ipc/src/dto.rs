@@ -94,3 +94,26 @@ pub struct ImportRequest {
 pub struct ImportResponse {
     pub entry_count: usize,
 }
+
+/// Status of the downloadable AI model, as reported to the frontend.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelStatusDto {
+    pub model_id: String,
+    pub display_name: String,
+    /// Plain-language guidance: what the model is good at, what it costs.
+    pub description: String,
+    /// One of `not_installed`, `installed`, `update_available`.
+    pub state: String,
+    pub installed_version: Option<String>,
+    pub latest_version: String,
+    /// Approximate size of the latest model build, in bytes.
+    pub size_bytes: u64,
+    /// Whether this is the active model (the one chat uses).
+    pub is_active: bool,
+    /// A download of this model is currently in flight.
+    pub is_downloading: bool,
+    /// Bytes downloaded so far (0 when not downloading).
+    pub downloaded_bytes: u64,
+    /// Expected total bytes for the in-flight download.
+    pub total_bytes: u64,
+}

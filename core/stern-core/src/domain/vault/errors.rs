@@ -30,6 +30,9 @@ pub enum VaultError {
     #[error("io error: {0}")]
     Io(String),
 
+    #[error("model error: {0}")]
+    Model(String),
+
     #[error("serialization error: {0}")]
     Serialization(String),
 }

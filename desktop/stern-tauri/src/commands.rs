@@ -1,6 +1,9 @@
 #![allow(clippy::unreachable, clippy::let_underscore_must_use)]
 
 use crate::AppState;
+use std::sync::Arc;
+use stern_core::ai::model_manager::{catalog_model, ModelState, MODEL_CATALOG};
+use stern_core::ai::AiModel;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
 use stern_core::domain::vault::aad::entry_aad;
@@ -12,7 +15,8 @@ use stern_core::domain::vault::errors::VaultError;
 use stern_core::domain::vault::kdf_params::KdfParams;
 use stern_ipc::dto::{
     ChatResponse, CreateEntryRequest, CreateVaultRequest, EntryDto, ExportRequest, ExportResponse,
-    ImportRequest, ImportResponse, SendChatRequest, UnlockRequest, UpdateEntryRequest, VaultStatus,
+    ImportRequest, ImportResponse, ModelStatusDto, SendChatRequest, UnlockRequest,
+    UpdateEntryRequest, VaultStatus,
 };
 use tauri::State;
 
@@ -797,4 +801,141 @@ mod tests {
         assert!(!state.session.lock().unwrap().is_unlocked);
         assert!(state.unlock_lockout.lock().unwrap().is_none());
     }
+}
+
+// ---------------------------------------------------------------------------
+// AI model management: models are downloaded after install, never bundled.
+// The user picks from the compiled-in catalog (Meetily-style model
+// manager); exactly one installed model is active at a time.
+// ---------------------------------------------------------------------------
+
+fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
+    let progress = state
+        .download_progress
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    MODEL_CATALOG
+        .iter()
+        .map(|descriptor| {
+            let info = state.model_manager.status_for(descriptor);
+            let (state_str, installed_version) = match &info.state {
+                ModelState::NotInstalled => ("not_installed", None),
+                ModelState::Installed { version } => ("installed", Some(version.clone())),
+                ModelState::UpdateAvailable {
+                    installed_version, ..
+                } => ("update_available", Some(installed_version.clone())),
+            };
+            let (is_downloading, downloaded_bytes, total_bytes) = match &progress {
+                Some((id, downloaded, total)) if id == descriptor.id => (true, *downloaded, *total),
+                _ => (false, 0, descriptor.size_bytes),
+            };
+            ModelStatusDto {
+                model_id: descriptor.id.to_string(),
+                display_name: descriptor.display_name.to_string(),
+                description: descriptor.description.to_string(),
+                state: state_str.to_string(),
+                installed_version,
+                latest_version: descriptor.version.to_string(),
+                size_bytes: descriptor.size_bytes,
+                is_active: info.is_active,
+                is_downloading,
+                downloaded_bytes,
+                total_bytes,
+            }
+        })
+        .collect()
+}
+
+/// Point the chat handler at the manifest's active model (or none).
+fn sync_chat_model(state: &AppState) {
+    match state.model_manager.active_model_path() {
+        Some(path) => match AiModel::new(&path) {
+            Ok(model) => state.chat_handler.set_model(Some(Arc::new(model))),
+            Err(e) => {
+                eprintln!("stern: active model failed to load: {e}");
+                state.chat_handler.set_model(None);
+            }
+        },
+        None => state.chat_handler.set_model(None),
+    }
+}
+
+#[tauri::command]
+pub async fn model_status(state: State<'_, AppState>) -> Result<Vec<ModelStatusDto>, VaultError> {
+    Ok(model_status_dtos(&state))
+}
+
+#[tauri::command]
+pub async fn download_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<ModelStatusDto>, VaultError> {
+    let descriptor = catalog_model(&model_id)
+        .copied()
+        .ok_or_else(|| VaultError::Model(format!("unknown model: {model_id}")))?;
+
+    {
+        let guard = state
+            .download_progress
+            .lock()
+            .map_err(|e| VaultError::Model(e.to_string()))?;
+        if guard.is_some() {
+            return Err(VaultError::Model(
+                "a model download is already in progress".to_string(),
+            ));
+        }
+    }
+
+    let manager = state.model_manager.clone();
+    let progress = state.download_progress.clone();
+    let progress_id = model_id.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        manager.download(&descriptor, &mut |downloaded, total| {
+            if let Ok(mut guard) = progress.lock() {
+                *guard = Some((progress_id.clone(), downloaded, total));
+            }
+        })
+    })
+    .await;
+
+    if let Ok(mut guard) = state.download_progress.lock() {
+        *guard = None;
+    }
+
+    match result {
+        Ok(Ok(_installed)) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => {
+            return Err(VaultError::Model(format!(
+                "model download task failed: {e}"
+            )));
+        }
+    }
+
+    // If the downloaded model is the active one (first install, or an
+    // update of the active model), hot-load it so chat picks it up.
+    sync_chat_model(&state);
+    Ok(model_status_dtos(&state))
+}
+
+#[tauri::command]
+pub async fn select_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<ModelStatusDto>, VaultError> {
+    state.model_manager.set_active_model(&model_id)?;
+    sync_chat_model(&state);
+    Ok(model_status_dtos(&state))
+}
+
+#[tauri::command]
+pub async fn remove_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<ModelStatusDto>, VaultError> {
+    state.model_manager.remove_model(&model_id)?;
+    sync_chat_model(&state);
+    Ok(model_status_dtos(&state))
 }

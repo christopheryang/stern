@@ -11,7 +11,8 @@
 mod commands;
 
 use std::sync::Arc;
-use stern_core::ai::ChatHandler;
+use stern_core::ai::model_manager::ModelManager;
+use stern_core::ai::{AiModel, ChatHandler};
 use stern_core::application::vault::session::VaultSession;
 use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
 use stern_core::infrastructure::keychain::OsKeychainProvider;
@@ -30,6 +31,8 @@ pub struct AppState {
     pub db_path: std::path::PathBuf,
     pub repository: Arc<SqliteRepository>,
     pub unlock_lockout: Mutex<Option<(u32, Instant)>>,
+    pub model_manager: Arc<ModelManager>,
+    pub download_progress: Arc<Mutex<Option<(String, u64, u64)>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -53,7 +56,21 @@ pub fn run() {
                     .map_err(|e| format!("failed to open database: {e}"))?,
             );
 
-            let chat_handler = Arc::new(ChatHandler::new(None));
+            // The AI model is downloaded after install, never bundled. If a
+            // verified model is already on disk, load it now; otherwise the
+            // chat handler starts model-less and the UI offers the download.
+            let model_manager = Arc::new(ModelManager::new(app_dir.join("models")));
+            let initial_model =
+                model_manager
+                    .active_model_path()
+                    .and_then(|path| match AiModel::new(&path) {
+                        Ok(model) => Some(Arc::new(model)),
+                        Err(e) => {
+                            eprintln!("stern: failed to load AI model: {e}");
+                            None
+                        }
+                    });
+            let chat_handler = Arc::new(ChatHandler::new(initial_model));
 
             app.manage(AppState {
                 session: Mutex::new(VaultSession::new()),
@@ -64,6 +81,8 @@ pub fn run() {
                 db_path,
                 repository,
                 unlock_lockout: Mutex::new(None),
+                model_manager,
+                download_progress: Arc::new(Mutex::new(None)),
             });
 
             Ok(())
@@ -81,6 +100,10 @@ pub fn run() {
             commands::search_entries,
             commands::copy_to_clipboard,
             commands::send_chat_message,
+            commands::model_status,
+            commands::download_model,
+            commands::select_model,
+            commands::remove_model,
             commands::export_vault,
             commands::import_vault,
         ])
