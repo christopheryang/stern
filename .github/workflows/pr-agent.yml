@@ -5,6 +5,13 @@ name: PR Agent
 # own model key. Reviews, describes, and suggests improvements on new
 # pull requests; /review, /improve, /ask, and /describe also work as
 # PR comments. Requires the OPENAI_KEY repository secret.
+#
+# Trigger guards (this workflow runs from the default branch with the
+# secret and write permissions, on a public repo): slash commands are
+# honored only on pull requests, only from comments starting with '/',
+# and only from the owner, members, or collaborators — an arbitrary
+# commenter must not be able to spend the OPENAI_KEY. Fork pull
+# requests never receive the secret, so they are skipped entirely.
 
 on:
   pull_request:
@@ -14,7 +21,16 @@ on:
 
 jobs:
   pr_agent:
-    if: ${{ github.event.sender.type != 'Bot' }}
+    if: >-
+      ${{ github.event.sender.type != 'Bot' &&
+      (github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/') &&
+      (github.event.comment.author_association == 'OWNER' ||
+      github.event.comment.author_association == 'MEMBER' ||
+      github.event.comment.author_association == 'COLLABORATOR'))) }}
     runs-on: ubuntu-latest
     permissions:
       issues: write
@@ -24,7 +40,7 @@ jobs:
     steps:
       - name: PR Agent action step
         id: pragent
-        uses: The-PR-Agent/pr-agent@v0.50.0
+        uses: The-PR-Agent/pr-agent@e673a02076ce09a4726c3d0c3cc85780e59ca52b # v0.50.0
         env:
           OPENAI_KEY: ${{ secrets.OPENAI_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

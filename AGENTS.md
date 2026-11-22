@@ -131,7 +131,12 @@ catalog.
   repo's Security tab.
 - `pr-agent.yml` — PR-Agent (open source) AI code review on new pull
   requests, plus /review, /improve, /ask, and /describe in PR
-  comments; needs the OPENAI_KEY repository secret.
+  comments; needs the OPENAI_KEY repository secret. Slash commands
+  run only on pull requests, only for the owner/members/collaborators,
+  and fork PRs are skipped (they never receive the secret).
+- `.github/dependabot.yml` — Dependabot opens weekly update PRs for
+  Cargo dependencies and GitHub Actions (minor/patch batched,
+  `chore(deps)` commit prefix so the commit-message gate passes).
 - `release.yml` — on `v*` tags on `main`: builds macOS (Apple Silicon)
   and Linux (x86_64) bundles and attaches them to a GitHub Release.
   Signing/notarization are not configured.

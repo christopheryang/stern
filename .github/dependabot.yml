@@ -4,7 +4,21 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # precommit-check.yml validates Conventional Commits messages, so
+    # Dependabot's default "Bump ..." subjects would fail the gate.
+    commit-message:
+      prefix: "chore(deps)"
+    # Batch minor/patch bumps into one PR; majors stay individual so
+    # breaking changes get their own review.
+    groups:
+      cargo-minor-patch:
+        update-types: ["minor", "patch"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
+    commit-message:
+      prefix: "chore(deps)"
+    groups:
+      actions-minor-patch:
+        update-types: ["minor", "patch"]

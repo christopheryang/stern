@@ -19,6 +19,12 @@ permissions:
 jobs:
   analyze:
     name: Analyze (${{ matrix.language }})
+    # Fork pull requests get a read-only token and no secrets, so the
+    # SARIF upload (security-events: write) would fail there; skip
+    # them — pushes, same-repo PRs, and the weekly schedule still scan.
+    if: >-
+      ${{ github.event_name != 'pull_request' ||
+      github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -26,6 +32,12 @@ jobs:
         language: [actions, rust]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Set up Rust
+        if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
 
       - name: Install system dependencies
         if: matrix.language == 'rust'

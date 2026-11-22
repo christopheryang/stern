@@ -133,7 +133,17 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
+        uses: taiki-e/install-action@1c009442a2e6d2f0b3839e122123f418ae963a1e # cargo-audit
+        with:
+          tool: cargo-audit
+
+      # Cache the RustSec advisory database between runs: cargo audit
+      # otherwise clones it fresh on every PR.
+      - name: Cache the RustSec advisory database
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/advisory-db
+          key: cargo-advisory-db
 
       - name: Audit dependencies against the RustSec advisory database
         run: cargo audit
@@ -147,6 +157,6 @@ jobs:
           fetch-depth: 0
 
       - name: Scan the pull request history for leaked secrets
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
