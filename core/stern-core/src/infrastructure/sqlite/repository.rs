@@ -103,7 +103,7 @@ impl SqliteRepository {
                     entry.dek_wrapped,
                     entry.nonce.as_slice(),
                     entry.ciphertext,
-                    entry.version,
+                    entry.version.cast_signed(),
                     entry.created_at.to_rfc3339(),
                     entry.updated_at.to_rfc3339(),
                 ],
@@ -128,7 +128,7 @@ impl SqliteRepository {
                 let dek_wrapped: Vec<u8> = row.get(4)?;
                 let nonce: Vec<u8> = row.get(5)?;
                 let ciphertext: Vec<u8> = row.get(6)?;
-                let version: u64 = row.get(7)?;
+                let version: u64 = row.get::<_, i64>(7)?.cast_unsigned();
                 let created_at: String = row.get(8)?;
                 let updated_at: String = row.get(9)?;
 

@@ -701,6 +701,8 @@ mod tests {
             kdf: Arc::new(Argon2idKdfProvider::new()),
             keychain: Arc::new(OsKeychainProvider::new()),
             chat_handler: Arc::new(stern_core::ai::ChatHandler::new(None)),
+            model_manager: Arc::new(stern_core::ai::ModelManager::new(db_path.clone())),
+            download_progress: Arc::new(Mutex::new(None)),
             db_path,
             repository,
             unlock_lockout: Mutex::new(None),
