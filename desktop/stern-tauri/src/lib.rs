@@ -56,21 +56,28 @@ pub fn run() {
                     .map_err(|e| format!("failed to open database: {e}"))?,
             );
 
-            // The AI model is downloaded after install, never bundled. If a
-            // verified model is already on disk, load it now; otherwise the
-            // chat handler starts model-less and the UI offers the download.
+            // The AI model is downloaded after install, never bundled.
+            // The chat handler starts model-less and the verified active
+            // model (if one is on disk) is loaded on a background thread:
+            // loading a 273–483 MB model synchronously here would block
+            // window startup. Until the load lands, chat uses the
+            // built-in rule-based classifier.
             let model_manager = Arc::new(ModelManager::new(app_dir.join("models")));
-            let initial_model =
-                model_manager
-                    .active_model_path()
-                    .and_then(|path| match AiModel::new(&path) {
-                        Ok(model) => Some(Arc::new(model)),
-                        Err(e) => {
-                            eprintln!("stern: failed to load AI model: {e}");
-                            None
+            let chat_handler = Arc::new(ChatHandler::new(None));
+            {
+                let model_manager = model_manager.clone();
+                let chat_handler = chat_handler.clone();
+                std::thread::spawn(move || {
+                    if let Some(path) = model_manager.active_model_path() {
+                        match AiModel::new(&path) {
+                            Ok(model) => chat_handler.set_model(Some(Arc::new(model))),
+                            Err(e) => {
+                                eprintln!("stern: failed to load AI model: {e}");
+                            }
                         }
-                    });
-            let chat_handler = Arc::new(ChatHandler::new(initial_model));
+                    }
+                });
+            }
 
             app.manage(AppState {
                 session: Mutex::new(VaultSession::new()),

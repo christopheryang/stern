@@ -308,13 +308,37 @@ impl ModelManager {
         path.exists().then_some(path)
     }
 
-    /// Make an installed model the active one.
+    /// Path of one installed model's verified file, if it is recorded in
+    /// the manifest *and* still present on disk. This is the checked view
+    /// [`ModelManager::status_for`] and [`ModelManager::active_model_path`]
+    /// use; a manifest record whose file was deleted externally yields
+    /// `None` here.
+    #[must_use]
+    pub fn installed_model_path(&self, model_id: &str) -> Option<PathBuf> {
+        let installed = self.installed_model(model_id)?;
+        let path = self.installed_file_path(&installed);
+        path.exists().then_some(path)
+    }
+
+    /// Make an installed model the active one. The model's file must
+    /// still be present on disk — a manifest record alone (e.g. after the
+    /// `.onnx` was deleted externally) is not enough.
     pub fn set_active_model(&self, model_id: &str) -> Result<(), VaultError> {
         let _guard = self.lock_manifest();
         let mut manifest = self.manifest();
-        if !manifest.models.iter().any(|m| m.model_id == model_id) {
+        let Some(installed) = manifest
+            .models
+            .iter()
+            .find(|m| m.model_id == model_id)
+            .cloned()
+        else {
             return Err(VaultError::Model(format!(
                 "model {model_id} is not installed"
+            )));
+        };
+        if !self.installed_file_path(&installed).exists() {
+            return Err(VaultError::Model(format!(
+                "model {model_id} is recorded as installed but its file is missing"
             )));
         }
         manifest.active_model_id = Some(model_id.to_string());
@@ -518,10 +542,20 @@ impl ModelManager {
         let tmp_path = self
             .models_dir
             .join(format!("installed.json.{}.tmp", std::process::id()));
-        fs::write(&tmp_path, &json)
-            .map_err(|e| VaultError::Model(format!("write model manifest: {e}")))?;
-        fs::rename(&tmp_path, self.manifest_path())
-            .map_err(|e| VaultError::Model(format!("replace model manifest: {e}")))?;
+        fs::write(&tmp_path, &json).map_err(|e| {
+            // Best-effort cleanup so a failed write leaves no temp file.
+            if let Err(cleanup) = fs::remove_file(&tmp_path) {
+                tracing::warn!("failed to remove manifest temp file: {cleanup}");
+            }
+            VaultError::Model(format!("write model manifest: {e}"))
+        })?;
+        fs::rename(&tmp_path, self.manifest_path()).map_err(|e| {
+            // A failed rename must not leave the temp file behind either.
+            if let Err(cleanup) = fs::remove_file(&tmp_path) {
+                tracing::warn!("failed to remove manifest temp file: {cleanup}");
+            }
+            VaultError::Model(format!("replace model manifest: {e}"))
+        })?;
         Ok(())
     }
 

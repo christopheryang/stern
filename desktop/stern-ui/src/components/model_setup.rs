@@ -13,6 +13,8 @@
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
+use std::rc::Rc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
@@ -89,21 +91,25 @@ async fn sleep_ms(ms: i32) {
 /// Poll `model_status` while any download runs, mirroring progress into
 /// the models signal. Stops when the download finishes, when it never
 /// started (the download invoke reports that error itself), after
-/// ~30 minutes, or when the component unmounts (`cancelled` is set by
-/// `on_cleanup`, so no write ever lands on a disposed signal).
+/// ~30 minutes, when the owning action's invoke returns (`stop` is set
+/// by `run_action` the moment its `invoke_cmd` settles — so a fast
+/// failure leaves no lingering poller behind to overlap a retry), or
+/// when the component unmounts (`cancelled` is set by `on_cleanup`, so
+/// no write ever lands on a disposed signal).
 #[allow(clippy::future_not_send)]
 async fn poll_download_progress(
     set_models: WriteSignal<Vec<ModelStatus>>,
     cancelled: ReadSignal<bool>,
+    stop: Rc<Cell<bool>>,
 ) {
     let mut seen_downloading = false;
     let mut iterations: u32 = 0;
     loop {
-        if cancelled.get_untracked() {
+        if cancelled.get_untracked() || stop.get() {
             break;
         }
         sleep_ms(400).await;
-        if cancelled.get_untracked() {
+        if cancelled.get_untracked() || stop.get() {
             break;
         }
         iterations = iterations.saturating_add(1);
@@ -147,7 +153,13 @@ async fn load_initial_status(
             let resume = list.iter().any(|m| m.is_downloading);
             set_models.set(list);
             if resume {
-                spawn_local(poll_download_progress(set_models, cancelled));
+                // No owning action on this mount: the stop flag is never
+                // set, and the poller ends on finish/cancel as before.
+                spawn_local(poll_download_progress(
+                    set_models,
+                    cancelled,
+                    Rc::new(Cell::new(false)),
+                ));
             }
         }
         Err(e) => {
@@ -311,11 +323,16 @@ pub fn ModelSetup() -> impl IntoView {
         }
         set_action_in_flight.set(true);
         set_error.set(None);
+        // Per-action stop flag for this action's poller: set the moment
+        // the invoke settles, so even a fast failure leaves no poller
+        // running to overlap a retry.
+        let stop = Rc::new(Cell::new(false));
         spawn_local(async move {
             if poll {
-                spawn_local(poll_download_progress(set_models, cancelled));
+                spawn_local(poll_download_progress(set_models, cancelled, stop.clone()));
             }
             let result = invoke_cmd(cmd, serde_json::json!({ "modelId": model_id })).await;
+            stop.set(true);
             if !cancelled.get_untracked() {
                 match result {
                     Ok(value) => {
