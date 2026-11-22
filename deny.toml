@@ -13,6 +13,8 @@ ignore = [
     { id = "RUSTSEC-2024-0419", reason = "transitive dep of tauri" },
     { id = "RUSTSEC-2024-0420", reason = "transitive dep of tauri" },
     { id = "RUSTSEC-2024-0436", reason = "transitive dep of tauri" },
+    # chrono unmaintained — direct dep for timestamps, no fixed upgrade
+    { id = "RUSTSEC-2026-0543", reason = "unmaintained, no fixed upgrade available" },
     # proc-macro-error unmaintained — transitive dep
     { id = "RUSTSEC-2024-0370", reason = "unmaintained, transitive dep" },
     { id = "RUSTSEC-2026-0173", reason = "unmaintained, transitive dep" },
