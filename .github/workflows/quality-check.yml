@@ -10,6 +10,11 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Least privilege for every job in this workflow (CodeQL
+# actions/missing-workflow-permissions): all jobs only read the repo.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
 
