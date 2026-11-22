@@ -89,8 +89,7 @@ impl ChatHandler {
             Intent::ListSecrets { ref category } => {
                 let cat_desc = category
                     .as_deref()
-                    .map(|c| format!(" of type \"{c}\""))
-                    .unwrap_or_default();
+                    .map_or_else(String::new, |c| format!(" of type \"{c}\""));
                 ChatResponse {
                     message: format!("Here are all your secrets{cat_desc}:"),
                     action: Some(Action::ListEntries {
