@@ -1,6 +1,9 @@
 #![allow(clippy::unreachable, clippy::let_underscore_must_use)]
 
 use crate::AppState;
+use std::sync::Arc;
+use stern_core::ai::model_manager::{catalog_model, ModelState, MODEL_CATALOG};
+use stern_core::ai::AiModel;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
 use stern_core::domain::vault::aad::entry_aad;
@@ -12,7 +15,8 @@ use stern_core::domain::vault::errors::VaultError;
 use stern_core::domain::vault::kdf_params::KdfParams;
 use stern_ipc::dto::{
     ChatResponse, CreateEntryRequest, CreateVaultRequest, EntryDto, ExportRequest, ExportResponse,
-    ImportRequest, ImportResponse, SendChatRequest, UnlockRequest, UpdateEntryRequest, VaultStatus,
+    ImportRequest, ImportResponse, ModelStatusDto, SendChatRequest, UnlockRequest,
+    UpdateEntryRequest, VaultStatus,
 };
 use tauri::State;
 
@@ -697,6 +701,8 @@ mod tests {
             kdf: Arc::new(Argon2idKdfProvider::new()),
             keychain: Arc::new(OsKeychainProvider::new()),
             chat_handler: Arc::new(stern_core::ai::ChatHandler::new(None)),
+            model_manager: Arc::new(stern_core::ai::ModelManager::new(db_path.clone())),
+            download_progress: Arc::new(Mutex::new(None)),
             db_path,
             repository,
             unlock_lockout: Mutex::new(None),
@@ -797,4 +803,202 @@ mod tests {
         assert!(!state.session.lock().unwrap().is_unlocked);
         assert!(state.unlock_lockout.lock().unwrap().is_none());
     }
+}
+
+// ---------------------------------------------------------------------------
+// AI model management: models are downloaded after install, never bundled.
+// The user picks from the compiled-in catalog (Meetily-style model
+// manager); exactly one installed model is active at a time.
+// ---------------------------------------------------------------------------
+
+fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
+    let progress = state
+        .download_progress
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+    MODEL_CATALOG
+        .iter()
+        .map(|descriptor| {
+            let info = state.model_manager.status_for(descriptor);
+            let (state_str, installed_version) = match &info.state {
+                ModelState::NotInstalled => ("not_installed", None),
+                ModelState::Installed { version } => ("installed", Some(version.clone())),
+                ModelState::UpdateAvailable {
+                    installed_version, ..
+                } => ("update_available", Some(installed_version.clone())),
+            };
+            let (is_downloading, downloaded_bytes, total_bytes) = match &progress {
+                Some((id, downloaded, total)) if id == descriptor.id => (true, *downloaded, *total),
+                _ => (false, 0, descriptor.size_bytes),
+            };
+            ModelStatusDto {
+                model_id: descriptor.id.to_string(),
+                display_name: descriptor.display_name.to_string(),
+                description: descriptor.description.to_string(),
+                state: state_str.to_string(),
+                installed_version,
+                latest_version: descriptor.version.to_string(),
+                size_bytes: descriptor.size_bytes,
+                is_active: info.is_active,
+                is_downloading,
+                downloaded_bytes,
+                total_bytes,
+            }
+        })
+        .collect()
+}
+
+/// Clears the download-progress slot when dropped — including when the
+/// download command is cancelled or panics — so a stuck `Some(...)` can
+/// never block every later download.
+struct DownloadProgressGuard {
+    progress: Arc<std::sync::Mutex<Option<(String, u64, u64)>>>,
+}
+
+impl Drop for DownloadProgressGuard {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.progress.lock() {
+            *guard = None;
+        }
+    }
+}
+
+/// Load one model file on the blocking pool. Loading a 100–500 MB model
+/// must never run on a Tokio worker, and a failure is returned to the
+/// caller (and shown in the UI) instead of being swallowed.
+async fn load_model_at(path: std::path::PathBuf) -> Result<Arc<AiModel>, VaultError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        AiModel::new(&path)
+            .map(Arc::new)
+            .map_err(|e| VaultError::Model(format!("model {} failed to load: {e}", path.display())))
+    })
+    .await
+    .map_err(|e| VaultError::Model(format!("model load task failed: {e}")))?
+}
+
+/// Point the chat handler at the manifest's active model (or none),
+/// loading it fresh from disk.
+async fn sync_chat_model(state: &AppState) -> Result<(), VaultError> {
+    match state.model_manager.active_model_path() {
+        Some(path) => {
+            let model = load_model_at(path).await?;
+            state.chat_handler.set_model(Some(model));
+        }
+        None => state.chat_handler.set_model(None),
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn model_status(state: State<'_, AppState>) -> Result<Vec<ModelStatusDto>, VaultError> {
+    Ok(model_status_dtos(&state))
+}
+
+#[tauri::command]
+pub async fn download_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<ModelStatusDto>, VaultError> {
+    let descriptor = catalog_model(&model_id)
+        .copied()
+        .ok_or_else(|| VaultError::Model(format!("unknown model: {model_id}")))?;
+
+    // Reserve the progress slot *before* dropping the lock: checking and
+    // reserving in the same critical section closes the TOCTOU window in
+    // which two rapid calls could both pass the check and download to the
+    // same `.part` file concurrently.
+    {
+        let mut guard = state
+            .download_progress
+            .lock()
+            .map_err(|e| VaultError::Model(e.to_string()))?;
+        if guard.is_some() {
+            return Err(VaultError::Model(
+                "a model download is already in progress".to_string(),
+            ));
+        }
+        *guard = Some((model_id.clone(), 0, descriptor.size_bytes));
+    }
+    // RAII: the slot is cleared when this guard drops, on every exit path
+    // below (success, error, cancellation, panic).
+    let _progress_guard = DownloadProgressGuard {
+        progress: state.download_progress.clone(),
+    };
+
+    let manager = state.model_manager.clone();
+    let progress = state.download_progress.clone();
+    let progress_id = model_id.clone();
+
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        manager.download(&descriptor, &mut |downloaded, total| {
+            if let Ok(mut guard) = progress.lock() {
+                *guard = Some((progress_id.clone(), downloaded, total));
+            }
+        })
+    })
+    .await;
+
+    match result {
+        Ok(Ok(_installed)) => {}
+        Ok(Err(e)) => return Err(e),
+        Err(e) => {
+            return Err(VaultError::Model(format!(
+                "model download task failed: {e}"
+            )));
+        }
+    }
+
+    // Hot-load only when the downloaded model is the active one (first
+    // install, or an update of the active model). Downloading a
+    // non-active model must not reload the active model from disk.
+    let is_active = state
+        .model_manager
+        .active_model()
+        .is_some_and(|active| active.model_id == descriptor.id);
+    if is_active {
+        sync_chat_model(&state).await?;
+    }
+    Ok(model_status_dtos(&state))
+}
+
+#[tauri::command]
+pub async fn select_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<ModelStatusDto>, VaultError> {
+    // Load *before* persisting the selection: if the load fails, the
+    // manifest, the UI's active badge, and the chat handler all stay on
+    // the previously active model instead of desyncing.
+    let path = state
+        .model_manager
+        .installed_model_path(&model_id)
+        .ok_or_else(|| {
+            VaultError::Model(format!(
+                "model {model_id} is not installed or its file is missing"
+            ))
+        })?;
+    let model = load_model_at(path).await?;
+    state.model_manager.set_active_model(&model_id)?;
+    state.chat_handler.set_model(Some(model));
+    Ok(model_status_dtos(&state))
+}
+
+#[tauri::command]
+pub async fn remove_model(
+    state: State<'_, AppState>,
+    model_id: String,
+) -> Result<Vec<ModelStatusDto>, VaultError> {
+    let was_active = state
+        .model_manager
+        .active_model()
+        .is_some_and(|active| active.model_id == model_id);
+    state.model_manager.remove_model(&model_id)?;
+    // Only the removal of the active model affects the chat handler
+    // (it becomes model-less); removing any other model leaves the
+    // loaded model untouched instead of reloading it from disk.
+    if was_active {
+        sync_chat_model(&state).await?;
+    }
+    Ok(model_status_dtos(&state))
 }
