@@ -80,13 +80,16 @@ full rules are in `.agents/skills/repo-skills.md`. In short:
 - **Tests** live in per-crate `tests/` directories, not in `src/`.
 - **App data** for manual debugging: the platform app-data dir for
   `com.stern.app` (macOS: `~/Library/Application Support/com.stern.app/`).
-  The vault is `stern.db`; downloaded AI models live under `models/`.
+  The vault is `stern.db`; downloaded AI models and the ONNX Runtime
+  library live under `models/` (ADR-0008).
   Deleting the folder resets the app to first-run state.
 
 ## Security invariants — do not break these
 
 - **No network access** anywhere except the user-initiated AI model
-  download (ADR-0006). No telemetry, no update checks, no remote config.
+  download (ADR-0006) and the ONNX Runtime download that accompanies
+  the first model (ADR-0008). No telemetry, no update checks, no
+  remote config.
 - **Secrets never travel through chat.** Chat classifies intent only;
   secret values are entered and shown in the entry UI, and chat responses
   to vault actions suppress the echoed user message.
@@ -95,8 +98,9 @@ full rules are in `.agents/skills/repo-skills.md`. In short:
 - Do not weaken the crypto parameters in
   `core/stern-core/src/domain/vault/crypto_constants.rs` or the KDF
   configuration (ADR-0003) without a new ADR and a migration story.
-- Downloaded model files are executed only after SHA-256 verification
-  against the pinned catalog hash.
+- Downloaded model files — and the ONNX Runtime library — are
+  executed only after SHA-256 verification against the pinned
+  catalog hash.
 
 ## Shipping a model update
 
@@ -116,6 +120,17 @@ with a unique `id` and the SHA-256 from its Hugging Face file page; the
 UI, commands, and manifest handle the rest. Never add an entry without a
 verified pinned hash — an unverifiable model must not ship in the
 catalog.
+
+## Shipping a runtime update
+
+The ONNX Runtime is not bundled either (ADR-0008): `ort` builds with
+`load-dynamic`, and the library is downloaded with the first model.
+The runtime version is pinned to the `ort` crate's API level — when
+`ort` is bumped, update `RUNTIME_VERSION` and every `RUNTIME_CATALOG`
+entry in `core/stern-core/src/ai/model_manager.rs` (wheel URL, SHA-256
+from the PyPI JSON API, size, archive entry) in the same change, and
+run the ignored network smoke test:
+`cargo test -p stern-core --test runtime_smoke -- --ignored`.
 
 ## CI
 

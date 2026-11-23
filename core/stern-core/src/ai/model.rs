@@ -2,15 +2,41 @@ use crate::domain::vault::errors::VaultError;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// One-time ONNX Runtime initialization. The runtime library is not
+/// linked into the app (ort is built with `load-dynamic`); it is
+/// downloaded on demand and loaded from `runtime_path` here, exactly
+/// once per process — the first model load wins, and a runtime upgrade
+/// takes effect on the next app start.
+static ORT_INIT: OnceLock<Result<(), String>> = OnceLock::new();
+
+fn ensure_ort_initialized(runtime_path: &Path) -> Result<(), VaultError> {
+    let result = ORT_INIT.get_or_init(|| {
+        ort::init_from(runtime_path)
+            .map(|builder| {
+                builder.with_name("stern-ai").commit();
+            })
+            .map_err(|e| {
+                format!(
+                    "ONNX Runtime failed to load from {}: {e}",
+                    runtime_path.display()
+                )
+            })
+    });
+    match result {
+        Ok(()) => Ok(()),
+        Err(e) => Err(VaultError::Model(e.clone())),
+    }
+}
 
 pub struct AiModel {
     session: Arc<Mutex<Session>>,
 }
 
 impl AiModel {
-    pub fn new(model_path: &Path) -> Result<Self, VaultError> {
-        let _env = ort::environment::init().with_name("stern-ai");
+    pub fn new(runtime_path: &Path, model_path: &Path) -> Result<Self, VaultError> {
+        ensure_ort_initialized(runtime_path)?;
 
         let session = Session::builder()
             .map_err(|e| VaultError::KeyDerivationFailed(format!("builder: {e}")))?

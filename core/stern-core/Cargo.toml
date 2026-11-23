@@ -35,7 +35,12 @@ uuid = { version = "1", features = ["v4"] }
 blake3 = "1"
 tempfile = "3"
 tokio = { version = "1", default-features = false, features = ["fs", "io-util", "rt", "sync", "time", "macros"] }
-ort = "=2.0.0-rc.12"
+# ONNX Runtime is NOT linked into the binary: `load-dynamic` makes ort
+# dlopen the runtime library at first use, and the library itself is
+# downloaded on demand with the first model (see ai::model_manager).
+# The app therefore ships with no ONNX code or model at all.
+ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "api-24", "load-dynamic"] }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 ureq = "3"
 ndarray = "0.16"
 data-encoding = "2"

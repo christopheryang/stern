@@ -22,6 +22,15 @@
 //! the catalog before it becomes usable. A mismatch deletes the partial
 //! file and leaves any previously installed model untouched.
 //!
+//! The ONNX Runtime library itself is also not bundled: the app binary
+//! is built with ort's `load-dynamic` feature and ships with no ONNX
+//! code at all. The first model download also fetches the pinned
+//! runtime build for the current platform (see [`RUNTIME_CATALOG`]),
+//! verifies it the same way, and extracts just the shared library;
+//! [`ModelManager::runtime_path`] then hands it to `AiModel`, which
+//! dlopens it. Until a model (and therefore the runtime) is present,
+//! there is no AI in the app at all.
+//!
 //! The only network access in Stern is the download performed here, and
 //! it happens only when the user explicitly asks for it.
 
@@ -122,6 +131,86 @@ pub fn catalog_model(id: &str) -> Option<&'static ModelDescriptor> {
     MODEL_CATALOG.iter().find(|m| m.id == id)
 }
 
+/// The ONNX Runtime version this build loads. It must match the API
+/// level the `ort` crate is compiled against (api-24 for
+/// ort 2.0.0-rc.12, whose own bundled distribution is 1.31.0).
+pub const RUNTIME_VERSION: &str = "1.31.0";
+
+/// A downloadable ONNX Runtime build for one platform.
+///
+/// The archive is the official `onnxruntime` Python wheel for the
+/// platform, used purely as a distribution container: exactly one
+/// entry — the shared library — is extracted from it, and the wheel's
+/// SHA-256 (as published by the `PyPI` JSON API) is pinned here. The
+/// wheel is ~21–24 MB; the extracted library is what stays on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeDescriptor {
+    /// `std::env::consts::OS` value this build targets ("macos", "linux").
+    pub platform_os: &'static str,
+    /// `std::env::consts::ARCH` value this build targets.
+    pub platform_arch: &'static str,
+    /// Runtime version (also the version directory name).
+    pub version: &'static str,
+    /// Canonical download URL of the wheel archive.
+    pub archive_url: &'static str,
+    /// Lowercase hex SHA-256 of the wheel archive.
+    pub sha256: &'static str,
+    /// Size of the wheel archive in bytes (progress totals/display).
+    pub size_bytes: u64,
+    /// Path of the shared library inside the wheel.
+    pub archive_entry: &'static str,
+    /// File name the library is stored under in its version directory.
+    pub lib_file_name: &'static str,
+}
+
+/// Every platform this build can fetch an ONNX Runtime for — the
+/// platforms Stern ships (macOS Apple Silicon, Linux `x86_64`).
+pub static RUNTIME_CATALOG: &[RuntimeDescriptor] = &[
+    RuntimeDescriptor {
+        platform_os: "macos",
+        platform_arch: "aarch64",
+        version: RUNTIME_VERSION,
+        archive_url: "https://files.pythonhosted.org/packages/e0/2b/117f94d73a3bac4276c285c47e384e1b3ea67b191aa4c7592df9d3f4a136/onnxruntime-1.31.0-cp313-cp313-macosx_14_0_arm64.whl",
+        sha256: "0ba02a44acb6203040354d9a1f160e3f37a43feac7bb05caa3e0ea545efed505",
+        size_bytes: 20_881_803,
+        archive_entry: "onnxruntime/capi/libonnxruntime.1.31.0.dylib",
+        lib_file_name: "libonnxruntime.1.31.0.dylib",
+    },
+    RuntimeDescriptor {
+        platform_os: "linux",
+        platform_arch: "x86_64",
+        version: RUNTIME_VERSION,
+        archive_url: "https://files.pythonhosted.org/packages/0d/ac/67ebbaab4b3083f2a6b27ee6c4aa400c7f8d6c72b5499aac7e4cd6ba74f5/onnxruntime-1.31.0-cp313-cp313-manylinux_2_28_x86_64.whl",
+        sha256: "37fd78cee5160c7a43a1730ccb3682ffd880af9c9e80385d625c0c2f8b125809",
+        size_bytes: 23_760_708,
+        archive_entry: "onnxruntime/capi/libonnxruntime.so.1.31.0",
+        lib_file_name: "libonnxruntime.so.1.31.0",
+    },
+];
+
+/// The runtime build for the platform this binary is running on, if
+/// the catalog carries one.
+#[must_use]
+pub fn current_runtime() -> Option<&'static RuntimeDescriptor> {
+    RUNTIME_CATALOG.iter().find(|r| {
+        r.platform_os == std::env::consts::OS && r.platform_arch == std::env::consts::ARCH
+    })
+}
+
+/// Record of the ONNX Runtime library that has been downloaded,
+/// verified, and extracted on this device.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InstalledRuntime {
+    pub version: String,
+    pub lib_file_name: String,
+    /// Hex SHA-256 of the downloaded archive (matches the catalog).
+    pub sha256: String,
+    /// Actual number of archive bytes downloaded.
+    pub size_bytes: u64,
+    /// RFC 3339 timestamp of the install.
+    pub installed_at: String,
+}
+
 /// Record of a model that has been downloaded and verified on this device.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InstalledModel {
@@ -144,6 +233,11 @@ pub struct ModelManifest {
     pub models: Vec<InstalledModel>,
     #[serde(default)]
     pub active_model_id: Option<String>,
+    /// The downloaded ONNX Runtime library, if one is installed.
+    /// Absent in manifests written before the runtime became a
+    /// download, hence the default.
+    #[serde(default)]
+    pub runtime: Option<InstalledRuntime>,
 }
 
 /// Where an installed model stands relative to the catalog.
@@ -266,6 +360,7 @@ impl ModelManager {
             return ModelManifest {
                 active_model_id: Some(legacy.model_id.clone()),
                 models: vec![legacy],
+                runtime: None,
             };
         }
         ModelManifest::default()
@@ -306,6 +401,126 @@ impl ModelManager {
         let installed = self.active_model()?;
         let path = self.installed_file_path(&installed);
         path.exists().then_some(path)
+    }
+
+    fn runtime_version_dir(&self, version: &str) -> PathBuf {
+        self.models_dir.join("runtime").join(version)
+    }
+
+    /// Path of the installed ONNX Runtime shared library, if one is
+    /// recorded in the manifest *and* still present on disk. This is
+    /// the library `AiModel` dlopens; without it no model can load.
+    #[must_use]
+    pub fn runtime_path(&self) -> Option<PathBuf> {
+        let runtime = self.manifest().runtime?;
+        let path = self
+            .runtime_version_dir(&runtime.version)
+            .join(&runtime.lib_file_name);
+        path.exists().then_some(path)
+    }
+
+    /// Make sure the ONNX Runtime library for this platform is
+    /// installed, downloading, verifying, and extracting it if not.
+    /// Returns the library path. Called as the first phase of a model
+    /// download, and on its own when a model is selected on a device
+    /// whose manifest predates the runtime download (models installed,
+    /// runtime missing).
+    pub fn ensure_runtime(
+        &self,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<PathBuf, VaultError> {
+        if let Some(path) = self.runtime_path() {
+            return Ok(path);
+        }
+        let Some(descriptor) = current_runtime() else {
+            return Err(VaultError::Model(format!(
+                "no ONNX Runtime build is catalogued for {}-{}",
+                std::env::consts::OS,
+                std::env::consts::ARCH
+            )));
+        };
+
+        let version_dir = self.runtime_version_dir(descriptor.version);
+        fs::create_dir_all(&version_dir)
+            .map_err(|e| VaultError::Model(format!("create runtime dir: {e}")))?;
+        let archive_path = version_dir.join("onnxruntime.whl.part");
+        let lib_path = version_dir.join(descriptor.lib_file_name);
+
+        let installed = (|| -> Result<InstalledRuntime, VaultError> {
+            let (mut reader, total) =
+                Self::open_download(descriptor.archive_url, descriptor.size_bytes)?;
+            let (digest, downloaded) = Self::stream_hash_to_file(
+                &mut reader,
+                total,
+                progress,
+                &archive_path,
+                "runtime archive",
+            )?;
+            if !digest.eq_ignore_ascii_case(descriptor.sha256) {
+                return Err(VaultError::Model(format!(
+                    "runtime integrity check failed: expected SHA-256 {}, got {digest}",
+                    descriptor.sha256
+                )));
+            }
+            Self::extract_zip_entry(&archive_path, descriptor.archive_entry, &lib_path)?;
+            Ok(InstalledRuntime {
+                version: descriptor.version.to_string(),
+                lib_file_name: descriptor.lib_file_name.to_string(),
+                sha256: digest,
+                size_bytes: downloaded,
+                installed_at: chrono::Utc::now().to_rfc3339(),
+            })
+        })();
+        if let Err(e) = installed {
+            if let Err(cleanup) = fs::remove_file(&archive_path) {
+                tracing::warn!("failed to remove partial runtime archive: {cleanup}");
+            }
+            return Err(e);
+        }
+        let installed = installed?;
+        if let Err(e) = fs::remove_file(&archive_path) {
+            tracing::warn!("failed to remove runtime archive after extraction: {e}");
+        }
+
+        let _guard = self.lock_manifest();
+        let mut manifest = self.manifest();
+        manifest.runtime = Some(installed);
+        self.write_manifest(&manifest)?;
+        Ok(lib_path)
+    }
+
+    /// Extract one entry of a ZIP archive (a wheel is a ZIP) to `dest`,
+    /// via a `.part` file and an atomic rename, and mark it executable
+    /// on Unix — a dlopen target needs the execute bit.
+    fn extract_zip_entry(
+        archive_path: &Path,
+        entry_name: &str,
+        dest: &Path,
+    ) -> Result<(), VaultError> {
+        let file = fs::File::open(archive_path)
+            .map_err(|e| VaultError::Model(format!("open runtime archive: {e}")))?;
+        let mut archive = zip::ZipArchive::new(file)
+            .map_err(|e| VaultError::Model(format!("read runtime archive: {e}")))?;
+        let mut entry = archive
+            .by_name(entry_name)
+            .map_err(|e| VaultError::Model(format!("runtime library missing from archive: {e}")))?;
+        let part_path = dest.with_extension("part");
+        let mut out = fs::File::create(&part_path)
+            .map_err(|e| VaultError::Model(format!("create runtime library file: {e}")))?;
+        std::io::copy(&mut entry, &mut out)
+            .map_err(|e| VaultError::Model(format!("extract runtime library: {e}")))?;
+        out.flush()
+            .map_err(|e| VaultError::Model(format!("flush runtime library: {e}")))?;
+        drop(out);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&part_path, fs::Permissions::from_mode(0o755))
+                .map_err(|e| VaultError::Model(format!("chmod runtime library: {e}")))?;
+        }
+        fs::rename(&part_path, dest)
+            .map_err(|e| VaultError::Model(format!("move runtime library into place: {e}")))?;
+        Ok(())
     }
 
     /// Path of one installed model's verified file, if it is recorded in
@@ -385,34 +600,33 @@ impl ModelManager {
         }
     }
 
-    /// Download the catalog model over HTTPS and install it.
-    ///
-    /// `progress` is called with `(downloaded_bytes, total_bytes)` as the
-    /// body streams in. This is the only network call in Stern.
-    pub fn download(
-        &self,
-        descriptor: &ModelDescriptor,
-        progress: &mut dyn FnMut(u64, u64),
-    ) -> Result<InstalledModel, VaultError> {
-        // Explicit timeouts so a stalled download fails instead of hanging
-        // forever: connecting and receiving the response headers are
-        // short, and `timeout_per_read` restarts on every read, so a large
-        // model on a slow link is fine as long as bytes keep arriving —
-        // 60 seconds without a single successful read aborts the download.
-        let agent: ureq::Agent = ureq::Agent::config_builder()
+    /// The HTTP agent for downloads, with explicit timeouts so a
+    /// stalled download fails instead of hanging forever: connecting
+    /// and receiving the response headers are short, and
+    /// `timeout_per_read` restarts on every read, so a large file on a
+    /// slow link is fine as long as bytes keep arriving — 60 seconds
+    /// without a single successful read aborts the download.
+    fn download_agent() -> ureq::Agent {
+        ureq::Agent::config_builder()
             .timeout_connect(Some(Duration::from_secs(15)))
             .timeout_recv_response(Some(Duration::from_secs(30)))
             .timeout_per_read(Some(Duration::from_mins(1)))
             .build()
-            .into();
-        let response = agent
-            .get(descriptor.download_url)
+            .into()
+    }
+
+    /// Open an HTTPS download and return its body reader plus the total
+    /// byte count (the `Content-Length` when the server sends a usable
+    /// one, otherwise `fallback_total`).
+    fn open_download(url: &str, fallback_total: u64) -> Result<(Box<dyn Read>, u64), VaultError> {
+        let response = Self::download_agent()
+            .get(url)
             .call()
-            .map_err(|e| VaultError::Model(format!("model download failed: {e}")))?;
+            .map_err(|e| VaultError::Model(format!("download failed: {e}")))?;
 
         if !response.status().is_success() {
             return Err(VaultError::Model(format!(
-                "model download failed: HTTP {}",
+                "download failed: HTTP {}",
                 response.status()
             )));
         }
@@ -423,10 +637,90 @@ impl ModelManager {
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<u64>().ok())
             .filter(|&n| n > 0)
-            .unwrap_or(descriptor.size_bytes);
+            .unwrap_or(fallback_total);
 
-        let mut reader = response.into_body().into_reader();
-        self.install_from_reader(descriptor, &mut reader, total, progress)
+        Ok((Box::new(response.into_body().into_reader()), total))
+    }
+
+    /// Stream `reader` into `part_path` while hashing, reporting
+    /// progress. Returns the hex SHA-256 and the byte count; the caller
+    /// compares the digest against its catalog pin.
+    fn stream_hash_to_file(
+        reader: &mut dyn Read,
+        total_bytes: u64,
+        progress: &mut dyn FnMut(u64, u64),
+        part_path: &Path,
+        what: &str,
+    ) -> Result<(String, u64), VaultError> {
+        let mut file = fs::File::create(part_path)
+            .map_err(|e| VaultError::Model(format!("create {what} file: {e}")))?;
+
+        let mut hasher = Sha256::new();
+        let mut downloaded: u64 = 0;
+        let mut buffer = vec![0u8; 64 * 1024].into_boxed_slice();
+        loop {
+            let n = reader
+                .read(&mut buffer)
+                .map_err(|e| VaultError::Model(format!("read {what} download: {e}")))?;
+            if n == 0 {
+                break;
+            }
+            let chunk = buffer
+                .get(..n)
+                .ok_or_else(|| VaultError::Model("read buffer overflow".to_string()))?;
+            hasher.update(chunk);
+            file.write_all(chunk)
+                .map_err(|e| VaultError::Model(format!("write {what} file: {e}")))?;
+            let n_u64 = u64::try_from(n)
+                .map_err(|_| VaultError::Model("read size overflow".to_string()))?;
+            downloaded = downloaded.saturating_add(n_u64);
+            progress(downloaded, total_bytes);
+        }
+        file.flush()
+            .map_err(|e| VaultError::Model(format!("flush {what} file: {e}")))?;
+        drop(file);
+
+        Ok((
+            data_encoding::HEXLOWER.encode(&hasher.finalize()),
+            downloaded,
+        ))
+    }
+
+    /// Download the catalog model over HTTPS and install it, fetching
+    /// the ONNX Runtime first if this device does not have it yet.
+    ///
+    /// `progress` is called with `(downloaded_bytes, total_bytes)` as
+    /// the bytes stream in; the totals span both phases (runtime, then
+    /// model), so the bar runs once from empty to full. These are the
+    /// only network calls in Stern.
+    pub fn download(
+        &self,
+        descriptor: &ModelDescriptor,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<InstalledModel, VaultError> {
+        // Phase 1: the runtime, if missing. Its size is folded into the
+        // progress totals so the two phases read as one download.
+        let runtime_size = match current_runtime() {
+            Some(runtime) if self.runtime_path().is_none() => runtime.size_bytes,
+            _ => 0,
+        };
+        if runtime_size > 0 {
+            let combined = runtime_size.saturating_add(descriptor.size_bytes);
+            self.ensure_runtime(&mut |downloaded, _| progress(downloaded, combined))?;
+        }
+
+        // Phase 2: the model itself, offset by the runtime bytes.
+        let (mut reader, model_total) =
+            Self::open_download(descriptor.download_url, descriptor.size_bytes)?;
+        let combined_total = runtime_size.saturating_add(model_total);
+        self.install_from_reader(
+            descriptor,
+            &mut reader,
+            model_total,
+            &mut |downloaded, _| {
+                progress(runtime_size.saturating_add(downloaded), combined_total);
+            },
+        )
     }
 
     /// Install a model from any byte stream: stream to a `.part` file while
@@ -485,35 +779,8 @@ impl ModelManager {
         progress: &mut dyn FnMut(u64, u64),
         part_path: &Path,
     ) -> Result<InstalledModel, VaultError> {
-        let mut file = fs::File::create(part_path)
-            .map_err(|e| VaultError::Model(format!("create model file: {e}")))?;
-
-        let mut hasher = Sha256::new();
-        let mut downloaded: u64 = 0;
-        let mut buffer = vec![0u8; 64 * 1024].into_boxed_slice();
-        loop {
-            let n = reader
-                .read(&mut buffer)
-                .map_err(|e| VaultError::Model(format!("read model download: {e}")))?;
-            if n == 0 {
-                break;
-            }
-            let chunk = buffer
-                .get(..n)
-                .ok_or_else(|| VaultError::Model("read buffer overflow".to_string()))?;
-            hasher.update(chunk);
-            file.write_all(chunk)
-                .map_err(|e| VaultError::Model(format!("write model file: {e}")))?;
-            let n_u64 = u64::try_from(n)
-                .map_err(|_| VaultError::Model("read size overflow".to_string()))?;
-            downloaded = downloaded.saturating_add(n_u64);
-            progress(downloaded, total_bytes);
-        }
-        file.flush()
-            .map_err(|e| VaultError::Model(format!("flush model file: {e}")))?;
-        drop(file);
-
-        let digest = data_encoding::HEXLOWER.encode(&hasher.finalize());
+        let (digest, downloaded) =
+            Self::stream_hash_to_file(reader, total_bytes, progress, part_path, "model")?;
         if !digest.eq_ignore_ascii_case(descriptor.sha256) {
             return Err(VaultError::Model(format!(
                 "model integrity check failed: expected SHA-256 {}, got {digest}",
@@ -598,7 +865,10 @@ impl ModelManager {
         if manifest.active_model_id.as_deref() == Some(model_id) {
             manifest.active_model_id = None;
         }
-        if manifest.models.is_empty() && manifest.active_model_id.is_none() {
+        if manifest.models.is_empty()
+            && manifest.active_model_id.is_none()
+            && manifest.runtime.is_none()
+        {
             let path = self.manifest_path();
             if path.exists() {
                 fs::remove_file(&path)
@@ -649,5 +919,87 @@ pub fn version_is_newer(latest: &str, installed: &str) -> bool {
             }
         }
         _ => latest != installed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn runtime_catalog_covers_this_platform() {
+        let runtime = current_runtime().expect("this platform must be catalogued");
+        assert_eq!(runtime.version, RUNTIME_VERSION);
+        assert_eq!(runtime.sha256.len(), 64);
+        assert!(runtime.archive_entry.ends_with(
+            runtime
+                .lib_file_name
+                .strip_prefix("libonnxruntime")
+                .unwrap_or("")
+        ));
+        assert!(runtime.archive_entry.contains(RUNTIME_VERSION));
+    }
+
+    #[test]
+    fn manifest_round_trips_the_runtime_record() {
+        let manifest = ModelManifest {
+            models: Vec::new(),
+            active_model_id: None,
+            runtime: Some(InstalledRuntime {
+                version: RUNTIME_VERSION.to_string(),
+                lib_file_name: "libonnxruntime.1.31.0.dylib".to_string(),
+                sha256: "ab".repeat(32),
+                size_bytes: 42,
+                installed_at: "2026-11-22T00:00:00+00:00".to_string(),
+            }),
+        };
+        let json = serde_json::to_string(&manifest).unwrap();
+        let parsed: ModelManifest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, manifest);
+
+        // A manifest written before the runtime record existed parses
+        // with no runtime installed.
+        let legacy: ModelManifest =
+            serde_json::from_str(r#"{"models":[],"active_model_id":null}"#).unwrap();
+        assert_eq!(legacy.runtime, None);
+    }
+
+    #[test]
+    fn extract_zip_entry_writes_the_library_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("runtime.whl");
+        let payload = b"fake onnxruntime library bytes";
+        {
+            let file = fs::File::create(&archive_path).unwrap();
+            let mut zip = zip::ZipWriter::new(file);
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("onnxruntime/capi/libonnxruntime.1.31.0.dylib", options)
+                .unwrap();
+            zip.write_all(payload).unwrap();
+            zip.finish().unwrap();
+        }
+        let dest = dir.path().join("libonnxruntime.1.31.0.dylib");
+        ModelManager::extract_zip_entry(
+            &archive_path,
+            "onnxruntime/capi/libonnxruntime.1.31.0.dylib",
+            &dest,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), payload);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&dest).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o755);
+        }
+    }
+
+    #[test]
+    fn fresh_manager_has_no_runtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ModelManager::new(dir.path().join("models"));
+        assert_eq!(manager.runtime_path(), None);
     }
 }
