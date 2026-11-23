@@ -133,9 +133,7 @@ impl AiModel {
             // the CPU provider alone does not override that policy;
             // `with_auto_device(PreferCPU)` replaces it. These models
             // are small; the CPU is fast enough.
-            .with_execution_providers([
-                ort::ep::CPU::default().build()
-            ])
+            .with_execution_providers([ort::ep::CPU::default().build()])
             .map_err(|e| VaultError::KeyDerivationFailed(format!("execution providers: {e}")))?
             .with_auto_device(ort::session::builder::AutoDevicePolicy::PreferCPU)
             .map_err(|e| VaultError::KeyDerivationFailed(format!("device policy: {e}")))?
