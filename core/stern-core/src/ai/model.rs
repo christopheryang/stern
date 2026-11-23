@@ -1,6 +1,7 @@
 use crate::ai::intent::Intent;
 use crate::ai::model_manager::PromptStyle;
 use crate::domain::vault::errors::VaultError;
+use ort::environment::Environment;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::{DynTensor, DynValue, Shape, Tensor, TensorElementType, ValueType};
 use serde::Deserialize;
@@ -11,65 +12,70 @@ use tokenizers::Tokenizer;
 
 /// One-time ONNX Runtime initialization. The runtime library is not
 /// linked into the app (ort is built with `load-dynamic`); it is
-/// downloaded on demand and loaded from `runtime_path` here. Only a
-/// *successful* initialization is cached, exactly once per process —
-/// the first model load wins, and a runtime upgrade takes effect on
-/// the next app start. A failure is NOT cached: if loading fails
-/// because the runtime file is missing or corrupt and the runtime is
-/// later repaired or re-downloaded, the next model load retries
-/// instead of replaying the first error until the app restarts.
+/// downloaded on demand and loaded from `runtime_path` here, and
+/// the `Environment` it creates is held for the process lifetime —
+/// since ort rc.15, sessions are built against an explicit
+/// environment instead of a global one. Only a *successful*
+/// initialization is cached, exactly once per process — the first
+/// model load wins, and a runtime upgrade takes effect on the next
+/// app start. A failure is NOT cached: if loading fails because the
+/// runtime file is missing or corrupt and the runtime is later
+/// repaired or re-downloaded, the next model load retries instead
+/// of replaying the first error until the app restarts.
 /// `ORT_INIT_LOCK` serializes initialization attempts so two
 /// concurrent loads cannot race `ort::init_from`.
-static ORT_INIT: OnceLock<()> = OnceLock::new();
+static ORT_ENV: OnceLock<Environment> = OnceLock::new();
 static ORT_INIT_LOCK: Mutex<()> = Mutex::new(());
 
 fn ensure_ort_initialized(runtime_path: &Path) -> Result<(), VaultError> {
-    if ORT_INIT.get().is_some() {
+    if ORT_ENV.get().is_some() {
         return Ok(());
     }
     let _guard = ORT_INIT_LOCK
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    if ORT_INIT.get().is_some() {
+    if ORT_ENV.get().is_some() {
         return Ok(());
     }
-    // Never hand `ort::init_from` a path that is not there. In ort
-    // rc.12's `load-dynamic` build, a failed library load does not
-    // return an error: building the error re-enters the API setup
-    // that the in-progress load itself owns, and the call deadlocks
-    // (found by the `failed_ort_init_is_not_cached` test hanging
-    // inside `ort::setup_api`). Fail here instead, with our own
-    // error — the missing-file case is also the realistic one
-    // (runtime not downloaded yet, or deleted after install). A
-    // file that exists but is corrupt still reaches `init_from`
-    // and remains exposed to that ort bug; there is no way to
-    // validate a dylib from outside it.
+    // Fail on a missing runtime file with our own error, naming the
+    // path: it is the realistic failure (runtime not downloaded
+    // yet, or deleted after install) and deserves a clearer message
+    // than the loader's. (In ort rc.12 this check was load-bearing:
+    // a failed `init_from` deadlocked instead of returning an
+    // error, because building the error re-entered the API setup
+    // the in-progress load owned. rc.15 fixed that upstream — load
+    // failures now return a plain `LoadError` — so a corrupt file
+    // that reaches `init_from` simply errors.)
     if !runtime_path.is_file() {
         return Err(VaultError::Model(format!(
             "ONNX Runtime is not installed: no library at {}",
             runtime_path.display()
         )));
     }
-    let committed = ort::init_from(runtime_path)
-        .map(|builder| builder.with_name("stern-ai").commit())
+    let environment = ort::init_from(runtime_path)
         .map_err(|e| {
             VaultError::Model(format!(
                 "ONNX Runtime failed to load from {}: {e}",
                 runtime_path.display()
             ))
-        })?;
-    if !committed {
-        return Err(VaultError::Model(format!(
-            "ONNX Runtime failed to load from {}: the environment was not created",
-            runtime_path.display()
-        )));
-    }
+        })?
+        .with_name("stern-ai")
+        .build()
+        .map_err(|e| VaultError::Model(format!("ONNX Runtime environment failed to start: {e}")))?;
     // Holding the lock with the `get` check above makes a lost race
     // unreachable today; map it to success anyway — the environment
     // exists either way, which is all this function promises.
-    match ORT_INIT.set(()) {
-        Ok(()) | Err(()) => Ok(()),
+    match ORT_ENV.set(environment) {
+        Ok(()) | Err(_) => Ok(()),
     }
+}
+
+/// The process-wide ONNX Runtime environment, once
+/// `ensure_ort_initialized` has succeeded.
+fn ort_environment() -> Result<&'static Environment, VaultError> {
+    ORT_ENV
+        .get()
+        .ok_or_else(|| VaultError::Model("ONNX Runtime is not initialized".to_string()))
 }
 
 /// The most tokens one parse may generate. A command JSON is short;
@@ -116,7 +122,7 @@ impl AiModel {
             ))
         })?;
 
-        let session = Session::builder()
+        let session = Session::builder(ort_environment()?)
             .map_err(|e| VaultError::KeyDerivationFailed(format!("builder: {e}")))?
             // CPU only, deliberately: parsing must behave identically
             // on every machine. ort's session builder defaults the EP
@@ -128,7 +134,7 @@ impl AiModel {
             // `with_auto_device(PreferCPU)` replaces it. These models
             // are small; the CPU is fast enough.
             .with_execution_providers([
-                ort::execution_providers::CPUExecutionProvider::default().build()
+                ort::ep::CPU::default().build()
             ])
             .map_err(|e| VaultError::KeyDerivationFailed(format!("execution providers: {e}")))?
             .with_auto_device(ort::session::builder::AutoDevicePolicy::PreferCPU)

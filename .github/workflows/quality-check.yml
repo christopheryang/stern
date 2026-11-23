@@ -145,7 +145,7 @@ jobs:
       # Cache the RustSec advisory database between runs: cargo audit
       # otherwise clones it fresh on every PR.
       - name: Cache the RustSec advisory database
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cargo/advisory-db
           key: cargo-advisory-db
