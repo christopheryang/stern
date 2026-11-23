@@ -39,7 +39,7 @@ tokio = { version = "1", default-features = false, features = ["fs", "io-util", 
 # dlopen the runtime library at first use, and the library itself is
 # downloaded on demand with the first model (see ai::model_manager).
 # The app therefore ships with no ONNX code or model at all.
-ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "api-24", "load-dynamic"] }
+ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "ndarray", "tracing", "api-24", "load-dynamic"] }
 # Wheel (ZIP) extraction for the runtime download is hand-rolled in
 # ai::model_manager (stored/deflate entries only, over an archive whose
 # SHA-256 was verified first); flate2 supplies just the deflate codec.

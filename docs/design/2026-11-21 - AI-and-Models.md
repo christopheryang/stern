@@ -96,11 +96,15 @@ the next app start; the library initializes once per process — a
 failed initialization is not cached, so a repaired or re-downloaded
 runtime loads on the next attempt without a restart. Before calling
 into ort, the loader checks the library file exists and fails with
-its own error if it does not: in ort rc.12's `load-dynamic` build a
-failed library load deadlocks inside ort's error construction
-instead of returning an error, so a missing runtime must never
-reach `init_from`. (A present-but-corrupt library still can; that
-is an upstream ort bug, to be re-checked at the next ort bump.)
+its own error if it does not — the clearer message is worth it, and
+in ort rc.12's `load-dynamic` build the check was load-bearing: a
+failed library load deadlocked inside ort's error construction
+instead of returning an error. ort rc.15 fixed that upstream (load
+failures return a plain `LoadError`), so a present-but-corrupt
+library now simply errors. rc.15 also made the environment
+explicit: `init_from(..).build()` yields an `Environment` the app
+holds for the process lifetime, and sessions are built against it
+(`Session::builder(&env)`).
 
 ### Install integrity
 
