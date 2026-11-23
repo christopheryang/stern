@@ -10,9 +10,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
-ulid = { version = "1", features = ["serde"] }
+ulid = { version = "3", features = ["serde"] }
 async-trait = "0.1"
-rusqlite = { version = "0.41", features = ["bundled"] }
+rusqlite = { version = "0.43", features = ["bundled"] }
 
 chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc", "getrandom"] }
 aes = "0.9"
@@ -30,7 +30,7 @@ base64 = "0.22"
 tracing = { version = "0.1", features = ["attributes"] }
 arboard = { version = "3", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
-region = "3"
+region = "4"
 uuid = { version = "1", features = ["v4"] }
 blake3 = "1"
 tempfile = "3"
@@ -45,7 +45,7 @@ ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "
 # SHA-256 was verified first); flate2 supplies just the deflate codec.
 flate2 = "1"
 ureq = "3"
-ndarray = "0.16"
+ndarray = "0.17"
 data-encoding = "2"
 
 [dependencies.sea-orm]
