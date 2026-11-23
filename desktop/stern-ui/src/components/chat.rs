@@ -58,15 +58,16 @@ async fn invoke_chat(content: String) -> Result<(String, Vec<String>, bool), Str
         .and_then(|v| v.as_str())
         .map(String::from)
         .ok_or_else(|| "no message in response".to_string())?;
-    let options = response
-        .get("options")
-        .and_then(|v| v.as_array())
-        .map_or_default(|items| {
-            items
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect()
-        });
+    // Written as a match, not map(..).unwrap_or_default() (CI's
+    // clippy 1.100 rejects that chain) and not map_or_default()
+    // (still unstable on the local 1.97 toolchain).
+    let options = match response.get("options").and_then(|v| v.as_array()) {
+        Some(items) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(String::from))
+            .collect(),
+        None => Vec::new(),
+    };
     let input_sensitive = response
         .get("input_sensitive")
         .and_then(serde_json::Value::as_bool)
