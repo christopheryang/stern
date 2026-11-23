@@ -45,8 +45,10 @@ core/
                               implementation for tests
       backup.rs, clipboard.rs Encrypted export/import; clipboard with
                               auto-clear
-    src/ai/                   Chat handler, intent classifier, ONNX model
-                              wrapper, model manager (download/updates)
+    src/ai/                   Chat handler, guided conversation, intent
+                              classifier, ONNX model wrapper, model
+                              manager (models, tokenizers, runtime;
+                              download/updates)
   stern-ipc/                  Serde DTOs for the Tauri boundary — the
                               only types allowed to cross it
 desktop/
@@ -55,8 +57,9 @@ desktop/
                               capabilities/, tauri.conf.json (packaging)
   stern-app/                  Leptos CSR entry point; Trunk serves it in
                               dev (port 1420) and builds dist/ for release
-  stern-ui/                   Leptos components (chat, settings/model
-                              picker, app shell). Depends on no other
+  stern-ui/                   Leptos components (auth setup/login,
+                              chat, settings/model picker, app shell).
+                              Depends on no other
                               crate in the workspace — it talks to the
                               shell through window.__TAURI__.core.invoke
                               and mirrors the DTOs it needs locally.
@@ -80,10 +83,15 @@ the blocking download on `tauri::async_runtime::spawn_blocking`.
 
 ## Key flows
 
-**Unlock.** Frontend → `unlock_vault` command → vault service derives
-keys from password + device Secret Key (see [2026-11-21 - Security.md](../design/2026-11-21%20-%20Security.md))
+**Unlock.** The shell gates on the vault before anything else: the
+first run shows the setup screen (`create_vault`), every later launch
+shows the login screen until the vault unlocks, and only then do the
+model gate and the chat become reachable — Settings included, so
+setup precedes any model download. Frontend → `unlock_vault` command
+→ vault service derives keys from password + device Secret Key (see [2026-11-21 - Security.md](../design/2026-11-21%20-%20Security.md))
 → constant-time verify against `VaultMeta` → session holds the master
-key in `SecretMem`. Locking drops the session and zeroizes the keys.
+key in `SecretMem`. Locking (the header Lock button, or app exit)
+drops the session and zeroizes the keys.
 
 **Store / retrieve an entry.** Commands delegate to the vault service,
 which asks the repository for the entry's ciphertext, unwraps its DEK
@@ -94,18 +102,26 @@ DEK per write). Plaintext exists only for the duration of the call.
 
 *Storing an entry: the value crosses into the core as a DTO and reaches the database as ciphertext; retrieval returns the revealed value along the dashed path.*
 
-**Chat.** Frontend → `send_chat` → `ChatHandler` classifies the message
-(rule-based today; [2026-11-21 - AI-and-Models.md](../design/2026-11-21%20-%20AI-and-Models.md)) → maps the
-intent to an `Action` → the shell performs vault actions through native
-UI flows. Secret values are never entered in, or echoed to, chat: for
-vault actions the response suppresses the user's message text.
+**Chat.** Frontend → `send_chat_message` → `ChatHandler`: the
+downloaded model parses the message into an intent when one is loaded
+([2026-11-22 - Model-Backed-Chat.md](../design/2026-11-22%20-%20Model-Backed-Chat.md));
+the rule classifier covers for it and cross-checks its greetings. A
+store the parser couldn't complete runs as a guided conversation —
+deterministic prompts, no model prose. Before any vault-touching
+request, a setup/unlock gate runs in chat and replays the interrupted
+message once the vault is ready. The intent maps to an `Action`, which
+the shell executes against the vault service; retrieval answers from
+the real vault in chat. Secret fields are answered into a peek-mask
+input and are never echoed or shown in the transcript.
 
-**Model download.** Frontend card → `download_model` → `ModelManager`
-streams the catalog file to a `.part` file while hashing → SHA-256 must
-match the pinned catalog hash → atomic rename into
-`models/<id>/<version>/`, manifest written, old versions pruned → the
-shell loads the model into the `ChatHandler`. Any failure before the
-rename leaves the previous state untouched.
+**Model download.** Settings picker → `download_model` →
+`ModelManager` streams the catalog file to a `.part` file while
+hashing → SHA-256 must match the pinned catalog hash → atomic rename
+into `models/<id>/<version>/`, manifest written, old versions pruned
+→ the shell loads the model into the `ChatHandler`. The download also
+fetches the model's tokenizer — and, on the first download, the ONNX
+Runtime library — each verified against its own pinned hash. Any
+failure before the rename leaves the previous state untouched.
 
 ## On-disk layout (app data dir, `com.stern.app`)
 
@@ -115,6 +131,9 @@ models/
   installed.json                      Manifest: which model + version
   <model-id>/<version>/model.onnx     Verified model files, one dir
                                       per version so updates are swaps
+  <model-id>/<version>/tokenizer.json The model's tokenizer, pinned too
+  runtime/<version>/                  The downloaded ONNX Runtime
+                                      library (ADR-0008)
 ```
 
 Deleting the whole folder returns the app to first-run state.

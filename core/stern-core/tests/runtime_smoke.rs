@@ -15,7 +15,12 @@ fn ensure_runtime_downloads_and_dlopen_works() {
     // A bogus model path must fail at the *model* stage, not the
     // runtime stage: reaching the session error proves init_from
     // loaded the downloaded library.
-    let msg = match AiModel::new(&path, std::path::Path::new("/nonexistent/model.onnx")) {
+    let msg = match AiModel::new(
+        &path,
+        std::path::Path::new("/nonexistent/model.onnx"),
+        std::path::Path::new("/nonexistent/tokenizer.json"),
+        stern_core::ai::model_manager::PromptStyle::ChatMl,
+    ) {
         Ok(_) => panic!("a nonexistent model must not load"),
         Err(e) => format!("{e}"),
     };

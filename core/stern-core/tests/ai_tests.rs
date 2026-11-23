@@ -1,6 +1,6 @@
 #![allow(clippy::unwrap_used)]
 
-use stern_core::ai::chat::{Action, ChatHandler};
+use stern_core::ai::chat::{Action, ChatHandler, EntryCandidate};
 use stern_core::ai::intent::{classify_intent, Intent};
 
 fn assert_intent(text: &str, expected: Intent) {
@@ -140,7 +140,7 @@ fn store_wifi_password() {
 fn retrieve_with_for() {
     let intent = classify_intent("find my password for GitHub");
     match intent {
-        Intent::RetrieveSecret { name } => {
+        Intent::RetrieveSecret { name, .. } => {
             assert!(name.to_lowercase().contains("github"), "name: {name}");
         }
         other => panic!("expected RetrieveSecret, got: {other:?}"),
@@ -151,7 +151,7 @@ fn retrieve_with_for() {
 fn retrieve_with_about() {
     let intent = classify_intent("what about my Gmail credentials");
     match intent {
-        Intent::RetrieveSecret { name } => {
+        Intent::RetrieveSecret { name, .. } => {
             assert!(name.to_lowercase().contains("gmail"), "name: {name}");
         }
         other => panic!("expected RetrieveSecret, got: {other:?}"),
@@ -330,7 +330,7 @@ fn unknown_empty_ish() {
 fn retrieve_with_named() {
     let intent = classify_intent("get credential called WorkEmail");
     match intent {
-        Intent::RetrieveSecret { name } => {
+        Intent::RetrieveSecret { name, .. } => {
             assert!(name.contains("workemail"), "name: {name}");
         }
         other => panic!("expected RetrieveSecret, got: {other:?}"),
@@ -366,7 +366,11 @@ fn classify_intent_is_deterministic() {
 }
 
 fn handler() -> ChatHandler {
-    ChatHandler::new(None)
+    // The handler fails closed by default now; a test that wants
+    // a ready vault says so, the way the app syncs before use.
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    handler
 }
 
 #[test]
@@ -408,7 +412,7 @@ fn retrieve_response() {
     let resp = handler().process_message("find my password for GitHub");
     assert!(resp.message.contains("github"), "message: {}", resp.message);
     match resp.action.expect("should have action") {
-        Action::SearchEntry { query } => {
+        Action::SearchEntry { query, .. } => {
             assert!(!query.is_empty());
         }
         other => panic!("expected SearchEntry, got: {other:?}"),
@@ -435,7 +439,7 @@ fn list_response() {
 fn list_no_category_response() {
     let resp = handler().process_message("show all secrets");
     match resp.action.expect("should have action") {
-        Action::SearchEntry { query } => {
+        Action::SearchEntry { query, .. } => {
             assert!(!query.is_empty());
         }
         other => panic!("expected SearchEntry, got: {other:?}"),
@@ -514,12 +518,16 @@ fn create_vault_response() {
 
 #[test]
 fn unlock_vault_response() {
+    // The handler's default vault state is ready (the app syncs
+    // the real state per message), so an unlock request is
+    // answered plainly — no dialog fiction, no action.
     let resp = handler().process_message("unlock vault");
-    assert!(resp.message.contains("unlock"), "message: {}", resp.message);
-    assert!(matches!(
-        resp.action.expect("should have action"),
-        Action::UnlockVault
-    ));
+    assert!(
+        resp.message.contains("already unlocked"),
+        "message: {}",
+        resp.message
+    );
+    assert!(resp.action.is_none());
     assert!(resp.user_message_display.is_none());
 }
 
@@ -556,4 +564,327 @@ fn non_vault_actions_have_no_display() {
         let resp = handler().process_message(input);
         assert!(resp.user_message_display.is_none());
     }
+}
+
+#[test]
+fn guided_store_flow_collects_a_login_field_by_field() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let first = handler.process_message("store");
+    assert_eq!(first.message, "What is this secret for?");
+    assert_eq!(first.options.len(), 5);
+    let second = handler.process_message("a");
+    assert_eq!(
+        second.message,
+        "What website is this username/password for?"
+    );
+    let _ = handler.process_message("Google");
+    let _ = handler.process_message("chris");
+    let confirm = handler.process_message("hunter2");
+    assert_eq!(confirm.options, vec!["yes".to_string(), "no".to_string()]);
+    let done = handler.process_message("yes");
+    assert!(matches!(done.action, Some(Action::StoreEntry { .. })));
+}
+
+#[test]
+fn cancelling_a_guided_store_returns_to_normal_classification() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let _ = handler.process_message("store");
+    let cancelled = handler.process_message("cancel");
+    assert!(cancelled.message.starts_with("Cancelled"));
+    let greeting = handler.process_message("hello");
+    assert!(greeting.message.contains("I'm Stern"));
+}
+
+#[test]
+fn retrieve_question_extracts_the_asked_field() {
+    match classify_intent("what's my password for google?") {
+        Intent::RetrieveSecret { name, field } => {
+            assert!(name.to_lowercase().contains("google"), "name: {name}");
+            assert_eq!(field.as_deref(), Some("password"));
+        }
+        other => panic!("expected RetrieveSecret, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pending_choice_resolves_by_letter() {
+    let handler = ChatHandler::new(None);
+    handler.set_pending_choice(
+        vec![
+            EntryCandidate {
+                id: "id-a".to_string(),
+                label: "Google".to_string(),
+            },
+            EntryCandidate {
+                id: "id-b".to_string(),
+                label: "Google Work".to_string(),
+            },
+        ],
+        Some("password".to_string()),
+    );
+    let response = handler.process_message("b");
+    match response.action {
+        Some(Action::RevealEntry { entry_id, field }) => {
+            assert_eq!(entry_id, "id-b");
+            assert_eq!(field.as_deref(), Some("password"));
+        }
+        other => panic!("expected RevealEntry, got: {other:?}"),
+    }
+}
+
+#[test]
+fn pending_choice_falls_through_on_other_messages() {
+    let handler = ChatHandler::new(None);
+    handler.set_pending_choice(
+        vec![EntryCandidate {
+            id: "id-a".to_string(),
+            label: "Google".to_string(),
+        }],
+        None,
+    );
+    let greeting = handler.process_message("hello");
+    assert!(greeting.message.contains("I'm Stern"));
+    // The choice is forgotten: "a" is no longer a pick.
+    let after = handler.process_message("a");
+    assert!(!matches!(after.action, Some(Action::RevealEntry { .. })));
+}
+
+#[test]
+fn greeting_how_are_you() {
+    assert_intent("how are you?", Intent::Greeting);
+    let handler = ChatHandler::new(None);
+    let response = handler.process_message("how are you?");
+    assert!(
+        response.message.contains("store a secret"),
+        "message: {}",
+        response.message
+    );
+    assert!(!response.message.contains("not sure what you mean"));
+}
+
+#[test]
+fn greeting_thanks_alone_but_not_after_a_command() {
+    assert_intent("thanks", Intent::Greeting);
+    assert_intent("thank you", Intent::Greeting);
+    // "save my password, thanks" is a store, not small talk.
+    assert_ne!(
+        classify_intent("save my GitHub password is hunter2, thanks"),
+        Intent::Greeting
+    );
+}
+
+#[test]
+fn sensitive_field_prompts_are_flagged() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let kind = handler.process_message("store");
+    assert!(!kind.input_sensitive);
+    let _ = handler.process_message("a");
+    let _ = handler.process_message("Google");
+    let password_prompt = handler.process_message("chris");
+    assert!(
+        password_prompt.input_sensitive,
+        "the password question must hide the typing: {}",
+        password_prompt.message
+    );
+    let confirm = handler.process_message("hunter2");
+    assert!(!confirm.input_sensitive);
+}
+
+#[test]
+fn gate_setup_flow_replays_the_interrupted_store() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(false, false);
+
+    let first = handler.process_message("store");
+    assert!(first.input_sensitive, "message: {}", first.message);
+    assert!(first.message.contains("set up your vault"));
+    assert!(first.action.is_none());
+
+    let weak = handler.process_message("short");
+    assert!(weak.input_sensitive);
+    assert!(weak.message.contains("still needs"));
+
+    let confirm = handler.process_message("Correct horse 9!");
+    assert!(confirm.input_sensitive);
+    assert!(confirm.message.contains("confirm"));
+
+    let mismatch = handler.process_message("Correct horse 9?");
+    assert!(mismatch.input_sensitive);
+    assert!(mismatch.message.contains("didn't match"));
+
+    let _ = handler.process_message("Correct horse 9!");
+    let ready = handler.process_message("Correct horse 9!");
+    match ready.action {
+        Some(Action::SetupVault { password }) => {
+            assert_eq!(password.as_str(), "Correct horse 9!");
+        }
+        other => panic!("expected SetupVault, got: {other:?}"),
+    }
+
+    handler.set_vault_state(true, true);
+    let replayed = handler.vault_gate_completed().unwrap();
+    assert_eq!(
+        replayed.options.len(),
+        5,
+        "the interrupted store should resume at the kind question: {}",
+        replayed.message
+    );
+}
+
+#[test]
+fn gate_unlock_flow_replays_the_interrupted_search() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, false);
+
+    let prompt = handler.process_message("what's my password for google?");
+    assert!(prompt.input_sensitive, "message: {}", prompt.message);
+    assert!(prompt.message.contains("locked"));
+
+    let attempt = handler.process_message("hunter22");
+    match attempt.action {
+        Some(Action::UnlockVaultWith { password }) => {
+            assert_eq!(password.as_str(), "hunter22");
+        }
+        other => panic!("expected UnlockVaultWith, got: {other:?}"),
+    }
+
+    handler.set_vault_state(true, true);
+    let replayed = handler.vault_gate_completed().unwrap();
+    assert!(
+        matches!(replayed.action, Some(Action::SearchEntry { .. })),
+        "the interrupted search should replay, got: {:?}",
+        replayed.action
+    );
+}
+
+#[test]
+fn gate_never_blocks_small_talk() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(false, false);
+    let response = handler.process_message("how are you?");
+    assert!(!response.input_sensitive);
+    assert!(response.message.contains("I'm Stern"));
+}
+
+#[test]
+fn gate_cancel_abandons_the_setup() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(false, false);
+    let _ = handler.process_message("store");
+    let cancelled = handler.process_message("cancel");
+    assert_eq!(cancelled.message, "Cancelled.");
+    assert!(handler.vault_gate_completed().is_none());
+}
+
+#[test]
+fn a_fresh_handler_fails_closed() {
+    // No state synced yet: a store request must run the setup
+    // gate, not sail through as if a vault existed, unlocked.
+    let handler = ChatHandler::new(None);
+    let response = handler.process_message("store");
+    assert!(response.action.is_none());
+    assert!(
+        response.message.contains("set up your vault"),
+        "message: {}",
+        response.message
+    );
+    assert!(response.input_sensitive);
+}
+
+#[test]
+fn the_gate_intercepts_before_a_pending_choice() {
+    // A choice is waiting and the unlock gate starts; the next
+    // message is the master password. "b" would be a valid
+    // choice pick — it must reach the gate, not the choice.
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, false);
+    let _ = handler.process_message("store");
+    handler.set_pending_choice(
+        vec![
+            EntryCandidate {
+                id: "id-a".to_string(),
+                label: "Google".to_string(),
+            },
+            EntryCandidate {
+                id: "id-b".to_string(),
+                label: "Google Work".to_string(),
+            },
+        ],
+        None,
+    );
+    let response = handler.process_message("b");
+    assert!(
+        matches!(&response.action, Some(Action::UnlockVaultWith { .. })),
+        "the password must go to the gate, got: {:?}",
+        response.action
+    );
+}
+
+#[test]
+fn pending_choice_matches_single_character_labels() {
+    // An entry named "1": the digit is not a choice letter, so
+    // the label match must get its turn.
+    let handler = ChatHandler::new(None);
+    handler.set_pending_choice(
+        vec![
+            EntryCandidate {
+                id: "id-1".to_string(),
+                label: "1".to_string(),
+            },
+            EntryCandidate {
+                id: "id-2".to_string(),
+                label: "2".to_string(),
+            },
+        ],
+        None,
+    );
+    let response = handler.process_message("1");
+    assert!(matches!(
+        response.action,
+        Some(Action::RevealEntry { entry_id, .. }) if entry_id == "id-1"
+    ));
+
+    // A letter past the offered range falls back to labels too.
+    let handler = ChatHandler::new(None);
+    handler.set_pending_choice(
+        vec![EntryCandidate {
+            id: "id-x".to_string(),
+            label: "x".to_string(),
+        }],
+        None,
+    );
+    let response = handler.process_message("x");
+    assert!(matches!(
+        response.action,
+        Some(Action::RevealEntry { entry_id, .. }) if entry_id == "id-x"
+    ));
+}
+
+#[test]
+fn action_debug_redacts_secrets() {
+    let store = Action::StoreEntry {
+        name: "GitHub".to_string(),
+        kind: "login".to_string(),
+        fields: vec![("password".to_string(), "hunter2".to_string())],
+    };
+    let rendered = format!("{store:?}");
+    assert!(
+        !rendered.contains("hunter2"),
+        "debug leaked a value: {rendered}"
+    );
+    assert!(
+        rendered.contains("password"),
+        "field keys stay visible: {rendered}"
+    );
+    let setup = Action::SetupVault {
+        password: zeroize::Zeroizing::new("Correct-Horse-9!".to_string()),
+    };
+    let rendered = format!("{setup:?}");
+    assert!(
+        !rendered.contains("Correct-Horse-9!"),
+        "debug leaked the master password: {rendered}"
+    );
 }

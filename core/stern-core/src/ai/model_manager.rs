@@ -43,6 +43,21 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+/// How a model's chat prompt is formatted for parsing commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PromptStyle {
+    /// `ChatML` turns (`<|im_start|>` / `<|im_end|>`), for the
+    /// instruction-tuned models.
+    ChatMl,
+    /// A plain few-shot completion, for the base model, which has
+    /// no instruction tuning to lean on.
+    FewShot,
+}
+
+/// The file name every model's tokenizer is stored under, beside
+/// the model file in its version directory.
+pub const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
+
 /// A downloadable AI model known to this build of Stern.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelDescriptor {
@@ -62,6 +77,14 @@ pub struct ModelDescriptor {
     /// Lowercase hex SHA-256 of the model file. This is the authoritative
     /// integrity check for every download.
     pub sha256: &'static str,
+    /// Canonical download URL of the model's `tokenizer.json`.
+    pub tokenizer_url: &'static str,
+    /// Lowercase hex SHA-256 of the tokenizer file.
+    pub tokenizer_sha256: &'static str,
+    /// Size in bytes of the tokenizer file.
+    pub tokenizer_size_bytes: u64,
+    /// How this model's parsing prompt is formatted.
+    pub prompt_style: PromptStyle,
     /// Approximate size in bytes, as published by the model host (the
     /// host's displayed megabyte figure is rounded). Used for UI display
     /// and as the progress total when the server does not send a
@@ -88,7 +111,11 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         download_url:
             "https://huggingface.co/HuggingFaceTB/SmolLM-135M/resolve/main/onnx/model_int8.onnx",
         sha256: "9fc89b8ea13d2e8ee3edcc19e728af1eb556ae4945824998a61d9cbbb8029df2",
-        size_bytes: 142_606_336, // ~136 MiB as listed on the model page
+        size_bytes: 135_804_132, // measured from the published file
+        tokenizer_url: "https://huggingface.co/HuggingFaceTB/SmolLM-135M/resolve/main/tokenizer.json",
+        tokenizer_sha256: "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+        tokenizer_size_bytes: 2_104_556,
+        prompt_style: PromptStyle::FewShot,
     },
     ModelDescriptor {
         id: "smollm2-135m-instruct",
@@ -100,6 +127,10 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/onnx/model_q4f16.onnx",
         sha256: "9358cd4ce037c304621f8c194a525607ae7c5ea73239fcae4c21bd02f2e34ff7",
         size_bytes: 118_000_000, // 118 MB as listed on the model page
+        tokenizer_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/tokenizer.json",
+        tokenizer_sha256: "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+        tokenizer_size_bytes: 2_104_556,
+        prompt_style: PromptStyle::ChatMl,
     },
     ModelDescriptor {
         id: "smollm2-360m-instruct",
@@ -111,6 +142,10 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/onnx/model_q4f16.onnx",
         sha256: "cc63370efc2aca6d5307518b85162777132cc5b8d68eeb8154ea9b5fce09ad46",
         size_bytes: 273_000_000, // 273 MB as listed on the model page
+        tokenizer_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/tokenizer.json",
+        tokenizer_sha256: "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
+        tokenizer_size_bytes: 2_104_556,
+        prompt_style: PromptStyle::ChatMl,
     },
     ModelDescriptor {
         id: "qwen2.5-0.5b-instruct",
@@ -122,6 +157,10 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         download_url: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct/resolve/main/onnx/model_q4f16.onnx",
         sha256: "b11c1dd99efd57e6c6e5bc4443a019931a5fbd5dd500d48644d8225f5ce0b2cb",
         size_bytes: 483_000_000, // 483 MB as listed on the model page
+        tokenizer_url: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct/resolve/main/tokenizer.json",
+        tokenizer_sha256: "a8506e7111b80c6d8635951a02eab0f4e1a8e4e5772da83846579e97b16f61bf",
+        tokenizer_size_bytes: 7_031_673,
+        prompt_style: PromptStyle::ChatMl,
     },
 ];
 
@@ -728,6 +767,31 @@ impl ModelManager {
         path.exists().then_some(path)
     }
 
+    /// Path of one installed model's tokenizer file, if the model is
+    /// recorded in the manifest *and* the tokenizer is present on
+    /// disk. Models installed before tokenizers were downloaded do
+    /// not have one; the chat falls back to the rule classifier for
+    /// them until the model is downloaded again.
+    #[must_use]
+    pub fn installed_tokenizer_path(&self, model_id: &str) -> Option<PathBuf> {
+        let installed = self.installed_model(model_id)?;
+        let path = self
+            .installed_file_path(&installed)
+            .with_file_name(TOKENIZER_FILE_NAME);
+        path.exists().then_some(path)
+    }
+
+    /// Path of the active model's tokenizer file, if it is present
+    /// on disk.
+    #[must_use]
+    pub fn active_tokenizer_path(&self) -> Option<PathBuf> {
+        let installed = self.active_model()?;
+        let path = self
+            .installed_file_path(&installed)
+            .with_file_name(TOKENIZER_FILE_NAME);
+        path.exists().then_some(path)
+    }
+
     /// Make an installed model the active one. The model's file must
     /// still be present on disk — a manifest record alone (e.g. after the
     /// `.onnx` was deleted externally) is not enough.
@@ -883,37 +947,93 @@ impl ModelManager {
     /// the ONNX Runtime first if this device does not have it yet.
     ///
     /// `progress` is called with `(downloaded_bytes, total_bytes)` as
-    /// the bytes stream in; the totals span both phases (runtime, then
-    /// model), so the bar runs once from empty to full. These are the
-    /// only network calls in Stern.
+    /// the bytes stream in; the totals span all three phases (runtime,
+    /// model, tokenizer), so the bar runs once from empty to full.
+    /// These are the only network calls in Stern.
     pub fn download(
         &self,
         descriptor: &ModelDescriptor,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<InstalledModel, VaultError> {
         // Phase 1: the runtime, if missing. Its size is folded into the
-        // progress totals so the two phases read as one download.
+        // progress totals so the three phases read as one download.
         let runtime_size = match current_runtime() {
             Some(runtime) if self.runtime_path().is_none() => runtime.size_bytes,
             _ => 0,
         };
+        let combined_total = runtime_size
+            .saturating_add(descriptor.size_bytes)
+            .saturating_add(descriptor.tokenizer_size_bytes);
         if runtime_size > 0 {
-            let combined = runtime_size.saturating_add(descriptor.size_bytes);
-            self.ensure_runtime(&mut |downloaded, _| progress(downloaded, combined))?;
+            self.ensure_runtime(&mut |downloaded, _| progress(downloaded, combined_total))?;
         }
 
         // Phase 2: the model itself, offset by the runtime bytes.
         let (mut reader, model_total) =
             Self::open_download(descriptor.download_url, descriptor.size_bytes)?;
-        let combined_total = runtime_size.saturating_add(model_total);
-        self.install_from_reader(
+        let installed = self.install_from_reader(
             descriptor,
             &mut reader,
             model_total,
             &mut |downloaded, _| {
                 progress(runtime_size.saturating_add(downloaded), combined_total);
             },
-        )
+        )?;
+
+        // Phase 3: the tokenizer, beside the model file. Without it
+        // the model cannot run, so a failure here fails the download
+        // (the model stays installed; a retry re-fetches both).
+        let tokenizer_base = runtime_size.saturating_add(model_total);
+        let (mut reader, tokenizer_total) =
+            Self::open_download(descriptor.tokenizer_url, descriptor.tokenizer_size_bytes)?;
+        self.install_tokenizer(
+            descriptor,
+            &mut reader,
+            tokenizer_total,
+            &mut |downloaded, _| {
+                progress(tokenizer_base.saturating_add(downloaded), combined_total);
+            },
+        )?;
+        Ok(installed)
+    }
+
+    /// Install a model's tokenizer beside its model file: stream to a
+    /// `.part` file while hashing, verify the SHA-256 against the
+    /// catalog, then atomically move it into place. On any failure
+    /// the partial file is removed.
+    fn install_tokenizer(
+        &self,
+        descriptor: &ModelDescriptor,
+        reader: &mut dyn Read,
+        total_bytes: u64,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<(), VaultError> {
+        let version_dir = self.model_version_dir(descriptor.id, descriptor.version);
+        fs::create_dir_all(&version_dir)
+            .map_err(|e| VaultError::Model(format!("create model dir: {e}")))?;
+
+        let part_path = version_dir.join(format!("{TOKENIZER_FILE_NAME}.part"));
+        let final_path = version_dir.join(TOKENIZER_FILE_NAME);
+
+        let result =
+            Self::stream_hash_to_file(reader, total_bytes, progress, &part_path, "tokenizer")
+                .and_then(|(digest, _)| {
+                    if !digest.eq_ignore_ascii_case(descriptor.tokenizer_sha256) {
+                        return Err(VaultError::Model(format!(
+                            "tokenizer integrity check failed: expected SHA-256 {}, got {digest}",
+                            descriptor.tokenizer_sha256
+                        )));
+                    }
+                    fs::rename(&part_path, &final_path)
+                        .map_err(|e| VaultError::Model(format!("move tokenizer into place: {e}")))
+                });
+        if let Err(e) = result {
+            if let Err(cleanup) = fs::remove_file(&part_path) {
+                tracing::warn!("failed to remove partial tokenizer file: {cleanup}");
+            }
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Install a model from any byte stream: stream to a `.part` file while

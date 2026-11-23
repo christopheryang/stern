@@ -71,6 +71,17 @@ pub struct ChatResponse {
     pub message: String,
     pub action: Option<String>,
     pub user_message_display: Option<String>,
+    /// Lettered choices accompanying the message (the guided
+    /// conversation's kind list, a yes/no confirmation, ...),
+    /// rendered by the UI as tappable options.
+    #[serde(default)]
+    pub options: Vec<String>,
+    /// The reply to this message is a secret (a master password,
+    /// a secret's sensitive field): the UI hides the typing —
+    /// each character shows for two seconds, then turns into a
+    /// mask character.
+    #[serde(default)]
+    pub input_sensitive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

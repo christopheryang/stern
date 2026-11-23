@@ -38,21 +38,21 @@ Stern/
 
 ## AI
 
-Stern includes a built-in chat interface powered by a local text generation model (SmolLM-135M, ONNX). The AI classifies natural language intents:
+Stern's chat is powered by a local text generation model (downloaded after install — see below). The model only *parses*: it turns a message into a structured intent, and deterministic code does everything else — the model never writes a reply you see. When a request is missing pieces, a guided conversation asks for them (kind first, then the fields it needs, then a masked confirmation):
 
 - **Store** — "save my GitHub password"
-- **Retrieve** — "get my Gmail credentials"
+- **Retrieve** — "what's my password for Gmail?"
 - **List** — "show all passwords"
 - **Update** — "change my Netflix password"
 - **Delete** — "remove my WiFi password"
 
-The model runs entirely on-device via ONNX Runtime, with a rule-based classifier as fallback — chat works even before the model is downloaded.
+The model runs entirely on-device via ONNX Runtime. A rule-based classifier covers for it — no model yet, a model error, output that doesn't parse — so chat works even before a model is downloaded.
 
 ### Model download & updates
 
-The model is **not bundled** with the app. After installation, the chat view offers a choice of on-device models — SmolLM-135M (~136 MB), SmolLM2-135M-Instruct (~118 MB), SmolLM2-360M-Instruct (~273 MB), or Qwen2.5-0.5B-Instruct (~483 MB) — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active).
+The model is **not bundled** with the app. After installation, Settings (the gear in the header) offers a choice of on-device models — SmolLM-135M (~136 MB), SmolLM2-135M-Instruct (~118 MB), SmolLM2-360M-Instruct (~273 MB), or Qwen2.5-0.5B-Instruct (~483 MB) — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active). Each model also downloads its tokenizer file, verified the same way, and the first download also fetches the ONNX Runtime library the model runs on.
 
-Because the model lives outside the app bundle, it can evolve independently: when a new Stern build ships with a newer catalog version, the app detects the difference and offers an in-place update. The new file is downloaded and verified first and only then swapped in, so a failed download never breaks a working install. You can keep several models installed, switch between them, or remove them at any time from the same card in the chat view.
+Because the model lives outside the app bundle, it can evolve independently: when a new Stern build ships with a newer catalog version, the app detects the difference and offers an in-place update. The new file is downloaded and verified first and only then swapped in, so a failed download never breaks a working install. You can keep several models installed, switch between them, or remove them at any time from the Settings picker.
 
 That download is the only network request Stern ever makes, and it happens only when you explicitly start it. Your vault data never leaves the device.
 
@@ -102,17 +102,21 @@ just build
 ### Test-drive the app
 
 1. `just dev` opens the Stern window.
-2. On first run, create a vault and choose a master password. Stern also
+2. On first run, the setup screen asks you to create a master password
+   (8+ characters, with a lowercase letter, an uppercase letter, a number,
+   and a symbol). There is no account and no username. Stern also
    generates a device Secret Key; password + Secret Key together unlock the
    vault (see [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md)).
-3. Unlock and open the **Chat** tab. Try "show all passwords" or "get my
-   Gmail credentials". Storing works too — "save my GitHub password" starts
-   the flow — but the secret itself is always entered in the entry form,
-   never in chat.
-4. The card at the top of the chat view reports "AI model not installed".
-   Chat already works via the built-in rules; click **Download model**
-   (~136 MB) to fetch the on-device AI model. A progress bar tracks the
-   download, and the card then shows the installed version.
+3. On later launches, the login screen asks for the master password
+   before anything else is reachable. After unlocking, pick an AI model
+   in Settings (the gear, top right) — the first download also fetches
+   the ONNX Runtime — or skip it: chat already works via the built-in
+   rules.
+4. In chat, try "show all passwords", "what's my password for Gmail?",
+   or "save my GitHub password". Storing runs as a short guided
+   conversation — kind first, then the fields it needs. Secret fields
+   are typed into a peek-mask input (each character visible for
+   2 seconds, then `*`) and never appear in the transcript.
 5. App data lives in the platform app-data folder for `com.stern.app`
    (macOS: `~/Library/Application Support/com.stern.app/`): the vault is
    `stern.db`, downloaded models live under `models/`. Delete that folder
@@ -134,6 +138,7 @@ configured yet, so local builds are unsigned.
 - [docs/architecture/Architecture.md](docs/architecture/Architecture.md) — how the app is put together
 - [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md) — the vault cryptography in detail
 - [docs/design/2026-11-21%20-%20AI-and-Models.md](docs/design/2026-11-21%20-%20AI-and-Models.md) — chat, intent classification, and the downloadable model
+- [docs/design/2026-11-22%20-%20Model-Backed-Chat.md](docs/design/2026-11-22%20-%20Model-Backed-Chat.md) — model-backed chat: parsing, guided conversations, retrieval Q&A, the vault gate, and the auth front door
 - [docs/Development.md](docs/Development.md) — build, test, and release workflows in depth
 - [docs/adr/](docs/adr/README.md) — architecture decision records
 - [AGENTS.md](AGENTS.md) — instructions for AI coding agents working in this repo

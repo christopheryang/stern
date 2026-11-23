@@ -12,16 +12,17 @@ All state lives under the OS app-data directory for `com.stern.app`
 | Path | What it is |
 | --- | --- |
 | `stern.db` | The vault database (ciphertext only while locked) |
-| `models/` | Downloaded AI models, one `<model-id>/<version>/` per install |
+| `models/` | Downloaded AI models and tokenizers, one `<model-id>/<version>/` per install, plus the ONNX Runtime under `runtime/` |
 | `models/installed.json` | Model manifest: what is installed, and which model is active |
 
 ## Healthy looks like
 
-- The app opens to the lock screen; unlocking shows the vault.
+- The app opens to the setup screen on first run and the login
+  screen after that; unlocking leads to the model gate or the chat.
 - Chat answers commands even with **no model installed** — the
   rule-based classifier is always on duty. A model is an enhancement,
   never a requirement.
-- The chat view's AI model card shows the catalog; an installed,
+- The Settings model picker shows the catalog; an installed,
   selected model carries an **Active** badge.
 
 ## Common problems
@@ -43,11 +44,12 @@ against the file's Hugging Face page and updated by a developer
 
 ### A model is downloaded but chat behaves the same
 
-Expected today: classification is rule-based, and the downloaded
-model is loaded and held ready (see
-[design/2026-11-21%20-%20AI-and-Models.md](design/2026-11-21%20-%20AI-and-Models.md)). Also check the
-picker: the model only counts when it is the **Active** one — use
-**Use this model** to switch; the change takes effect immediately.
+Two usual causes. The model only counts when it is the **Active**
+one — use **Use this model** in the Settings picker; the change
+takes effect immediately. And a model installed before tokenizers
+shipped with models has no tokenizer on disk: the parser needs it,
+so chat silently stays on the rule classifier — remove the model in
+the picker and download it again to pick up its tokenizer.
 
 ### A model shows as not installed, but files are on disk
 

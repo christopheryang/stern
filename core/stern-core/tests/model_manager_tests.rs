@@ -5,7 +5,9 @@
 
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
-use stern_core::ai::model_manager::{version_is_newer, ModelDescriptor, ModelManager, ModelState};
+use stern_core::ai::model_manager::{
+    version_is_newer, ModelDescriptor, ModelManager, ModelState, PromptStyle,
+};
 
 fn fixture_bytes() -> Vec<u8> {
     b"stern test model bytes".to_vec()
@@ -29,6 +31,10 @@ fn descriptor_for_id(id: &'static str, bytes: &[u8], version: &'static str) -> M
         download_url: "https://example.invalid/model.onnx",
         sha256: sha,
         size_bytes: u64::try_from(bytes.len()).unwrap_or(0),
+        tokenizer_url: "https://example.invalid/tokenizer.json",
+        tokenizer_sha256: sha,
+        tokenizer_size_bytes: 0,
+        prompt_style: PromptStyle::ChatMl,
     }
 }
 

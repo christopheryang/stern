@@ -90,9 +90,15 @@ full rules are in `.agents/skills/repo-skills.md`. In short:
   download (ADR-0006) and the ONNX Runtime download that accompanies
   the first model (ADR-0008). No telemetry, no update checks, no
   remote config.
-- **Secrets never travel through chat.** Chat classifies intent only;
-  secret values are entered and shown in the entry UI, and chat responses
-  to vault actions suppress the echoed user message.
+- **Secrets travel through chat only under mask.** The guided
+  conversation collects secret values in chat, only at prompts flagged
+  sensitive: the input peek-masks (each character visible for 2 s, then
+  `*`), responses never echo a secret, the transcript shows a mask in
+  place of a sent secret, and chat responses to vault actions suppress
+  the echoed user message. The AI model only parses free-form
+  messages, on-device; once a guided conversation starts, its replies
+  go to the deterministic state machine, never to the model, and no
+  model-generated prose is ever shown to the user.
 - Key material lives in `SecretMem<T>` (mlock + zeroize). Never log,
   serialize, or clone secrets or keys into plain types.
 - Do not weaken the crypto parameters in
@@ -111,15 +117,19 @@ and are offered updates in-app. To ship a new model:
    the file page — the hash is authoritative; `size_bytes` is approximate.
 2. In `core/stern-core/src/ai/model_manager.rs`, update the
    `MODEL_CATALOG` entry: `version` (bump it — version comparison drives
-   the update prompt), `download_url`, `sha256`, `size_bytes`.
+   the update prompt), `download_url`, `sha256`, `size_bytes`. If the
+   model's tokenizer changed, update `tokenizer_url`,
+   `tokenizer_sha256`, and `tokenizer_size_bytes` too — an install
+   without its tokenizer silently falls back to rule-based chat.
 3. Existing installs then report `UpdateAvailable`; the new file is
    downloaded and verified before it replaces the old one.
 
 To **add** a model to the picker (ADR-0007), append a new catalog entry
-with a unique `id` and the SHA-256 from its Hugging Face file page; the
-UI, commands, and manifest handle the rest. Never add an entry without a
-verified pinned hash — an unverifiable model must not ship in the
-catalog.
+with a unique `id`, the SHA-256 from its Hugging Face file page, its
+tokenizer's URL and SHA-256, and its `prompt_style` (`ChatMl` for
+instruction-tuned models, `FewShot` for base models); the UI, commands,
+and manifest handle the rest. Never add an entry without a verified
+pinned hash — an unverifiable model must not ship in the catalog.
 
 ## Shipping a runtime update
 
@@ -165,6 +175,11 @@ run the ignored network smoke test:
 
 ## Documentation duties
 
+- **Use the documentation skill.** When creating or modifying a pull
+  request, always follow
+  [skills/documentation-skill/SKILL.md](skills/documentation-skill/SKILL.md)
+  — it carries the freshness checklist and the rules for where a new
+  doc goes.
 - Behavior changes update the matching page in `docs/`.
 - **Before creating or updating a pull request:** check doc freshness
   — every behavior, interface, workflow, or structure change in the PR

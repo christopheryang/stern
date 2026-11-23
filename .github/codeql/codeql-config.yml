@@ -1,0 +1,8 @@
+name: "Stern CodeQL config"
+
+# Test code is full of fixture passwords and assert messages that
+# print secret-shaped values on purpose; scanning it produces
+# hard-coded-credential and cleartext-logging alerts that are not
+# findings. Production code is scanned in full.
+paths-ignore:
+  - "**/tests/**"

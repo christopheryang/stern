@@ -5,13 +5,20 @@
 //! and a gear button that opens the configuration view. There is no
 //! sidebar.
 //!
-//! Stern ships with no AI model (and no ONNX Runtime) at all, so until
-//! the user has downloaded a model and it is the active one, there is
-//! nothing to chat with: the chat area shows a model-required gate
-//! that routes to the configuration view, where the model picker
-//! lives. The gate check is `model_status`: an active model whose
-//! runtime is installed.
+//! Two gates stand in front of the chat, in this order:
+//!
+//! 1. The vault. First run shows the setup screen (choose a master
+//!    password); every later launch shows the login screen until
+//!    the vault is unlocked. Nothing else — not even Settings — is
+//!    reachable before that.
+//! 2. The model. Stern ships with no AI model (and no ONNX
+//!    Runtime) at all, so until the user has downloaded a model and
+//!    it is the active one, the chat area shows a model-required
+//!    gate that routes to the configuration view, where the model
+//!    picker lives. The gate check is `model_status`: an active
+//!    model whose runtime is installed.
 
+use crate::components::auth::{AuthPhase, LoginView, SetupView};
 use crate::components::chat::ChatView;
 use crate::components::config::ConfigView;
 use leptos::prelude::*;
@@ -71,6 +78,28 @@ async fn fetch_model_ready() -> Result<bool, String> {
                 .and_then(serde_json::Value::as_bool)
                 == Some(true)
     }))
+}
+
+fn spawn_vault_refresh(
+    set_auth: WriteSignal<Option<AuthPhase>>,
+    set_auth_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) {
+    spawn_local(async move {
+        match crate::components::auth::fetch_vault_phase().await {
+            Ok(phase) => {
+                if !cancelled.load(Ordering::Relaxed) {
+                    set_auth_error.set(None);
+                    set_auth.set(Some(phase));
+                }
+            }
+            Err(error) => {
+                if !cancelled.load(Ordering::Relaxed) {
+                    set_auth_error.set(Some(error));
+                }
+            }
+        }
+    });
 }
 
 fn spawn_refresh(
@@ -148,6 +177,154 @@ fn StatusErrorGate(
     }
 }
 
+/// The gate shown when the vault-status check itself failed:
+/// the error and a retry, instead of a "Loading…" that never ends.
+#[component]
+fn VaultStatusErrorGate(
+    error: String,
+    set_auth: WriteSignal<Option<AuthPhase>>,
+    set_auth_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) -> impl IntoView {
+    view! {
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
+            <div style="font-size:16px;color:#e6e6e6;">
+                "Couldn't check the vault"
+            </div>
+            <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
+                {error}
+            </p>
+            <button
+                style=PRIMARY_BUTTON_STYLE
+                on:click=move |_| {
+                    set_auth_error.set(None);
+                    spawn_vault_refresh(set_auth, set_auth_error, cancelled.clone());
+                }
+            >
+                "Retry"
+            </button>
+        </div>
+    }
+}
+
+/// What the main area shows once the vault is unlocked: the
+/// configuration view, the chat, or the model-required gate.
+#[allow(clippy::too_many_arguments)]
+fn unlocked_main(
+    in_config: bool,
+    model_ready: Option<bool>,
+    status_error: Option<String>,
+    set_in_config: WriteSignal<bool>,
+    set_model_ready: WriteSignal<Option<bool>>,
+    set_status_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) -> AnyView {
+    if in_config {
+        view! { <ConfigView /> }.into_any()
+    } else if model_ready == Some(true) {
+        view! { <ChatView /> }.into_any()
+    } else if model_ready == Some(false) {
+        view! { <ModelRequiredGate set_in_config=set_in_config /> }.into_any()
+    } else if let Some(error) = status_error {
+        view! {
+            <StatusErrorGate
+                error=error
+                set_model_ready=set_model_ready
+                set_status_error=set_status_error
+                cancelled=cancelled
+            />
+        }
+        .into_any()
+    } else {
+        view! {
+            <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#a0a0b0;font-size:14px;">
+                "Loading…"
+            </div>
+        }
+        .into_any()
+    }
+}
+
+/// The header's right-hand side: nothing before authentication,
+/// a back button in Settings, and Lock + the gear in the chat.
+#[allow(clippy::too_many_arguments)]
+fn header_actions(
+    auth: Option<AuthPhase>,
+    in_config: bool,
+    locking: bool,
+    lock_error: Option<String>,
+    set_in_config: WriteSignal<bool>,
+    set_auth: WriteSignal<Option<AuthPhase>>,
+    set_model_ready: WriteSignal<Option<bool>>,
+    set_status_error: WriteSignal<Option<String>>,
+    set_locking: WriteSignal<bool>,
+    set_lock_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) -> AnyView {
+    if auth != Some(AuthPhase::Unlocked) {
+        // No header actions before authentication: Settings (and
+        // its model downloads) wait for an unlocked vault.
+        return ().into_any();
+    }
+    if in_config {
+        view! {
+            <button
+                style=BACK_BUTTON_STYLE
+                on:click=move |_| {
+                    set_in_config.set(false);
+                    // The user may have just downloaded or
+                    // selected a model — re-check the gate.
+                    spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+                }
+            >
+                "← Chat"
+            </button>
+        }
+        .into_any()
+    } else {
+        view! {
+            <span style="display:flex;gap:8px;align-items:center;">
+                {lock_error.map(|error| {
+                    view! { <span style="color:#e94560;font-size:13px;">{error}</span> }
+                })}
+                <button
+                    style=BACK_BUTTON_STYLE
+                    prop:disabled=locking
+                    on:click=move |_| {
+                        if locking {
+                            return;
+                        }
+                        set_locking.set(true);
+                        set_lock_error.set(None);
+                        spawn_local(async move {
+                            match crate::components::auth::lock_vault().await {
+                                Ok(()) => set_auth.set(Some(AuthPhase::Login)),
+                                Err(error) => {
+                                    set_lock_error.set(Some(format!(
+                                        "Couldn't lock the vault: {error}"
+                                    )));
+                                    set_locking.set(false);
+                                }
+                            }
+                        });
+                    }
+                >
+                    "Lock"
+                </button>
+                <button
+                    style=GEAR_BUTTON_STYLE
+                    aria-label="Settings"
+                    title="Settings"
+                    on:click=move |_| set_in_config.set(true)
+                >
+                    "⚙"
+                </button>
+            </span>
+        }
+        .into_any()
+    }
+}
+
 const HEADER_STYLE: &str = "display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#16213e;border-bottom:1px solid #2a2a4a;flex-shrink:0;";
 const GEAR_BUTTON_STYLE: &str = "padding:6px 12px;border:1px solid #2a2a4a;border-radius:8px;background:transparent;color:#e6e6e6;font-size:16px;cursor:pointer;line-height:1;";
 const BACK_BUTTON_STYLE: &str = "padding:6px 14px;border:1px solid #2a2a4a;border-radius:8px;background:transparent;color:#a0a0b0;font-size:13px;cursor:pointer;";
@@ -156,11 +333,21 @@ const PRIMARY_BUTTON_STYLE: &str = "padding:10px 20px;border:none;border-radius:
 #[component]
 pub fn AppShell() -> impl IntoView {
     let (in_config, set_in_config) = signal(false);
+    // The outermost gate: the vault. None = still checking. Until
+    // this is Some(Unlocked), neither chat nor Settings (and so no
+    // model download) is reachable — vault setup comes first.
+    let (auth, set_auth) = signal(Option::<AuthPhase>::None);
+    let (auth_error, set_auth_error) = signal(Option::<String>::None);
     // None = still checking. Chat stays gated until this is Some(true).
     let (model_ready, set_model_ready) = signal(Option::<bool>::None);
     // A failed status check, kept apart from `model_ready` so the UI
     // can show the error with a retry instead of "Loading…" forever.
     let (status_error, set_status_error) = signal(Option::<String>::None);
+    // The Lock button's in-flight flag (a second click while a
+    // lock is running must not start another) and its failure,
+    // shown next to the button instead of swallowed.
+    let (locking, set_locking) = signal(false);
+    let (lock_error, set_lock_error) = signal(Option::<String>::None);
     // Set on unmount so a late status fetch never writes a dead
     // signal. An `Arc<AtomicBool>`, not a signal: the flag itself must
     // stay readable after this component is disposed, when reading a
@@ -172,75 +359,69 @@ pub fn AppShell() -> impl IntoView {
     let cancelled_on_cleanup = cancelled.clone();
     on_cleanup(move || cancelled_on_cleanup.store(true, Ordering::Relaxed));
 
+    spawn_vault_refresh(set_auth, set_auth_error, cancelled.clone());
     spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
     // One clone per view closure below: each `move` closure takes
     // its own handle to the same flag.
     let cancelled_header = cancelled.clone();
-    let cancelled_main = cancelled;
+    let cancelled_main = cancelled.clone();
+    let cancelled_auth = cancelled;
 
     view! {
         <div style="display:flex;flex-direction:column;height:100vh;">
             <header style=HEADER_STYLE>
                 <h1 style="font-size:18px;font-weight:700;">"Stern"</h1>
-                {move || -> AnyView {
-                    if in_config.get() {
-                        let cancelled_back = cancelled_header.clone();
-                        view! {
-                            <button
-                                style=BACK_BUTTON_STYLE
-                                on:click=move |_| {
-                                    set_in_config.set(false);
-                                    // The user may have just downloaded or
-                                    // selected a model — re-check the gate.
-                                    spawn_refresh(
-                                        set_model_ready,
-                                        set_status_error,
-                                        cancelled_back.clone(),
-                                    );
-                                }
-                            >
-                                "← Chat"
-                            </button>
-                        }.into_any()
-                    } else {
-                        view! {
-                            <button
-                                style=GEAR_BUTTON_STYLE
-                                aria-label="Settings"
-                                title="Settings"
-                                on:click=move |_| set_in_config.set(true)
-                            >
-                                "⚙"
-                            </button>
-                        }.into_any()
-                    }
-                }}
+                {move || header_actions(
+                    auth.get(),
+                    in_config.get(),
+                    locking.get(),
+                    lock_error.get(),
+                    set_in_config,
+                    set_auth,
+                    set_model_ready,
+                    set_status_error,
+                    set_locking,
+                    set_lock_error,
+                    cancelled_header.clone(),
+                )}
             </header>
             <main style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
                 {move || -> AnyView {
-                    if in_config.get() {
-                        view! { <ConfigView /> }.into_any()
-                    } else if model_ready.get() == Some(true) {
-                        view! { <ChatView /> }.into_any()
-                    } else if model_ready.get() == Some(false) {
-                        view! {
-                            <ModelRequiredGate set_in_config=set_in_config />
-                        }.into_any()
-                    } else if let Some(error) = status_error.get() {
-                        view! {
-                            <StatusErrorGate
-                                error=error
-                                set_model_ready=set_model_ready
-                                set_status_error=set_status_error
-                                cancelled=cancelled_main.clone()
-                            />
-                        }.into_any()
-                    } else {
-                        view! {
-                            <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#a0a0b0;font-size:14px;">
-                                "Loading…"
-                            </div>
-                        }.into_any()
+                    match auth.get() {
+                        Some(AuthPhase::Setup) => {
+                            view! { <SetupView set_auth=set_auth /> }.into_any()
+                        }
+                        Some(AuthPhase::Login) => {
+                            view! { <LoginView set_auth=set_auth /> }.into_any()
+                        }
+                        Some(AuthPhase::Unlocked) => unlocked_main(
+                            in_config.get(),
+                            model_ready.get(),
+                            status_error.get(),
+                            set_in_config,
+                            set_model_ready,
+                            set_status_error,
+                            cancelled_main.clone(),
+                        ),
+                        None => auth_error.get().map_or_else(
+                            || {
+                                view! {
+                                    <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#a0a0b0;font-size:14px;">
+                                        "Loading…"
+                                    </div>
+                                }.into_any()
+                            },
+                            |error| {
+                                view! {
+                                    <VaultStatusErrorGate
+                                        error=error
+                                        set_auth=set_auth
+                                        set_auth_error=set_auth_error
+                                        cancelled=cancelled_auth.clone()
+                                    />
+                                }.into_any()
+                            },
+                        ),
                     }
                 }}
             </main>
