@@ -343,7 +343,7 @@ pub fn ModelSetup() -> impl IntoView {
                         }
                     }
                     Err(e) => {
-                        let label = if poll {
+                        let label = if cmd == "download_model" {
                             format!("Download failed: {e}")
                         } else {
                             e
@@ -363,8 +363,11 @@ pub fn ModelSetup() -> impl IntoView {
 
     let on_download =
         Callback::new(move |model_id: String| run_action("download_model", model_id, true));
+    // Select polls too: on a runtime-less device, selecting a model
+    // first downloads the runtime (~21-24 MB), and that fetch now
+    // reports through the same progress slot as a model download.
     let on_select =
-        Callback::new(move |model_id: String| run_action("select_model", model_id, false));
+        Callback::new(move |model_id: String| run_action("select_model", model_id, true));
     let on_remove =
         Callback::new(move |model_id: String| run_action("remove_model", model_id, false));
 

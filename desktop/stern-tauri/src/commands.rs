@@ -2,7 +2,7 @@
 
 use crate::AppState;
 use std::sync::Arc;
-use stern_core::ai::model_manager::{catalog_model, ModelState, MODEL_CATALOG};
+use stern_core::ai::model_manager::{catalog_model, current_runtime, ModelState, MODEL_CATALOG};
 use stern_core::ai::AiModel;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
@@ -872,14 +872,57 @@ impl Drop for DownloadProgressGuard {
 /// part of a user-initiated model action (download/select), never at
 /// startup. Devices whose manifest predates the runtime download have
 /// models installed but no runtime — this is where they catch up.
-async fn ensure_runtime_path(state: &AppState) -> Result<std::path::PathBuf, VaultError> {
+async fn ensure_runtime_path(
+    state: &AppState,
+    progress_id: Option<&str>,
+) -> Result<std::path::PathBuf, VaultError> {
     if let Some(path) = state.model_manager.runtime_path() {
         return Ok(path);
     }
+    // Report the runtime download through the same progress slot a
+    // model download uses, keyed by the model the user just picked,
+    // so the UI's poller shows the ~21-24 MB fetch instead of a
+    // silent wait. The slot is only reserved when it is free (a
+    // model download may already own it), and only a slot reserved
+    // here is cleared here — the guard never steals another
+    // download's progress.
+    let total = current_runtime().map_or(0, |runtime| runtime.size_bytes);
+    let reserved = match progress_id {
+        Some(id) => {
+            let mut guard = state
+                .download_progress
+                .lock()
+                .map_err(|e| VaultError::Model(e.to_string()))?;
+            if guard.is_none() {
+                *guard = Some((id.to_string(), 0, total));
+                true
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
+    let _progress_guard = reserved.then(|| DownloadProgressGuard {
+        progress: state.download_progress.clone(),
+    });
+    let progress = state.download_progress.clone();
+    let progress_key = progress_id.map(str::to_string);
     let manager = state.model_manager.clone();
-    tauri::async_runtime::spawn_blocking(move || manager.ensure_runtime(&mut |_, _| {}))
-        .await
-        .map_err(|e| VaultError::Model(format!("runtime install task failed: {e}")))?
+    tauri::async_runtime::spawn_blocking(move || {
+        manager.ensure_runtime(&mut |downloaded, total_bytes| {
+            if let Some(key) = &progress_key {
+                if let Ok(mut guard) = progress.lock() {
+                    // Only ever update the slot while it still
+                    // belongs to this action's model.
+                    if guard.as_ref().is_some_and(|(id, _, _)| id == key) {
+                        *guard = Some((key.clone(), downloaded, total_bytes));
+                    }
+                }
+            }
+        })
+    })
+    .await
+    .map_err(|e| VaultError::Model(format!("runtime install task failed: {e}")))?
 }
 
 /// Load one model file on the blocking pool. Loading a 100–500 MB model
@@ -903,7 +946,11 @@ async fn load_model_at(
 async fn sync_chat_model(state: &AppState) -> Result<(), VaultError> {
     match state.model_manager.active_model_path() {
         Some(path) => {
-            let runtime_path = ensure_runtime_path(state).await?;
+            let active_id = state
+                .model_manager
+                .active_model()
+                .map(|active| active.model_id);
+            let runtime_path = ensure_runtime_path(state, active_id.as_deref()).await?;
             let model = load_model_at(runtime_path, path).await?;
             state.chat_handler.set_model(Some(model));
         }
@@ -1000,7 +1047,7 @@ pub async fn select_model(
                 "model {model_id} is not installed or its file is missing"
             ))
         })?;
-    let runtime_path = ensure_runtime_path(&state).await?;
+    let runtime_path = ensure_runtime_path(&state, Some(&model_id)).await?;
     let model = load_model_at(runtime_path, path).await?;
     state.model_manager.set_active_model(&model_id)?;
     state.chat_handler.set_model(Some(model));

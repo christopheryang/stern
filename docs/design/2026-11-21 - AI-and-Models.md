@@ -88,8 +88,19 @@ extracts exactly one entry — the shared library — into
 `<app_data_dir>/models/runtime/<version>/`, deletes the archive, and
 records the install in the manifest. Selecting an already-installed
 model on a device whose manifest predates the runtime record fetches
-the runtime as part of that click. A runtime upgrade takes effect on
-the next app start; the library initializes once per process.
+the runtime as part of that click (with progress, through the same
+progress slot a model download uses). A recorded runtime whose
+version does not match the pinned catalog version counts as not
+installed and is fetched again. A runtime upgrade takes effect on
+the next app start; the library initializes once per process — a
+failed initialization is not cached, so a repaired or re-downloaded
+runtime loads on the next attempt without a restart. Before calling
+into ort, the loader checks the library file exists and fails with
+its own error if it does not: in ort rc.12's `load-dynamic` build a
+failed library load deadlocks inside ort's error construction
+instead of returning an error, so a missing runtime must never
+reach `init_from`. (A present-but-corrupt library still can; that
+is an upstream ort bug, to be re-checked at the next ort bump.)
 
 ### Install integrity
 

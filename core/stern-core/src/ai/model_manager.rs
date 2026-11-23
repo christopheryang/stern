@@ -273,6 +273,11 @@ pub struct ModelManager {
     /// changes cannot interleave and leave `installed.json` out of sync
     /// with the model directories on disk.
     manifest_lock: Mutex<()>,
+    /// Serializes a whole runtime install (download, extraction, and
+    /// the manifest update) so concurrent `ensure_runtime` callers
+    /// cannot download to and rename the same `.part` archive or race
+    /// the runtime record in `installed.json`.
+    runtime_lock: Mutex<()>,
 }
 
 impl ModelManager {
@@ -281,6 +286,7 @@ impl ModelManager {
         Self {
             models_dir,
             manifest_lock: Mutex::new(()),
+            runtime_lock: Mutex::new(()),
         }
     }
 
@@ -288,6 +294,14 @@ impl ModelManager {
     /// guard if a previous holder panicked while holding it.
     fn lock_manifest(&self) -> std::sync::MutexGuard<'_, ()> {
         self.manifest_lock
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Lock the runtime install for one `ensure_runtime` run,
+    /// recovering the guard if a previous holder panicked.
+    fn lock_runtime(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.runtime_lock
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
@@ -407,15 +421,26 @@ impl ModelManager {
         self.models_dir.join("runtime").join(version)
     }
 
-    /// Path of the installed ONNX Runtime shared library, if one is
-    /// recorded in the manifest *and* still present on disk. This is
-    /// the library `AiModel` dlopens; without it no model can load.
+    /// Path of the installed ONNX Runtime shared library, if the
+    /// runtime recorded in the manifest *is the catalog's pinned
+    /// build* and is still present on disk. This is the library
+    /// `AiModel` dlopens; without it no model can load. A record
+    /// whose version (or library name) does not match the current
+    /// catalog — e.g. after a pinned-version bump — counts as not
+    /// installed, so `ensure_runtime` fetches the pinned build
+    /// instead of handing `AiModel` the older library.
     #[must_use]
     pub fn runtime_path(&self) -> Option<PathBuf> {
         let runtime = self.manifest().runtime?;
+        let descriptor = current_runtime()?;
+        if runtime.version != descriptor.version
+            || runtime.lib_file_name != descriptor.lib_file_name
+        {
+            return None;
+        }
         let path = self
-            .runtime_version_dir(&runtime.version)
-            .join(&runtime.lib_file_name);
+            .runtime_version_dir(descriptor.version)
+            .join(descriptor.lib_file_name);
         path.exists().then_some(path)
     }
 
@@ -429,6 +454,12 @@ impl ModelManager {
         &self,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<PathBuf, VaultError> {
+        // One install at a time: concurrent callers would otherwise
+        // stream to the same `.part` archive, rename it over each
+        // other, and race the manifest's runtime record. The second
+        // caller re-checks inside the lock and reuses the first
+        // caller's install.
+        let _runtime_guard = self.lock_runtime();
         if let Some(path) = self.runtime_path() {
             return Ok(path);
         }
@@ -511,10 +542,35 @@ impl ModelManager {
             .map_err(|e| VaultError::Model(format!("open runtime archive: {e}")))?;
         let (reader, uncompressed_size) = Self::zip_entry_data(&bytes, entry_name)?;
         let part_path = dest.with_extension("part");
-        let mut out = fs::File::create(&part_path)
+        let result = Self::write_zip_entry(reader, uncompressed_size, &part_path, dest);
+        if let Err(e) = result {
+            // No orphaned `.part` library on any failure path (copy,
+            // size check, flush, chmod, rename) — the same cleanup
+            // discipline as the archive `.part` above.
+            if let Err(cleanup) = fs::remove_file(&part_path) {
+                if cleanup.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!("failed to remove partial runtime library: {cleanup}");
+                }
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// Stream one extracted entry to `part_path` (capped at the size
+    /// the central directory declares, so a corrupt deflate stream
+    /// cannot write unbounded data), mark it executable on Unix — a
+    /// dlopen target needs the execute bit — and rename it onto
+    /// `dest`. The caller removes `part_path` if this returns an
+    /// error.
+    fn write_zip_entry(
+        reader: Box<dyn Read + '_>,
+        uncompressed_size: u64,
+        part_path: &Path,
+        dest: &Path,
+    ) -> Result<(), VaultError> {
+        let mut out = fs::File::create(part_path)
             .map_err(|e| VaultError::Model(format!("create runtime library file: {e}")))?;
-        // Cap the output at the size the central directory declares,
-        // so a corrupt deflate stream cannot write unbounded data.
         let written = std::io::copy(&mut reader.take(uncompressed_size), &mut out)
             .map_err(|e| VaultError::Model(format!("extract runtime library: {e}")))?;
         if written != uncompressed_size {
@@ -528,10 +584,10 @@ impl ModelManager {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&part_path, fs::Permissions::from_mode(0o755))
+            fs::set_permissions(part_path, fs::Permissions::from_mode(0o755))
                 .map_err(|e| VaultError::Model(format!("chmod runtime library: {e}")))?;
         }
-        fs::rename(&part_path, dest)
+        fs::rename(part_path, dest)
             .map_err(|e| VaultError::Model(format!("move runtime library into place: {e}")))?;
         Ok(())
     }
@@ -577,12 +633,17 @@ impl ModelManager {
             .rev()
             .find(|&i| sig_at(archive, i, [0x50, 0x4b, 0x05, 0x06]))
             .ok_or_else(|| malformed("end of central directory"))?;
-        let cd_count = usize::from(
-            u16_at(archive, eocd + 10).ok_or_else(|| malformed("end of central directory"))?,
-        );
+        let cd_count_raw =
+            u16_at(archive, eocd + 10).ok_or_else(|| malformed("end of central directory"))?;
+        let cd_count = usize::from(cd_count_raw);
+        let cd_size =
+            u32_at(archive, eocd + 12).ok_or_else(|| malformed("end of central directory"))?;
         let cd_offset =
             u32_at(archive, eocd + 16).ok_or_else(|| malformed("end of central directory"))?;
-        if cd_offset == u32::MAX {
+        // ZIP64 sentinel values in the end record: any of them means
+        // the real value lives in a ZIP64 extension record, which
+        // this reader does not parse.
+        if cd_count_raw == u16::MAX || cd_size == u32::MAX || cd_offset == u32::MAX {
             return Err(VaultError::Model(
                 "read runtime archive: ZIP64 archives are unsupported".to_string(),
             ));
@@ -605,6 +666,17 @@ impl ModelManager {
             };
             let (method, compressed, uncompressed, name_len, extra_len, comment_len, local_offset) =
                 fields().ok_or_else(|| malformed("central directory"))?;
+            // ZIP64 sentinels in a central-directory entry: the real
+            // sizes/offset would live in a ZIP64 extra field, which
+            // this reader does not parse.
+            if compressed == u32::MAX as usize
+                || uncompressed == u32::MAX as usize
+                || local_offset == u32::MAX as usize
+            {
+                return Err(VaultError::Model(
+                    "read runtime archive: ZIP64 archives are unsupported".to_string(),
+                ));
+            }
             let name = archive
                 .get(pos + 46..pos + 46 + name_len)
                 .ok_or_else(|| malformed("central directory"))?;
@@ -1198,6 +1270,97 @@ mod tests {
             &dir.path().join("absent.dylib"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn runtime_path_rejects_a_stale_runtime_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ModelManager::new(dir.path().join("models"));
+        let descriptor = current_runtime().unwrap();
+        // Record an older runtime in the manifest and place its file
+        // on disk: it must NOT be handed to AiModel once the catalog
+        // pins a different version.
+        let stale = ModelManifest {
+            models: Vec::new(),
+            active_model_id: None,
+            runtime: Some(InstalledRuntime {
+                version: "0.0.0-stale".to_string(),
+                lib_file_name: descriptor.lib_file_name.to_string(),
+                sha256: "ab".repeat(32),
+                size_bytes: 42,
+                installed_at: "2026-11-22T00:00:00+00:00".to_string(),
+            }),
+        };
+        manager.write_manifest(&stale).unwrap();
+        let stale_dir = manager.runtime_version_dir("0.0.0-stale");
+        fs::create_dir_all(&stale_dir).unwrap();
+        fs::write(stale_dir.join(descriptor.lib_file_name), b"old library").unwrap();
+        assert_eq!(manager.runtime_path(), None);
+
+        // The catalog build itself, recorded and on disk, resolves.
+        let current = ModelManifest {
+            runtime: Some(InstalledRuntime {
+                version: descriptor.version.to_string(),
+                ..stale.runtime.clone().unwrap()
+            }),
+            ..stale
+        };
+        manager.write_manifest(&current).unwrap();
+        let current_dir = manager.runtime_version_dir(descriptor.version);
+        fs::create_dir_all(&current_dir).unwrap();
+        let lib_path = current_dir.join(descriptor.lib_file_name);
+        fs::write(&lib_path, b"current library").unwrap();
+        assert_eq!(manager.runtime_path(), Some(lib_path));
+    }
+
+    #[test]
+    fn zip_entry_data_rejects_zip64_sentinels() {
+        let payload = b"fake onnxruntime library bytes";
+        let wheel = build_test_wheel(&[("lib.dylib", payload, false)]);
+        // Central-directory uncompressed-size sentinel (offset 24 in
+        // the central header).
+        let cd = wheel
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .unwrap();
+        let mut patched = wheel.clone();
+        patched[cd + 24..cd + 28].copy_from_slice(&u32::MAX.to_le_bytes());
+        let err = ModelManager::zip_entry_data(&patched, "lib.dylib")
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("ZIP64"), "unexpected error: {err}");
+        // End-record entry-count sentinel (the end record is the
+        // last 22 bytes; its total-count field is at +10).
+        let mut patched = wheel;
+        let eocd = patched.len() - 22;
+        patched[eocd + 10..eocd + 12].copy_from_slice(&u16::MAX.to_le_bytes());
+        let err = ModelManager::zip_entry_data(&patched, "lib.dylib")
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("ZIP64"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn extract_failure_leaves_no_part_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive_path = dir.path().join("runtime.whl");
+        let payload = b"fake onnxruntime library bytes";
+        let mut wheel = build_test_wheel(&[("lib.dylib", payload, false)]);
+        // Lie about the uncompressed size so extraction fails its
+        // size check after writing the .part file.
+        let cd = wheel
+            .windows(4)
+            .position(|w| w == [0x50, 0x4b, 0x01, 0x02])
+            .unwrap();
+        let bigger = u32::try_from(payload.len() + 5).unwrap();
+        wheel[cd + 24..cd + 28].copy_from_slice(&bigger.to_le_bytes());
+        fs::write(&archive_path, &wheel).unwrap();
+        let dest = dir.path().join("lib.dylib");
+        assert!(ModelManager::extract_zip_entry(&archive_path, "lib.dylib", &dest).is_err());
+        assert!(!dest.exists());
+        assert!(!dest.with_extension("part").exists());
     }
 
     #[test]

@@ -15,6 +15,8 @@
 use crate::components::chat::ChatView;
 use crate::components::config::ConfigView;
 use leptos::prelude::*;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 
@@ -53,11 +55,16 @@ async fn invoke_model_status() -> Result<serde_json::Value, String> {
 
 /// True when some catalog model is active *and* the ONNX Runtime is
 /// installed — the two things chat needs before it can run a model.
+/// An invoke or parse failure is an `Err`, not "not ready": the
+/// caller surfaces it instead of leaving the UI on "Loading…" with
+/// no way out.
 #[allow(clippy::future_not_send)]
-async fn fetch_model_ready() -> Option<bool> {
-    let value = invoke_model_status().await.ok()?;
-    let rows = value.as_array()?;
-    Some(rows.iter().any(|row| {
+async fn fetch_model_ready() -> Result<bool, String> {
+    let value = invoke_model_status().await?;
+    let rows = value
+        .as_array()
+        .ok_or_else(|| "model status was not a list".to_string())?;
+    Ok(rows.iter().any(|row| {
         row.get("is_active").and_then(serde_json::Value::as_bool) == Some(true)
             && row
                 .get("runtime_installed")
@@ -66,14 +73,79 @@ async fn fetch_model_ready() -> Option<bool> {
     }))
 }
 
-fn spawn_refresh(set_model_ready: WriteSignal<Option<bool>>, cancelled: ReadSignal<bool>) {
+fn spawn_refresh(
+    set_model_ready: WriteSignal<Option<bool>>,
+    set_status_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) {
     spawn_local(async move {
-        if let Some(ready) = fetch_model_ready().await {
-            if !cancelled.get_untracked() {
-                set_model_ready.set(Some(ready));
+        match fetch_model_ready().await {
+            Ok(ready) => {
+                if !cancelled.load(Ordering::Relaxed) {
+                    set_status_error.set(None);
+                    set_model_ready.set(Some(ready));
+                }
+            }
+            Err(error) => {
+                if !cancelled.load(Ordering::Relaxed) {
+                    set_status_error.set(Some(error));
+                }
             }
         }
     });
+}
+
+/// The gate shown when no model is ready: Stern ships without one,
+/// so the first run routes the user to Settings to pick one.
+#[component]
+fn ModelRequiredGate(set_in_config: WriteSignal<bool>) -> impl IntoView {
+    view! {
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
+            <div style="font-size:16px;color:#e6e6e6;">
+                "Choose an AI model to get started"
+            </div>
+            <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
+                "Stern ships without an AI model. Pick one in Settings \
+                and it downloads to this device only — then you can chat."
+            </p>
+            <button
+                style=PRIMARY_BUTTON_STYLE
+                on:click=move |_| set_in_config.set(true)
+            >
+                "Choose a model"
+            </button>
+        </div>
+    }
+}
+
+/// The gate shown when the model-status check itself failed: the
+/// error and a retry, instead of a "Loading…" that never ends.
+#[component]
+fn StatusErrorGate(
+    error: String,
+    set_model_ready: WriteSignal<Option<bool>>,
+    set_status_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) -> impl IntoView {
+    view! {
+        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
+            <div style="font-size:16px;color:#e6e6e6;">
+                "Couldn't check whether a model is ready"
+            </div>
+            <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
+                {error}
+            </p>
+            <button
+                style=PRIMARY_BUTTON_STYLE
+                on:click=move |_| {
+                    set_status_error.set(None);
+                    spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+                }
+            >
+                "Retry"
+            </button>
+        </div>
+    }
 }
 
 const HEADER_STYLE: &str = "display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#16213e;border-bottom:1px solid #2a2a4a;flex-shrink:0;";
@@ -86,11 +158,25 @@ pub fn AppShell() -> impl IntoView {
     let (in_config, set_in_config) = signal(false);
     // None = still checking. Chat stays gated until this is Some(true).
     let (model_ready, set_model_ready) = signal(Option::<bool>::None);
-    // Set on unmount so a late status fetch never writes a dead signal.
-    let (cancelled, set_cancelled) = signal(false);
-    on_cleanup(move || set_cancelled.set(true));
+    // A failed status check, kept apart from `model_ready` so the UI
+    // can show the error with a retry instead of "Loading…" forever.
+    let (status_error, set_status_error) = signal(Option::<String>::None);
+    // Set on unmount so a late status fetch never writes a dead
+    // signal. An `Arc<AtomicBool>`, not a signal: the flag itself must
+    // stay readable after this component is disposed, when reading a
+    // signal it owned would access a disposed signal. (The
+    // `Rc<Cell<bool>>` pattern `model_setup.rs` uses for its
+    // per-action stop flags cannot serve here: `on_cleanup` requires
+    // a Send + Sync closure.)
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let cancelled_on_cleanup = cancelled.clone();
+    on_cleanup(move || cancelled_on_cleanup.store(true, Ordering::Relaxed));
 
-    spawn_refresh(set_model_ready, cancelled);
+    spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+    // One clone per view closure below: each `move` closure takes
+    // its own handle to the same flag.
+    let cancelled_header = cancelled.clone();
+    let cancelled_main = cancelled;
 
     view! {
         <div style="display:flex;flex-direction:column;height:100vh;">
@@ -98,6 +184,7 @@ pub fn AppShell() -> impl IntoView {
                 <h1 style="font-size:18px;font-weight:700;">"Stern"</h1>
                 {move || -> AnyView {
                     if in_config.get() {
+                        let cancelled_back = cancelled_header.clone();
                         view! {
                             <button
                                 style=BACK_BUTTON_STYLE
@@ -105,7 +192,11 @@ pub fn AppShell() -> impl IntoView {
                                     set_in_config.set(false);
                                     // The user may have just downloaded or
                                     // selected a model — re-check the gate.
-                                    spawn_refresh(set_model_ready, cancelled);
+                                    spawn_refresh(
+                                        set_model_ready,
+                                        set_status_error,
+                                        cancelled_back.clone(),
+                                    );
                                 }
                             >
                                 "← Chat"
@@ -133,21 +224,16 @@ pub fn AppShell() -> impl IntoView {
                         view! { <ChatView /> }.into_any()
                     } else if model_ready.get() == Some(false) {
                         view! {
-                            <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
-                                <div style="font-size:16px;color:#e6e6e6;">
-                                    "Choose an AI model to get started"
-                                </div>
-                                <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
-                                    "Stern ships without an AI model. Pick one in Settings \
-                                    and it downloads to this device only — then you can chat."
-                                </p>
-                                <button
-                                    style=PRIMARY_BUTTON_STYLE
-                                    on:click=move |_| set_in_config.set(true)
-                                >
-                                    "Choose a model"
-                                </button>
-                            </div>
+                            <ModelRequiredGate set_in_config=set_in_config />
+                        }.into_any()
+                    } else if let Some(error) = status_error.get() {
+                        view! {
+                            <StatusErrorGate
+                                error=error
+                                set_model_ready=set_model_ready
+                                set_status_error=set_status_error
+                                cancelled=cancelled_main.clone()
+                            />
                         }.into_any()
                     } else {
                         view! {
