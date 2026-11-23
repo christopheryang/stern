@@ -61,13 +61,12 @@ async fn invoke_chat(content: String) -> Result<(String, Vec<String>, bool), Str
     let options = response
         .get("options")
         .and_then(|v| v.as_array())
-        .map(|items| {
+        .map_or_default(|items| {
             items
                 .iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect()
-        })
-        .unwrap_or_default();
+        });
     let input_sensitive = response
         .get("input_sensitive")
         .and_then(serde_json::Value::as_bool)
