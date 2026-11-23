@@ -10,9 +10,11 @@
 [extend]
 useDefault = true
 
-[[allowlists]]
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
 description = "Model catalog SHA-256 integrity pins (public hashes, not secrets)"
 condition = "AND"
-regexTarget = "match"
+regexTarget = "line"
 regexes = ['''tokenizer_sha256: "[0-9a-f]{64}"''']
 paths = ['''core/stern-core/src/ai/model_manager\.rs''']
