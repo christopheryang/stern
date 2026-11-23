@@ -2,6 +2,7 @@ use crate::ai::conversation::{Conversation, Step as ConversationStep};
 use crate::ai::intent::{classify_intent, Intent};
 use crate::ai::model::AiModel;
 use std::sync::{Arc, Mutex, RwLock};
+use zeroize::Zeroizing;
 
 /// A vault entry offered in a lettered choice.
 #[derive(Debug, Clone)]
@@ -28,8 +29,9 @@ pub struct ChatHandler {
     /// when a search matched several entries.
     pending_choice: Mutex<Option<PendingChoice>>,
     /// Vault readiness as last synced by the app layer. Defaults
-    /// to ready: the core on its own has no vault to check, and
-    /// the app syncs the real state before every message.
+    /// to NOT ready — fail closed: until the app syncs the real
+    /// state, the handler treats the vault as missing and locked
+    /// and runs the gate rather than letting a request through.
     vault_state: Mutex<VaultState>,
     /// The vault setup/unlock conversation in progress, if any.
     /// While one is active it owns every incoming message: its
@@ -60,8 +62,8 @@ struct VaultGate {
     /// True for setting up a new vault, false for unlocking.
     setup: bool,
     /// The first typing of the new master password, kept only
-    /// until the confirmation matches.
-    first_password: Option<String>,
+    /// until the confirmation matches. Zeroized on drop.
+    first_password: Option<Zeroizing<String>>,
     /// The message that was interrupted by the gate, replayed
     /// once the vault is ready.
     stashed: Option<String>,
@@ -106,8 +108,8 @@ impl ChatHandler {
             conversation: Mutex::new(None),
             pending_choice: Mutex::new(None),
             vault_state: Mutex::new(VaultState {
-                exists: true,
-                unlocked: true,
+                exists: false,
+                unlocked: false,
             }),
             vault_gate: Mutex::new(None),
         }
@@ -257,7 +259,7 @@ impl ChatHandler {
                          What master password would you like?"
                     ));
                 }
-                gate.first_password = Some(user_input.to_string());
+                gate.first_password = Some(Zeroizing::new(user_input.to_string()));
                 gate.stage = GateStage::SetupConfirm;
                 self.keep_gate(gate);
                 sensitive_prompt(
@@ -267,7 +269,11 @@ impl ChatHandler {
                 )
             }
             GateStage::SetupConfirm => {
-                if gate.first_password.as_deref() == Some(user_input) {
+                let confirmed = gate
+                    .first_password
+                    .as_ref()
+                    .is_some_and(|password| password.as_str() == user_input);
+                if confirmed {
                     let password = gate.first_password.take().unwrap_or_default();
                     gate.stage = GateStage::Completing;
                     self.keep_gate(gate);
@@ -289,7 +295,7 @@ impl ChatHandler {
                 }
             }
             GateStage::UnlockPassword => {
-                let password = user_input.to_string();
+                let password = Zeroizing::new(user_input.to_string());
                 self.keep_gate(gate);
                 ChatResponse {
                     message: "Unlocking...".to_string(),
@@ -321,6 +327,22 @@ impl ChatHandler {
 
     #[must_use]
     pub fn process_message(&self, user_input: &str) -> ChatResponse {
+        // A vault gate in progress owns the message FIRST: its
+        // replies are master passwords. A pending entry choice
+        // must never intercept one — if the vault locks while a
+        // choice is waiting, the password would otherwise be read
+        // as a choice answer.
+        let gate = {
+            let mut guard = self
+                .vault_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.take()
+        };
+        if let Some(gate) = gate {
+            return self.handle_gate_message(gate, user_input);
+        }
+
         // A lettered entry choice waiting on this message.
         let pending = {
             let mut guard = self
@@ -354,19 +376,6 @@ impl ChatHandler {
             }
             // Not a choice: the user moved on, and the message is
             // processed normally below with the choice forgotten.
-        }
-
-        // A vault gate in progress owns the message: its replies
-        // are master passwords, not new commands.
-        let gate = {
-            let mut guard = self
-                .vault_gate
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner);
-            guard.take()
-        };
-        if let Some(gate) = gate {
-            return self.handle_gate_message(gate, user_input);
         }
 
         // A guided conversation in progress owns the message.
@@ -737,10 +746,20 @@ impl ChatHandler {
 /// range, or the candidate's label.
 fn parse_choice<'a>(input: &str, candidates: &'a [EntryCandidate]) -> Option<&'a EntryCandidate> {
     let trimmed = input.trim();
+    // A single letter picks by position — but only when it is a
+    // letter inside the offered range. Anything else (a digit, a
+    // letter past the end) falls through to label matching, so an
+    // entry whose name is itself one character stays pickable.
     if trimmed.len() == 1 {
-        let byte = trimmed.as_bytes().first()?;
-        let index = usize::from(byte.to_ascii_lowercase()).checked_sub('a' as usize)?;
-        return candidates.get(index);
+        let byte = *trimmed.as_bytes().first()?;
+        if byte.is_ascii_alphabetic() {
+            let index = usize::from(byte.to_ascii_lowercase())
+                .checked_sub('a' as usize)
+                .unwrap_or(usize::MAX);
+            if let Some(candidate) = candidates.get(index) {
+                return Some(candidate);
+            }
+        }
     }
     let lower = trimmed.to_lowercase();
     candidates
@@ -793,7 +812,6 @@ fn sensitive_prompt(message: &str) -> ChatResponse {
     }
 }
 
-#[derive(Debug)]
 pub enum Action {
     StoreEntry {
         name: String,
@@ -828,12 +846,67 @@ pub enum Action {
     /// collected and confirmed it). Executed by the app layer,
     /// which then reports completion back to the handler.
     SetupVault {
-        password: String,
+        password: Zeroizing<String>,
     },
     /// Unlock the vault with this master password (the unlock
     /// gate collected it). Executed by the app layer with its
     /// lockout protection.
     UnlockVaultWith {
-        password: String,
+        password: Zeroizing<String>,
     },
+}
+
+/// Actions carry secrets — the master passwords, and every field
+/// value of an entry being stored or updated — so `Debug` is
+/// written by hand: it shows the shape and the field KEYS, never
+/// a value. A derived impl would print the secrets into logs,
+/// panic messages, and test output.
+impl std::fmt::Debug for Action {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        fn keys(fields: &[(String, String)]) -> Vec<&str> {
+            fields.iter().map(|(key, _)| key.as_str()).collect()
+        }
+        match self {
+            Self::StoreEntry { name, kind, fields } => f
+                .debug_struct("StoreEntry")
+                .field("name", name)
+                .field("kind", kind)
+                .field("field_keys", &keys(fields))
+                .finish(),
+            Self::SearchEntry { query, field } => f
+                .debug_struct("SearchEntry")
+                .field("query", query)
+                .field("field", field)
+                .finish(),
+            Self::RevealEntry { entry_id, field } => f
+                .debug_struct("RevealEntry")
+                .field("entry_id", entry_id)
+                .field("field", field)
+                .finish(),
+            Self::ListEntries { category } => f
+                .debug_struct("ListEntries")
+                .field("category", category)
+                .finish(),
+            Self::ConfirmDelete { name } => {
+                f.debug_struct("ConfirmDelete").field("name", name).finish()
+            }
+            Self::UpdateEntry { name, fields } => f
+                .debug_struct("UpdateEntry")
+                .field("name", name)
+                .field("field_keys", &keys(fields))
+                .finish(),
+            Self::ExportVault => f.write_str("ExportVault"),
+            Self::ImportVault => f.write_str("ImportVault"),
+            Self::CreateVault => f.write_str("CreateVault"),
+            Self::UnlockVault => f.write_str("UnlockVault"),
+            Self::SetupVault { .. } => f
+                .debug_struct("SetupVault")
+                .field("password", &"••••")
+                .finish(),
+            Self::UnlockVaultWith { .. } => f
+                .debug_struct("UnlockVaultWith")
+                .field("password", &"••••")
+                .finish(),
+        }
+    }
 }

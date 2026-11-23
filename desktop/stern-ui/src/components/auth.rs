@@ -227,7 +227,11 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
                         <div style="display:flex;gap:10px;">
                             <button
                                 style=GHOST_BUTTON_STYLE
-                                on:click=move |_| set_warn.set(false)
+                                prop:disabled=busy
+                                on:click=move |_| {
+                                    set_warn.set(false);
+                                    set_error.set(None);
+                                }
                             >
                                 "Back"
                             </button>
@@ -253,6 +257,7 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
                             <label style=TOGGLE_STYLE>
                                 <input
                                     type="checkbox"
+                                    prop:checked=show
                                     on:change=move |ev| set_show.set(event_target_checked(&ev))
                                 />
                                 "Show password"
@@ -312,6 +317,7 @@ pub fn LoginView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
                 <label style=TOGGLE_STYLE>
                     <input
                         type="checkbox"
+                        prop:checked=show
                         on:change=move |ev| set_show.set(event_target_checked(&ev))
                     />
                     "Show password"

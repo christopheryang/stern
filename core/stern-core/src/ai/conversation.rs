@@ -8,7 +8,8 @@
 //! what kind of secret it is (a short lettered list), then one
 //! question per field, then a confirmation. The user can answer a
 //! choice with its letter or its label, skip optional fields, and
-//! cancel at any point.
+//! cancel at any point — except at a secret prompt, where the
+//! reply is the secret itself and is taken verbatim.
 //!
 //! The engine is deliberately deterministic — no model output is
 //! involved — so the questions, their order, and the resulting
@@ -295,13 +296,35 @@ impl Conversation {
     /// Advance the conversation with the user's reply.
     pub fn handle(&mut self, input: &str) -> Step {
         let trimmed = input.trim();
-        if is_cancel(trimmed) {
-            return Step::Cancelled;
-        }
         match self.stage {
-            Stage::AwaitingKind => self.handle_kind_choice(trimmed),
-            Stage::Collecting => self.handle_field_value(trimmed),
-            Stage::Confirming => self.handle_confirmation(trimmed),
+            Stage::AwaitingKind => {
+                if is_cancel(trimmed) {
+                    return Step::Cancelled;
+                }
+                self.handle_kind_choice(trimmed)
+            }
+            Stage::Collecting => {
+                // At a sensitive prompt the reply IS the secret:
+                // it is data, not a command — recorded verbatim,
+                // with no trimming (a password may legitimately
+                // start or end with spaces) and no cancel check
+                // (a secret that happens to read "cancel" is
+                // still the secret). Everywhere else the trimmed
+                // control words apply.
+                if self.next_field().is_some_and(|field| field.sensitive) {
+                    return self.handle_field_value(input);
+                }
+                if is_cancel(trimmed) {
+                    return Step::Cancelled;
+                }
+                self.handle_field_value(trimmed)
+            }
+            Stage::Confirming => {
+                if is_cancel(trimmed) {
+                    return Step::Cancelled;
+                }
+                self.handle_confirmation(trimmed)
+            }
         }
     }
 
@@ -340,9 +363,18 @@ impl Conversation {
                 let Some(kind) = self.kind else {
                     return Step::Cancelled;
                 };
-                let name = self
+                // The entry's name is the kind's FIRST field (the
+                // website for a login, the title for a text) —
+                // looked up by key, not by position: a prefilled
+                // conversation records parsed fields before the
+                // name field is ever prompted, so fields.first()
+                // can be a different field entirely (the password).
+                let name = kind
                     .fields
                     .first()
+                    .and_then(|name_field| {
+                        self.fields.iter().find(|(key, _)| key == name_field.key)
+                    })
                     .map_or_else(String::new, |(_, value)| value.clone());
                 Step::Finished(Intent::StoreSecret {
                     name,
@@ -613,5 +645,51 @@ mod tests {
     #[test]
     fn prefilled_unknown_kind_returns_none() {
         assert!(Conversation::prefilled("biometric", "Face", &[]).is_none());
+    }
+
+    #[test]
+    fn prefilled_name_comes_from_the_name_field_not_the_first_field() {
+        // The parsed password is recorded before the website is
+        // ever prompted; the finished entry must still be named
+        // for the website, not for the password.
+        let parsed = vec![("password".to_string(), "hunter2".to_string())];
+        let (mut conversation, step) = Conversation::prefilled("password", "", &parsed).unwrap();
+        match step {
+            Step::Prompt { message, .. } => {
+                assert_eq!(message, "What website is this username/password for?");
+            }
+            _ => panic!("expected the website prompt"),
+        }
+        conversation.handle("example.com");
+        conversation.handle("chris");
+        match conversation.handle("yes") {
+            Step::Finished(Intent::StoreSecret { name, fields, .. }) => {
+                assert_eq!(name, "example.com");
+                assert!(fields.contains(&("password".to_string(), "hunter2".to_string())));
+            }
+            _ => panic!("expected a finished store intent"),
+        }
+    }
+
+    #[test]
+    fn sensitive_values_are_recorded_verbatim_and_are_not_commands() {
+        // At the password prompt, " cancel " (spaces and all) is
+        // the secret: no trimming, and no cancel-word abort.
+        let mut conversation = start_at_fields();
+        conversation.handle("a");
+        conversation.handle("example.com");
+        conversation.handle("chris");
+        match conversation.handle(" cancel ") {
+            Step::Prompt { message, .. } => {
+                assert!(message.starts_with("Save this username/password?"));
+            }
+            other => panic!("expected the confirmation prompt, got: {other:?}"),
+        }
+        match conversation.handle("yes") {
+            Step::Finished(Intent::StoreSecret { fields, .. }) => {
+                assert!(fields.contains(&("password".to_string(), " cancel ".to_string())));
+            }
+            _ => panic!("expected a finished store intent"),
+        }
     }
 }

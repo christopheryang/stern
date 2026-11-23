@@ -251,10 +251,14 @@ fn unlocked_main(
 fn header_actions(
     auth: Option<AuthPhase>,
     in_config: bool,
+    locking: bool,
+    lock_error: Option<String>,
     set_in_config: WriteSignal<bool>,
     set_auth: WriteSignal<Option<AuthPhase>>,
     set_model_ready: WriteSignal<Option<bool>>,
     set_status_error: WriteSignal<Option<String>>,
+    set_locking: WriteSignal<bool>,
+    set_lock_error: WriteSignal<Option<String>>,
     cancelled: Arc<AtomicBool>,
 ) -> AnyView {
     if auth != Some(AuthPhase::Unlocked) {
@@ -279,13 +283,28 @@ fn header_actions(
         .into_any()
     } else {
         view! {
-            <span style="display:flex;gap:8px;">
+            <span style="display:flex;gap:8px;align-items:center;">
+                {lock_error.map(|error| {
+                    view! { <span style="color:#e94560;font-size:13px;">{error}</span> }
+                })}
                 <button
                     style=BACK_BUTTON_STYLE
+                    prop:disabled=locking
                     on:click=move |_| {
+                        if locking {
+                            return;
+                        }
+                        set_locking.set(true);
+                        set_lock_error.set(None);
                         spawn_local(async move {
-                            if crate::components::auth::lock_vault().await.is_ok() {
-                                set_auth.set(Some(AuthPhase::Login));
+                            match crate::components::auth::lock_vault().await {
+                                Ok(()) => set_auth.set(Some(AuthPhase::Login)),
+                                Err(error) => {
+                                    set_lock_error.set(Some(format!(
+                                        "Couldn't lock the vault: {error}"
+                                    )));
+                                    set_locking.set(false);
+                                }
                             }
                         });
                     }
@@ -324,6 +343,11 @@ pub fn AppShell() -> impl IntoView {
     // A failed status check, kept apart from `model_ready` so the UI
     // can show the error with a retry instead of "Loading…" forever.
     let (status_error, set_status_error) = signal(Option::<String>::None);
+    // The Lock button's in-flight flag (a second click while a
+    // lock is running must not start another) and its failure,
+    // shown next to the button instead of swallowed.
+    let (locking, set_locking) = signal(false);
+    let (lock_error, set_lock_error) = signal(Option::<String>::None);
     // Set on unmount so a late status fetch never writes a dead
     // signal. An `Arc<AtomicBool>`, not a signal: the flag itself must
     // stay readable after this component is disposed, when reading a
@@ -350,10 +374,14 @@ pub fn AppShell() -> impl IntoView {
                 {move || header_actions(
                     auth.get(),
                     in_config.get(),
+                    locking.get(),
+                    lock_error.get(),
                     set_in_config,
                     set_auth,
                     set_model_ready,
                     set_status_error,
+                    set_locking,
+                    set_lock_error,
                     cancelled_header.clone(),
                 )}
             </header>

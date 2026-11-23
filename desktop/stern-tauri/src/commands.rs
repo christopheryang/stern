@@ -19,6 +19,7 @@ use stern_ipc::dto::{
     UpdateEntryRequest, VaultStatus,
 };
 use tauri::State;
+use zeroize::Zeroizing;
 
 use std::time::{Duration, Instant};
 
@@ -283,10 +284,10 @@ fn execute_chat_response(
             ref field,
         }) => handle_reveal_entry(state, entry_id, field.as_deref()),
         Some(stern_core::ai::chat::Action::SetupVault { ref password }) => {
-            handle_setup_vault(state, password)
+            handle_setup_vault(state, password.as_str())
         }
         Some(stern_core::ai::chat::Action::UnlockVaultWith { ref password }) => {
-            handle_unlock_vault(state, password)
+            handle_unlock_vault(state, password.as_str())
         }
         Some(
             stern_core::ai::chat::Action::ListEntries { .. }
@@ -404,7 +405,7 @@ fn handle_store_entry(
         });
     }
 
-    let kek = *session.kek()?;
+    let kek = Zeroizing::new(*session.kek()?);
     drop(session);
 
     let entry_kind = match kind {
@@ -487,8 +488,9 @@ const fn plain_chat_response(message: String) -> ChatResponse {
 }
 
 /// All entries plus the session KEK, or `None` when the vault is
-/// locked.
-type UnlockedVault = Option<(Vec<EncryptedEntry>, [u8; KEK_LEN])>;
+/// locked. The KEK copy travels in a `Zeroizing` so it is wiped
+/// when the caller drops it, not left on the stack or heap.
+type UnlockedVault = Option<(Vec<EncryptedEntry>, Zeroizing<[u8; KEK_LEN]>)>;
 
 fn unlocked_entries(state: &AppState) -> Result<UnlockedVault, VaultError> {
     let session = state
@@ -500,7 +502,7 @@ fn unlocked_entries(state: &AppState) -> Result<UnlockedVault, VaultError> {
         return Ok(None);
     }
 
-    let kek = *session.kek()?;
+    let kek = Zeroizing::new(*session.kek()?);
     drop(session);
 
     let entries = state.repository.list_all_entries()?;
@@ -663,7 +665,7 @@ pub async fn export_vault(
     if !session.is_unlocked {
         return Err(VaultError::VaultLocked);
     }
-    let kek = *session.kek()?;
+    let kek = Zeroizing::new(*session.kek()?);
     drop(session);
 
     let encrypted_entries = state.repository.list_all_entries()?;
@@ -741,7 +743,7 @@ pub async fn import_vault(
     if !session.is_unlocked {
         return Err(VaultError::VaultLocked);
     }
-    let kek = *session.kek()?;
+    let kek = Zeroizing::new(*session.kek()?);
     drop(session);
 
     let path = std::path::PathBuf::from(&request.path);

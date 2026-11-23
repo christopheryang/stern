@@ -101,66 +101,138 @@ fn mask_display(secret: &str, reveals: &[f64]) -> String {
         .collect()
 }
 
+/// The splice an edit applies, in char indices: where it
+/// starts, how many chars it removes, and the chars it inserts.
+type Splice = (usize, usize, Vec<char>);
+
+/// Locate an edit from the caret: after an edit the caret sits
+/// right after the inserted text (or right where the deleted
+/// text was), so the changed region is the one ending at the
+/// caret. Unlike a prefix/suffix diff this stays unambiguous
+/// when the typed character is a literal `*` next to masked
+/// characters — the diff cannot tell those apart, the caret
+/// can. Returns `None` when the caret does not verify (a
+/// select-and-retype, say), leaving the diff as the fallback.
+/// `caret_utf16` is the input's `selectionStart`, which counts
+/// UTF-16 code units.
+#[allow(clippy::arithmetic_side_effects)]
+fn caret_splice(old: &[char], new: &[char], caret_utf16: Option<u32>) -> Option<Splice> {
+    let caret16 = usize::try_from(caret_utf16?).ok()?;
+    let mut units = 0_usize;
+    let mut caret = None;
+    for (index, ch) in new.iter().enumerate() {
+        if units == caret16 {
+            caret = Some(index);
+            break;
+        }
+        units += ch.len_utf16();
+    }
+    if caret.is_none() && units == caret16 {
+        caret = Some(new.len());
+    }
+    let caret = caret?;
+    let delta = isize::try_from(new.len()).ok()? - isize::try_from(old.len()).ok()?;
+    if delta >= 0 {
+        let inserted_len = usize::try_from(delta).ok()?;
+        let start = caret.checked_sub(inserted_len)?;
+        // Untouched before the insertion, and the tail after the
+        // caret is the old tail from the insertion point on.
+        let before_untouched = new.get(..start) == old.get(..start);
+        let tail_untouched = new.get(caret..) == old.get(start..);
+        if before_untouched && tail_untouched {
+            return Some((start, 0, new.get(start..caret)?.to_vec()));
+        }
+    } else {
+        let removed_len = usize::try_from(-delta).ok()?;
+        let before_untouched = new.get(..caret) == old.get(..caret);
+        let tail_untouched = new.get(caret..) == old.get(caret + removed_len..);
+        if before_untouched && tail_untouched {
+            return Some((caret, removed_len, Vec::new()));
+        }
+    }
+    None
+}
+
+/// Locate an edit by the common prefix/suffix of the two
+/// display strings — the fallback when no caret verifies.
+#[allow(clippy::arithmetic_side_effects)]
+fn diff_splice(old: &[char], new: &[char]) -> Splice {
+    let shared = old.len().min(new.len());
+    let mut prefix = 0;
+    while prefix < shared && old.get(prefix) == new.get(prefix) {
+        prefix += 1;
+    }
+    let mut suffix = 0;
+    while suffix < shared.saturating_sub(prefix)
+        && old.get(old.len() - 1 - suffix) == new.get(new.len() - 1 - suffix)
+    {
+        suffix += 1;
+    }
+    let inserted: Vec<char> = new
+        .get(prefix..new.len().saturating_sub(suffix))
+        .unwrap_or(&[])
+        .to_vec();
+    let removed = old.len().saturating_sub(prefix).saturating_sub(suffix);
+    (prefix, removed, inserted)
+}
+
 /// Fold one edit of the masked display back into the real
-/// secret. The browser edits the display string; the common
-/// prefix/suffix against the last rendered display locates the
-/// change, and inserted characters are the real typed text. The
-/// index math is bounded by the strings' own lengths, and the
-/// float math is millisecond timestamps.
+/// secret. The browser edits the display string; the caret (or,
+/// failing that, the common prefix/suffix against the last
+/// rendered display) locates the change, and inserted
+/// characters are the real typed text. The index math is
+/// bounded by the strings' own lengths, and the float math is
+/// millisecond timestamps.
 #[allow(clippy::arithmetic_side_effects, clippy::float_arithmetic)]
 fn fold_secret_edit(
     shadow: &str,
     secret: &str,
     reveals: &[f64],
     new_display: &str,
+    caret_utf16: Option<u32>,
 ) -> (String, Vec<f64>) {
     let old_display: Vec<char> = shadow.chars().collect();
     let new_chars: Vec<char> = new_display.chars().collect();
     let real: Vec<char> = secret.chars().collect();
-    let shared = old_display.len().min(new_chars.len());
-    let mut prefix = 0;
-    while prefix < shared && old_display.get(prefix) == new_chars.get(prefix) {
-        prefix += 1;
-    }
-    let mut suffix = 0;
-    while suffix < shared.saturating_sub(prefix)
-        && old_display.get(old_display.len() - 1 - suffix)
-            == new_chars.get(new_chars.len() - 1 - suffix)
-    {
-        suffix += 1;
-    }
-    let inserted: Vec<char> = new_chars
-        .get(prefix..new_chars.len().saturating_sub(suffix))
-        .unwrap_or(&[])
-        .to_vec();
-    let removed = old_display
-        .len()
-        .saturating_sub(prefix)
-        .saturating_sub(suffix);
-    let mut next_real: Vec<char> = real.get(..prefix).unwrap_or(&[]).to_vec();
+    let (start, removed, inserted) = caret_splice(&old_display, &new_chars, caret_utf16)
+        .unwrap_or_else(|| diff_splice(&old_display, &new_chars));
+    let mut next_real: Vec<char> = real.get(..start).unwrap_or(&[]).to_vec();
     next_real.extend(inserted.iter());
-    next_real.extend(real.get(prefix + removed..).unwrap_or(&[]));
+    next_real.extend(real.get(start + removed..).unwrap_or(&[]));
     let now = js_sys::Date::now();
-    let mut next_rev: Vec<f64> = reveals.get(..prefix).unwrap_or(&[]).to_vec();
+    let mut next_rev: Vec<f64> = reveals.get(..start).unwrap_or(&[]).to_vec();
     next_rev.extend(inserted.iter().map(|_| now + PEEK_MILLIS));
-    next_rev.extend(reveals.get(prefix + removed..).unwrap_or(&[]));
+    next_rev.extend(reveals.get(start + removed..).unwrap_or(&[]));
     (next_real.iter().collect(), next_rev)
 }
 
 /// A counter that bumps five times a second, so the peek-mask
-/// display re-renders as typed characters expire.
+/// display re-renders as typed characters expire. The interval
+/// is cleared when the owning component is disposed, and the
+/// callback is held in a stored value the arena drops with it —
+/// without that, every mount leaked a timer that kept writing
+/// a disposed signal.
 fn use_tick() -> ReadSignal<u32> {
     let (tick, set_tick) = signal(0_u32);
     let tick_cb = Closure::wrap(Box::new(move || {
         set_tick.update(|t| *t = t.wrapping_add(1));
     }) as Box<dyn FnMut()>);
+    let stored_cb = StoredValue::new_local(tick_cb);
     if let Some(window) = web_sys::window() {
-        let _interval_id = window.set_interval_with_callback_and_timeout_and_arguments_0(
-            tick_cb.as_ref().unchecked_ref(),
-            200,
-        );
+        let interval_id = stored_cb.with_value(|cb| {
+            window.set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref(),
+                200,
+            )
+        });
+        if let Ok(interval_id) = interval_id {
+            on_cleanup(move || {
+                if let Some(window) = web_sys::window() {
+                    window.clear_interval_with_handle(interval_id);
+                }
+            });
+        }
     }
-    tick_cb.forget();
     tick
 }
 
@@ -297,18 +369,39 @@ fn message_view(
     .into_any()
 }
 
+/// Keep the input element showing `display`: apply the string
+/// imperatively from an effect — never from inside the view,
+/// where writing state fights the render — and only when it
+/// actually changed. Assigning `.value` drops the caret to the
+/// end, so the selection is saved and restored around the
+/// assignment: a character expiring mid-edit must not yank the
+/// cursor.
+fn bind_input_value(input_ref: NodeRef<leptos::html::Input>, display: Memo<String>) {
+    Effect::new(move |_| {
+        let wanted = display.get();
+        if let Some(el) = input_ref.get() {
+            if el.value() != wanted {
+                let start = el.selection_start().ok().flatten();
+                let end = el.selection_end().ok().flatten();
+                el.set_value(&wanted);
+                if let (Some(start), Some(end)) = (start, end) {
+                    el.set_selection_range(start, end).unwrap_or_default();
+                }
+            }
+        }
+    });
+}
+
 #[component]
 pub fn ChatView() -> impl IntoView {
     let (messages, set_messages) = signal(Vec::<ChatMsg>::new());
     let (input, set_input) = signal(String::new());
     let (loading, set_loading) = signal(false);
     // Peek-mask state for secret replies: the real value, the
-    // per-character reveal deadlines, the display string as last
-    // rendered (the diff base for edits), and a timer tick that
+    // per-character reveal deadlines, and a timer tick that
     // re-renders as characters expire.
     let (secret, set_secret) = signal(String::new());
     let (reveals, set_reveals) = signal(Vec::<f64>::new());
-    let (shadow, set_shadow) = signal(String::new());
     let tick = use_tick();
 
     // Secret mode lasts while the newest message asks for one.
@@ -319,29 +412,38 @@ pub fn ChatView() -> impl IntoView {
             .is_some_and(|msg| msg.role == "assistant" && msg.input_sensitive)
     };
 
+    // The string the input should show right now. A Memo, so it
+    // only notifies when the string actually changes — the
+    // 200 ms tick on its own no longer re-assigns the input's
+    // value. Its current value doubles as the diff base for the
+    // next edit (the display as last rendered).
+    let display = Memo::new(move |_| {
+        let _ = tick.get();
+        if is_sensitive() {
+            mask_display(&secret.get(), &reveals.get())
+        } else {
+            input.get()
+        }
+    });
+
     let send_text = make_sender(set_messages, loading, set_loading);
 
-    let reconcile_secret = move |new_display: String| {
+    let reconcile_secret = move |new_display: String, caret_utf16: Option<u32>| {
         let (next_secret, next_reveals) = fold_secret_edit(
-            &shadow.get_untracked(),
+            &display.get_untracked(),
             &secret.get_untracked(),
             &reveals.get_untracked(),
             &new_display,
+            caret_utf16,
         );
         set_secret.set(next_secret);
         set_reveals.set(next_reveals);
     };
 
-    let input_value = move || -> String {
-        let _ = tick.get();
-        if is_sensitive() {
-            let display = mask_display(&secret.get(), &reveals.get());
-            set_shadow.set(display.clone());
-            display
-        } else {
-            input.get()
-        }
-    };
+    // The display reaches the input element through an effect,
+    // never from inside the view (see bind_input_value).
+    let input_ref = NodeRef::<leptos::html::Input>::new();
+    bind_input_value(input_ref, display);
 
     let send_message = move |ev: SubmitEvent| {
         ev.prevent_default();
@@ -349,7 +451,6 @@ pub fn ChatView() -> impl IntoView {
             let text = secret.get_untracked();
             set_secret.set(String::new());
             set_reveals.set(Vec::new());
-            set_shadow.set(String::new());
             send_text.run((text, Some("••••••••".to_string())));
         } else {
             let text = input.get();
@@ -369,11 +470,15 @@ pub fn ChatView() -> impl IntoView {
             >
                 <input
                     style="flex:1;padding:10px 14px;border:1px solid #2a2a4a;border-radius:8px;background:#1a1a2e;color:#e6e6e6;font-size:14px;outline:none;"
-                    prop:value=input_value
+                    node_ref=input_ref
                     on:input=move |ev| {
                         let value = event_target_value(&ev);
                         if is_sensitive() {
-                            reconcile_secret(value);
+                            let caret = event_target::<web_sys::HtmlInputElement>(&ev)
+                                .selection_start()
+                                .ok()
+                                .flatten();
+                            reconcile_secret(value, caret);
                         } else {
                             set_input.set(value);
                         }

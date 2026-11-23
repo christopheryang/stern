@@ -366,7 +366,11 @@ fn classify_intent_is_deterministic() {
 }
 
 fn handler() -> ChatHandler {
-    ChatHandler::new(None)
+    // The handler fails closed by default now; a test that wants
+    // a ready vault says so, the way the app syncs before use.
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    handler
 }
 
 #[test]
@@ -565,6 +569,7 @@ fn non_vault_actions_have_no_display() {
 #[test]
 fn guided_store_flow_collects_a_login_field_by_field() {
     let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
     let first = handler.process_message("store");
     assert_eq!(first.message, "What is this secret for?");
     assert_eq!(first.options.len(), 5);
@@ -584,6 +589,7 @@ fn guided_store_flow_collects_a_login_field_by_field() {
 #[test]
 fn cancelling_a_guided_store_returns_to_normal_classification() {
     let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
     let _ = handler.process_message("store");
     let cancelled = handler.process_message("cancel");
     assert!(cancelled.message.starts_with("Cancelled"));
@@ -672,6 +678,7 @@ fn greeting_thanks_alone_but_not_after_a_command() {
 #[test]
 fn sensitive_field_prompts_are_flagged() {
     let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
     let kind = handler.process_message("store");
     assert!(!kind.input_sensitive);
     let _ = handler.process_message("a");
@@ -712,7 +719,7 @@ fn gate_setup_flow_replays_the_interrupted_store() {
     let ready = handler.process_message("Correct horse 9!");
     match ready.action {
         Some(Action::SetupVault { password }) => {
-            assert_eq!(password, "Correct horse 9!");
+            assert_eq!(password.as_str(), "Correct horse 9!");
         }
         other => panic!("expected SetupVault, got: {other:?}"),
     }
@@ -739,7 +746,7 @@ fn gate_unlock_flow_replays_the_interrupted_search() {
     let attempt = handler.process_message("hunter22");
     match attempt.action {
         Some(Action::UnlockVaultWith { password }) => {
-            assert_eq!(password, "hunter22");
+            assert_eq!(password.as_str(), "hunter22");
         }
         other => panic!("expected UnlockVaultWith, got: {other:?}"),
     }
@@ -770,4 +777,111 @@ fn gate_cancel_abandons_the_setup() {
     let cancelled = handler.process_message("cancel");
     assert_eq!(cancelled.message, "Cancelled.");
     assert!(handler.vault_gate_completed().is_none());
+}
+
+#[test]
+fn a_fresh_handler_fails_closed() {
+    // No state synced yet: a store request must run the setup
+    // gate, not sail through as if a vault existed, unlocked.
+    let handler = ChatHandler::new(None);
+    let response = handler.process_message("store");
+    assert!(response.action.is_none());
+    assert!(
+        response.message.contains("set up your vault"),
+        "message: {}",
+        response.message
+    );
+    assert!(response.input_sensitive);
+}
+
+#[test]
+fn the_gate_intercepts_before_a_pending_choice() {
+    // A choice is waiting and the unlock gate starts; the next
+    // message is the master password. "b" would be a valid
+    // choice pick — it must reach the gate, not the choice.
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, false);
+    let _ = handler.process_message("store");
+    handler.set_pending_choice(
+        vec![
+            EntryCandidate {
+                id: "id-a".to_string(),
+                label: "Google".to_string(),
+            },
+            EntryCandidate {
+                id: "id-b".to_string(),
+                label: "Google Work".to_string(),
+            },
+        ],
+        None,
+    );
+    let response = handler.process_message("b");
+    assert!(
+        matches!(
+            &response.action,
+            Some(Action::UnlockVaultWith { .. })
+        ),
+        "the password must go to the gate, got: {:?}",
+        response.action
+    );
+}
+
+#[test]
+fn pending_choice_matches_single_character_labels() {
+    // An entry named "1": the digit is not a choice letter, so
+    // the label match must get its turn.
+    let handler = ChatHandler::new(None);
+    handler.set_pending_choice(
+        vec![
+            EntryCandidate {
+                id: "id-1".to_string(),
+                label: "1".to_string(),
+            },
+            EntryCandidate {
+                id: "id-2".to_string(),
+                label: "2".to_string(),
+            },
+        ],
+        None,
+    );
+    let response = handler.process_message("1");
+    assert!(matches!(
+        response.action,
+        Some(Action::RevealEntry { entry_id, .. }) if entry_id == "id-1"
+    ));
+
+    // A letter past the offered range falls back to labels too.
+    let handler = ChatHandler::new(None);
+    handler.set_pending_choice(
+        vec![EntryCandidate {
+            id: "id-x".to_string(),
+            label: "x".to_string(),
+        }],
+        None,
+    );
+    let response = handler.process_message("x");
+    assert!(matches!(
+        response.action,
+        Some(Action::RevealEntry { entry_id, .. }) if entry_id == "id-x"
+    ));
+}
+
+#[test]
+fn action_debug_redacts_secrets() {
+    let store = Action::StoreEntry {
+        name: "GitHub".to_string(),
+        kind: "login".to_string(),
+        fields: vec![("password".to_string(), "hunter2".to_string())],
+    };
+    let rendered = format!("{store:?}");
+    assert!(!rendered.contains("hunter2"), "debug leaked a value: {rendered}");
+    assert!(rendered.contains("password"), "field keys stay visible: {rendered}");
+    let setup = Action::SetupVault {
+        password: zeroize::Zeroizing::new("Correct-Horse-9!".to_string()),
+    };
+    let rendered = format!("{setup:?}");
+    assert!(
+        !rendered.contains("Correct-Horse-9!"),
+        "debug leaked the master password: {rendered}"
+    );
 }
