@@ -343,6 +343,8 @@ fn chat_response_all_some() {
         message: "Sure!".into(),
         action: Some("create_entry".into()),
         user_message_display: Some("Create entry".into()),
+        options: Vec::new(),
+        input_sensitive: false,
     };
     let r = roundtrip(&c);
     assert_eq!(r.message, "Sure!");
@@ -356,6 +358,8 @@ fn chat_response_all_none() {
         message: String::new(),
         action: None,
         user_message_display: None,
+        options: Vec::new(),
+        input_sensitive: false,
     };
     let r = roundtrip(&c);
     assert!(r.action.is_none());
@@ -368,6 +372,8 @@ fn chat_response_mixed_options() {
         message: "msg".into(),
         action: Some(String::new()),
         user_message_display: None,
+        options: Vec::new(),
+        input_sensitive: false,
     };
     let r = roundtrip(&c);
     assert_eq!(r.action.as_deref(), Some(""));
@@ -640,4 +646,14 @@ fn deserialize_update_request_partial_json() {
     assert!(u.name.is_none());
     assert!(u.tags.is_none());
     assert!(u.fields.is_none());
+}
+
+#[test]
+fn chat_response_without_input_sensitive_defaults_to_false() {
+    // A payload from before the field existed must still parse.
+    let parsed: ChatResponse = serde_json::from_str(
+        r#"{"message":"hi","action":null,"user_message_display":null,"options":[]}"#,
+    )
+    .unwrap();
+    assert!(!parsed.input_sensitive);
 }

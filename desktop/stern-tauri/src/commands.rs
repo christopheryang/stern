@@ -8,7 +8,7 @@ use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
 use stern_core::domain::vault::aad::entry_aad;
 use stern_core::domain::vault::crypto_constants::{
-    DEK_WRAPPED_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN,
+    DEK_WRAPPED_LEN, KEK_LEN, SECRET_KEY_LEN, VAULT_SALT_LEN,
 };
 use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind, EntryPayload, Field};
 use stern_core::domain::vault::errors::VaultError;
@@ -44,6 +44,12 @@ pub async fn create_vault(
     state: State<'_, AppState>,
     request: CreateVaultRequest,
 ) -> Result<VaultStatus, VaultError> {
+    create_vault_inner(&state, &request.password)
+}
+
+/// Create the vault and leave the session unlocked. Shared by
+/// the `create_vault` command and the chat vault gate.
+fn create_vault_inner(state: &AppState, password: &str) -> Result<VaultStatus, VaultError> {
     if state.repository.vault_exists()? {
         return Err(VaultError::Database("vault already exists".to_string()));
     }
@@ -54,7 +60,7 @@ pub async fn create_vault(
 
     let preprocessed = state
         .kdf
-        .preprocess_2skd(request.password.as_bytes(), &secret_key)?;
+        .preprocess_2skd(password.as_bytes(), &secret_key)?;
     let master_key = state.kdf.derive_master_key(&preprocessed, &salt, &params)?;
     let kek = state.kdf.derive_kek(&master_key)?;
     let verify = state.kdf.derive_verify_hash(&master_key)?;
@@ -81,11 +87,17 @@ pub async fn create_vault(
 }
 
 #[tauri::command]
-#[allow(clippy::arithmetic_side_effects)]
 pub async fn unlock_vault(
     state: State<'_, AppState>,
     request: UnlockRequest,
 ) -> Result<VaultStatus, VaultError> {
+    unlock_vault_inner(&state, &request.password)
+}
+
+/// Unlock the vault, with the failed-attempt lockout. Shared by
+/// the `unlock_vault` command and the chat vault gate.
+#[allow(clippy::arithmetic_side_effects)]
+fn unlock_vault_inner(state: &AppState, password: &str) -> Result<VaultStatus, VaultError> {
     {
         let mut lockout = state
             .unlock_lockout
@@ -112,7 +124,7 @@ pub async fn unlock_vault(
     let params = KdfParams::argon2id_default();
     let preprocessed = state
         .kdf
-        .preprocess_2skd(request.password.as_bytes(), &meta.secret_key)?;
+        .preprocess_2skd(password.as_bytes(), &meta.secret_key)?;
     let master_key = state
         .kdf
         .derive_master_key(&preprocessed, &meta.salt, &params)?;
@@ -235,17 +247,49 @@ pub async fn send_chat_message(
     state: State<'_, AppState>,
     request: SendChatRequest,
 ) -> Result<ChatResponse, VaultError> {
-    let response = state.chat_handler.process_message(&request.content);
+    // Sync the vault's readiness so the handler can run its
+    // setup/unlock gate before a request that needs the vault.
+    let exists = state.repository.vault_exists()?;
+    let unlocked = {
+        let session = state
+            .session
+            .lock()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        session.is_unlocked
+    };
+    state.chat_handler.set_vault_state(exists, unlocked);
 
+    let response = state.chat_handler.process_message(&request.content);
+    execute_chat_response(&state, response)
+}
+
+/// Execute a chat response's action, if it carries one.
+fn execute_chat_response(
+    state: &AppState,
+    response: stern_core::ai::chat::ChatResponse,
+) -> Result<ChatResponse, VaultError> {
     match response.action {
         Some(stern_core::ai::chat::Action::StoreEntry {
             ref name,
             ref kind,
             ref fields,
-        }) => handle_store_entry(&state, name, kind, fields, &response.message),
+        }) => handle_store_entry(state, name, kind, fields, &response.message),
+        Some(stern_core::ai::chat::Action::SearchEntry {
+            ref query,
+            ref field,
+        }) => handle_search_entry(state, query, field.as_deref()),
+        Some(stern_core::ai::chat::Action::RevealEntry {
+            ref entry_id,
+            ref field,
+        }) => handle_reveal_entry(state, entry_id, field.as_deref()),
+        Some(stern_core::ai::chat::Action::SetupVault { ref password }) => {
+            handle_setup_vault(state, password)
+        }
+        Some(stern_core::ai::chat::Action::UnlockVaultWith { ref password }) => {
+            handle_unlock_vault(state, password)
+        }
         Some(
-            stern_core::ai::chat::Action::SearchEntry { .. }
-            | stern_core::ai::chat::Action::ListEntries { .. }
+            stern_core::ai::chat::Action::ListEntries { .. }
             | stern_core::ai::chat::Action::ConfirmDelete { .. }
             | stern_core::ai::chat::Action::UpdateEntry { .. }
             | stern_core::ai::chat::Action::ExportVault
@@ -257,6 +301,55 @@ pub async fn send_chat_message(
             message: response.message,
             action: None,
             user_message_display: None,
+            options: response.options,
+            input_sensitive: response.input_sensitive,
+        }),
+    }
+}
+
+/// The setup gate collected a confirmed master password: create
+/// the vault, then let the handler replay the interrupted
+/// message (or confirm the setup when nothing was interrupted).
+fn handle_setup_vault(state: &AppState, password: &str) -> Result<ChatResponse, VaultError> {
+    match create_vault_inner(state, password) {
+        Ok(_) => {
+            state.chat_handler.set_vault_state(true, true);
+            state.chat_handler.vault_gate_completed().map_or_else(
+                || {
+                    Ok(plain_chat_response(
+                        "Your vault is set up and unlocked.".to_string(),
+                    ))
+                },
+                |replayed| execute_chat_response(state, replayed),
+            )
+        }
+        Err(e) => {
+            state.chat_handler.vault_gate_failed();
+            Ok(plain_chat_response(format!(
+                "I couldn't set up the vault: {e}"
+            )))
+        }
+    }
+}
+
+/// The unlock gate collected a master password: unlock (with
+/// the lockout protection), then replay the interrupted
+/// message. A wrong password re-prompts — the gate stays open.
+fn handle_unlock_vault(state: &AppState, password: &str) -> Result<ChatResponse, VaultError> {
+    match unlock_vault_inner(state, password) {
+        Ok(_) => {
+            state.chat_handler.set_vault_state(true, true);
+            state.chat_handler.vault_gate_completed().map_or_else(
+                || Ok(plain_chat_response("Vault unlocked.".to_string())),
+                |replayed| execute_chat_response(state, replayed),
+            )
+        }
+        Err(e) => Ok(ChatResponse {
+            message: format!("{e}\n\nEnter your master password:"),
+            action: None,
+            user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: true,
         }),
     }
 }
@@ -267,6 +360,8 @@ fn passthrough_response(response: &stern_core::ai::chat::ChatResponse) -> ChatRe
         message: response.message.clone(),
         action: action_str,
         user_message_display: response.user_message_display.clone(),
+        options: response.options.clone(),
+        input_sensitive: response.input_sensitive,
     }
 }
 
@@ -274,6 +369,7 @@ fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
     match action {
         stern_core::ai::chat::Action::StoreEntry { .. } => "store".to_string(),
         stern_core::ai::chat::Action::SearchEntry { .. } => "search".to_string(),
+        stern_core::ai::chat::Action::RevealEntry { .. } => "reveal".to_string(),
         stern_core::ai::chat::Action::ListEntries { .. } => "list".to_string(),
         stern_core::ai::chat::Action::ConfirmDelete { .. } => "delete".to_string(),
         stern_core::ai::chat::Action::UpdateEntry { .. } => "update".to_string(),
@@ -281,6 +377,8 @@ fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
         stern_core::ai::chat::Action::ImportVault => "import".to_string(),
         stern_core::ai::chat::Action::CreateVault => "create_vault".to_string(),
         stern_core::ai::chat::Action::UnlockVault => "unlock_vault".to_string(),
+        stern_core::ai::chat::Action::SetupVault { .. } => "setup_vault".to_string(),
+        stern_core::ai::chat::Action::UnlockVaultWith { .. } => "unlock_vault_with".to_string(),
     }
 }
 
@@ -301,6 +399,8 @@ fn handle_store_entry(
             message: "Vault is locked. Please unlock it first.".to_string(),
             action: Some("locked".to_string()),
             user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
         });
     }
 
@@ -359,7 +459,195 @@ fn handle_store_entry(
         message: message.to_string(),
         action: Some("store".to_string()),
         user_message_display: None,
+        options: Vec::new(),
+        input_sensitive: false,
     })
+}
+
+/// The chat response used when the vault is locked.
+fn locked_chat_response() -> ChatResponse {
+    ChatResponse {
+        message: "Vault is locked. Please unlock it first.".to_string(),
+        action: Some("locked".to_string()),
+        user_message_display: None,
+        options: Vec::new(),
+        input_sensitive: false,
+    }
+}
+
+/// A chat response carrying only a message.
+const fn plain_chat_response(message: String) -> ChatResponse {
+    ChatResponse {
+        message,
+        action: None,
+        user_message_display: None,
+        options: Vec::new(),
+        input_sensitive: false,
+    }
+}
+
+/// All entries plus the session KEK, or `None` when the vault is
+/// locked.
+type UnlockedVault = Option<(Vec<EncryptedEntry>, [u8; KEK_LEN])>;
+
+fn unlocked_entries(state: &AppState) -> Result<UnlockedVault, VaultError> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+
+    if !session.is_unlocked {
+        return Ok(None);
+    }
+
+    let kek = *session.kek()?;
+    drop(session);
+
+    let entries = state.repository.list_all_entries()?;
+    Ok(Some((entries, kek)))
+}
+
+/// An entry's decrypted fields, in stored order.
+fn decrypt_entry_fields(
+    state: &AppState,
+    entry: &EncryptedEntry,
+    kek: &[u8; KEK_LEN],
+) -> Result<Vec<(String, String)>, VaultError> {
+    let aad = entry_aad(&entry.id, entry.version);
+    let wrapped = <[u8; DEK_WRAPPED_LEN]>::try_from(entry.dek_wrapped.as_slice())
+        .map_err(|_| VaultError::DecryptionFailed)?;
+    let dek = state.crypto.unwrap_dek(&wrapped, kek)?;
+    let plaintext = state
+        .crypto
+        .decrypt_entry(&dek, &entry.nonce, &entry.ciphertext, &aad)?;
+    let payload: EntryPayload =
+        serde_json::from_slice(&plaintext).map_err(|e| VaultError::Serialization(e.to_string()))?;
+    Ok(payload
+        .fields
+        .iter()
+        .map(|field| (field.key.clone(), field.value.clone()))
+        .collect())
+}
+
+/// Answer from one entry: the asked-for field, or every field when
+/// none was asked for.
+fn answer_entry(
+    state: &AppState,
+    entry: &EncryptedEntry,
+    kek: &[u8; KEK_LEN],
+    field: Option<&str>,
+) -> Result<ChatResponse, VaultError> {
+    let fields = decrypt_entry_fields(state, entry, kek)?;
+    let message = field.map_or_else(
+        || {
+            if fields.is_empty() {
+                format!("\"{}\" has no fields stored.", entry.name)
+            } else {
+                let lines: Vec<String> = fields
+                    .iter()
+                    .map(|(key, value)| format!("  {key}: {value}"))
+                    .collect();
+                format!("\"{}\":\n{}", entry.name, lines.join("\n"))
+            }
+        },
+        |wanted| {
+            fields
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(wanted))
+                .map_or_else(
+                    || {
+                        let keys: Vec<&str> = fields.iter().map(|(key, _)| key.as_str()).collect();
+                        format!(
+                            "\"{}\" doesn't have a {wanted} field. It has: {}.",
+                            entry.name,
+                            keys.join(", ")
+                        )
+                    },
+                    |(key, value)| format!("{} — {key}: {value}", entry.name),
+                )
+        },
+    );
+    Ok(plain_chat_response(message))
+}
+
+/// A label for a choice list, made unique with a " (2)", " (3)",
+/// ... suffix when the name is already taken.
+fn unique_label(name: &str, taken: &[String]) -> String {
+    if !taken.iter().any(|label| label == name) {
+        return name.to_string();
+    }
+    let mut suffix = 2usize;
+    loop {
+        let candidate = format!("{name} ({suffix})");
+        if !taken.contains(&candidate) {
+            return candidate;
+        }
+        suffix = suffix.saturating_add(1);
+    }
+}
+
+/// Execute a chat search: match the query against entry names and
+/// answer directly, or offer a lettered choice when several
+/// entries match.
+fn handle_search_entry(
+    state: &AppState,
+    query: &str,
+    field: Option<&str>,
+) -> Result<ChatResponse, VaultError> {
+    let Some((entries, kek)) = unlocked_entries(state)? else {
+        return Ok(locked_chat_response());
+    };
+    let needle = query.to_lowercase();
+    let matches: Vec<&EncryptedEntry> = entries
+        .iter()
+        .filter(|entry| entry.name.to_lowercase().contains(&needle))
+        .collect();
+    match matches.as_slice() {
+        [] => Ok(plain_chat_response(format!(
+            "No secret found for \"{query}\"."
+        ))),
+        [entry] => answer_entry(state, entry, &kek, field),
+        _ => {
+            let mut labels: Vec<String> = Vec::new();
+            let mut candidates: Vec<stern_core::ai::chat::EntryCandidate> = Vec::new();
+            for entry in &matches {
+                let label = unique_label(&entry.name, &labels);
+                labels.push(label.clone());
+                candidates.push(stern_core::ai::chat::EntryCandidate {
+                    id: entry.id.clone(),
+                    label,
+                });
+            }
+            state
+                .chat_handler
+                .set_pending_choice(candidates, field.map(str::to_string));
+            Ok(ChatResponse {
+                message: format!("More than one match for \"{query}\". Which one?"),
+                action: None,
+                user_message_display: None,
+                options: labels,
+                input_sensitive: false,
+            })
+        }
+    }
+}
+
+/// Execute a reveal for the entry the user picked from a lettered
+/// choice.
+fn handle_reveal_entry(
+    state: &AppState,
+    entry_id: &str,
+    field: Option<&str>,
+) -> Result<ChatResponse, VaultError> {
+    let Some((entries, kek)) = unlocked_entries(state)? else {
+        return Ok(locked_chat_response());
+    };
+    let Some(entry) = entries.iter().find(|entry| entry.id == entry_id) else {
+        return Ok(plain_chat_response(
+            "That entry is no longer available.".to_string(),
+        ));
+    };
+    answer_entry(state, entry, &kek, field)
 }
 
 #[tauri::command]
@@ -565,6 +853,7 @@ mod tests {
     fn action_to_string_search_entry() {
         let action = CoreAction::SearchEntry {
             query: "foo".into(),
+            field: None,
         };
         assert_eq!(action_to_string(&action), "search");
     }
@@ -626,6 +915,8 @@ mod tests {
             message: "hello".into(),
             action: Some(CoreAction::ExportVault),
             user_message_display: Some("display me".into()),
+            options: Vec::new(),
+            input_sensitive: false,
         };
         let ipc_resp = passthrough_response(&core_resp);
         assert_eq!(ipc_resp.message, "hello");
@@ -639,6 +930,8 @@ mod tests {
             message: "no action".into(),
             action: None,
             user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
         };
         let ipc_resp = passthrough_response(&core_resp);
         assert_eq!(ipc_resp.message, "no action");
@@ -654,7 +947,14 @@ mod tests {
                 kind: "login".into(),
                 fields: vec![],
             },
-            CoreAction::SearchEntry { query: "q".into() },
+            CoreAction::SearchEntry {
+                query: "q".into(),
+                field: None,
+            },
+            CoreAction::RevealEntry {
+                entry_id: "id".into(),
+                field: None,
+            },
             CoreAction::ListEntries { category: None },
             CoreAction::ConfirmDelete { name: "n".into() },
             CoreAction::UpdateEntry {
@@ -670,6 +970,7 @@ mod tests {
         let expected = [
             "store",
             "search",
+            "reveal",
             "list",
             "delete",
             "update",
@@ -684,10 +985,75 @@ mod tests {
                 message: "m".into(),
                 action: Some(action),
                 user_message_display: None,
+                options: Vec::new(),
+                input_sensitive: false,
             };
             let ipc_resp = passthrough_response(&core_resp);
             assert_eq!(ipc_resp.action.as_deref(), Some(*expected_str));
         }
+    }
+
+    fn unlock_test_session(state: &AppState) {
+        use stern_core::domain::vault::crypto_constants::{KEK_LEN, VERIFY_HASH_LEN};
+        let kek = [7u8; KEK_LEN];
+        let verify = [9u8; VERIFY_HASH_LEN];
+        state.session.lock().unwrap().unlock(kek, verify);
+    }
+
+    fn store_test_entry(state: &AppState, name: &str, password: &str) {
+        let fields = vec![
+            ("username".to_string(), "chris".to_string()),
+            ("password".to_string(), password.to_string()),
+        ];
+        let stored = handle_store_entry(state, name, "login", &fields, "stored").unwrap();
+        assert_eq!(stored.action.as_deref(), Some("store"));
+    }
+
+    #[test]
+    fn search_entry_answers_the_asked_field() {
+        let (state, _path) = make_test_app_state();
+        unlock_test_session(&state);
+        store_test_entry(&state, "Google", "hunter2");
+
+        let answer = handle_search_entry(&state, "google", Some("password")).unwrap();
+        assert!(
+            answer.message.contains("hunter2"),
+            "message: {}",
+            answer.message
+        );
+
+        let missing = handle_search_entry(&state, "nope", None).unwrap();
+        assert!(missing.message.contains("No secret found"));
+    }
+
+    #[test]
+    fn search_entry_with_two_matches_offers_a_choice_that_reveals() {
+        let (state, _path) = make_test_app_state();
+        unlock_test_session(&state);
+        store_test_entry(&state, "Google", "personal-pass");
+        store_test_entry(&state, "Google Work", "work-pass");
+
+        let response = handle_search_entry(&state, "google", Some("password")).unwrap();
+        assert_eq!(response.options.len(), 2);
+
+        let picked = state.chat_handler.process_message("b");
+        let entry_id = match picked.action {
+            Some(CoreAction::RevealEntry { entry_id, .. }) => entry_id,
+            other => panic!("expected RevealEntry, got: {other:?}"),
+        };
+        let answer = handle_reveal_entry(&state, &entry_id, Some("password")).unwrap();
+        assert!(
+            answer.message.contains("work-pass"),
+            "message: {}",
+            answer.message
+        );
+    }
+
+    #[test]
+    fn search_entry_while_locked_reports_locked() {
+        let (state, _path) = make_test_app_state();
+        let response = handle_search_entry(&state, "google", None).unwrap();
+        assert_eq!(response.action.as_deref(), Some("locked"));
     }
 
     fn make_test_app_state() -> (AppState, tempfile::TempPath) {
@@ -802,6 +1168,68 @@ mod tests {
         let (state, _path) = make_test_app_state();
         assert!(!state.session.lock().unwrap().is_unlocked);
         assert!(state.unlock_lockout.lock().unwrap().is_none());
+    }
+
+    /// Drive one chat message the way `send_chat_message` does:
+    /// sync the vault state, process, execute the action.
+    fn chat(state: &AppState, text: &str) -> ChatResponse {
+        let exists = state.repository.vault_exists().unwrap();
+        let unlocked = state.session.lock().unwrap().is_unlocked;
+        state.chat_handler.set_vault_state(exists, unlocked);
+        let response = state.chat_handler.process_message(text);
+        execute_chat_response(state, response).unwrap()
+    }
+
+    #[test]
+    fn chat_sets_up_the_vault_before_the_first_store() {
+        let (state, _path) = make_test_app_state();
+
+        let gate = chat(&state, "store");
+        assert!(gate.input_sensitive, "message: {}", gate.message);
+        assert!(gate.message.contains("set up your vault"));
+        assert!(!state.repository.vault_exists().unwrap());
+
+        let confirm = chat(&state, "Correct-Horse-9!");
+        assert!(confirm.input_sensitive);
+
+        // Setup completes and the interrupted store resumes at
+        // the kind question.
+        let resumed = chat(&state, "Correct-Horse-9!");
+        assert!(state.repository.vault_exists().unwrap());
+        assert!(state.session.lock().unwrap().is_unlocked);
+        assert_eq!(resumed.options.len(), 5, "message: {}", resumed.message);
+
+        chat(&state, "a");
+        chat(&state, "Google");
+        chat(&state, "chris");
+        let saved = chat(&state, "hunter2");
+        assert!(saved.message.contains("Save this"));
+        let done = chat(&state, "yes");
+        assert_eq!(done.action.as_deref(), Some("store"));
+        assert_eq!(state.repository.count_entries().unwrap(), 1);
+    }
+
+    #[test]
+    fn chat_unlocks_a_locked_vault_and_replays_the_question() {
+        let (state, _path) = make_test_app_state();
+        create_vault_inner(&state, "correct horse battery").unwrap();
+        store_test_entry(&state, "Google", "hunter2");
+        state.session.lock().unwrap().lock();
+
+        let prompt = chat(&state, "what's my password for google?");
+        assert!(prompt.input_sensitive, "message: {}", prompt.message);
+        assert!(prompt.message.contains("locked"));
+
+        let wrong = chat(&state, "not the password");
+        assert!(wrong.input_sensitive, "message: {}", wrong.message);
+        assert!(!state.session.lock().unwrap().is_unlocked);
+
+        let answer = chat(&state, "correct horse battery");
+        assert!(
+            answer.message.contains("hunter2"),
+            "the replayed question should be answered: {}",
+            answer.message
+        );
     }
 }
 
@@ -931,9 +1359,11 @@ async fn ensure_runtime_path(
 async fn load_model_at(
     runtime_path: std::path::PathBuf,
     path: std::path::PathBuf,
+    tokenizer_path: std::path::PathBuf,
+    prompt_style: stern_core::ai::model_manager::PromptStyle,
 ) -> Result<Arc<AiModel>, VaultError> {
     tauri::async_runtime::spawn_blocking(move || {
-        AiModel::new(&runtime_path, &path)
+        AiModel::new(&runtime_path, &path, &tokenizer_path, prompt_style)
             .map(Arc::new)
             .map_err(|e| VaultError::Model(format!("model {} failed to load: {e}", path.display())))
     })
@@ -942,19 +1372,30 @@ async fn load_model_at(
 }
 
 /// Point the chat handler at the manifest's active model (or none),
-/// loading it fresh from disk.
+/// loading it fresh from disk. An active model without a tokenizer
+/// (installed before tokenizers were downloaded) leaves the chat
+/// model-less — the rule classifier keeps working — rather than
+/// failing the sync.
 async fn sync_chat_model(state: &AppState) -> Result<(), VaultError> {
-    match state.model_manager.active_model_path() {
-        Some(path) => {
-            let active_id = state
-                .model_manager
-                .active_model()
-                .map(|active| active.model_id);
+    match (
+        state.model_manager.active_model_path(),
+        state.model_manager.active_tokenizer_path(),
+    ) {
+        (Some(path), Some(tokenizer_path)) => {
+            let active = state.model_manager.active_model();
+            let active_id = active.as_ref().map(|active| active.model_id.clone());
+            let prompt_style = active_id
+                .as_deref()
+                .and_then(stern_core::ai::model_manager::catalog_model)
+                .map_or(
+                    stern_core::ai::model_manager::PromptStyle::ChatMl,
+                    |descriptor| descriptor.prompt_style,
+                );
             let runtime_path = ensure_runtime_path(state, active_id.as_deref()).await?;
-            let model = load_model_at(runtime_path, path).await?;
+            let model = load_model_at(runtime_path, path, tokenizer_path, prompt_style).await?;
             state.chat_handler.set_model(Some(model));
         }
-        None => state.chat_handler.set_model(None),
+        _ => state.chat_handler.set_model(None),
     }
     Ok(())
 }
@@ -1047,8 +1488,20 @@ pub async fn select_model(
                 "model {model_id} is not installed or its file is missing"
             ))
         })?;
+    let tokenizer_path = state
+        .model_manager
+        .installed_tokenizer_path(&model_id)
+        .ok_or_else(|| {
+            VaultError::Model(format!(
+                "model {model_id} has no tokenizer; download it again to repair the install"
+            ))
+        })?;
+    let prompt_style = stern_core::ai::model_manager::catalog_model(&model_id).map_or(
+        stern_core::ai::model_manager::PromptStyle::ChatMl,
+        |descriptor| descriptor.prompt_style,
+    );
     let runtime_path = ensure_runtime_path(&state, Some(&model_id)).await?;
-    let model = load_model_at(runtime_path, path).await?;
+    let model = load_model_at(runtime_path, path, tokenizer_path, prompt_style).await?;
     state.model_manager.set_active_model(&model_id)?;
     state.chat_handler.set_model(Some(model));
     Ok(model_status_dtos(&state))

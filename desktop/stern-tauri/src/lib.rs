@@ -72,11 +72,21 @@ pub fn run() {
                 let model_manager = model_manager.clone();
                 let chat_handler = chat_handler.clone();
                 std::thread::spawn(move || {
-                    if let (Some(runtime_path), Some(path)) = (
+                    let active_style = model_manager
+                        .active_model()
+                        .and_then(|active| {
+                            stern_core::ai::model_manager::catalog_model(&active.model_id)
+                        })
+                        .map_or(
+                            stern_core::ai::model_manager::PromptStyle::ChatMl,
+                            |descriptor| descriptor.prompt_style,
+                        );
+                    if let (Some(runtime_path), Some(path), Some(tokenizer_path)) = (
                         model_manager.runtime_path(),
                         model_manager.active_model_path(),
+                        model_manager.active_tokenizer_path(),
                     ) {
-                        match AiModel::new(&runtime_path, &path) {
+                        match AiModel::new(&runtime_path, &path, &tokenizer_path, active_style) {
                             Ok(model) => chat_handler.set_model(Some(Arc::new(model))),
                             Err(e) => {
                                 eprintln!("stern: failed to load AI model: {e}");

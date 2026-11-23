@@ -9,6 +9,9 @@ pub enum Intent {
     },
     RetrieveSecret {
         name: String,
+        /// The field the user asked for ("password" in "what's my
+        /// password for Google?"), when they named one.
+        field: Option<String>,
     },
     ListSecrets {
         category: Option<String>,
@@ -53,14 +56,33 @@ const UPDATE_VERBS: &[&str] = &["update", "change", "modify", "edit"];
 
 #[must_use]
 pub fn classify_intent(text: &str) -> Intent {
-    let lower = text.to_lowercase();
+    // Expand a sentence-initial question contraction, so "what's
+    // my password for Google?" parses like "what is ..." — the
+    // detectors key on the separate words. Only the leading
+    // contraction is touched: the same words inside a stored value
+    // keep their original text.
+    let raw_lower = text.to_lowercase();
+    let lower = if raw_lower.starts_with("what's ") {
+        raw_lower.replacen("what's", "what is", 1)
+    } else if raw_lower.starts_with("where's ") {
+        raw_lower.replacen("where's", "where is", 1)
+    } else {
+        raw_lower
+    };
     let words: Vec<&str> = lower.split_whitespace().collect();
+    // The greeting/help checks compare whole words, so strip the
+    // punctuation a sentence leaves on its last word ("you?" is
+    // still "you").
+    let clean_words: Vec<&str> = words
+        .iter()
+        .map(|word| word.trim_end_matches(['?', '!', '.', ',']))
+        .collect();
 
-    if is_greeting(&words) {
+    if is_greeting(&clean_words, &lower) {
         return Intent::Greeting;
     }
 
-    if is_help(&words) {
+    if is_help(&clean_words) {
         return Intent::Help;
     }
 
@@ -101,7 +123,7 @@ pub fn classify_intent(text: &str) -> Intent {
     }
 }
 
-fn is_greeting(words: &[&str]) -> bool {
+fn is_greeting(words: &[&str], lower: &str) -> bool {
     let greetings = [
         "hello",
         "hi",
@@ -110,8 +132,29 @@ fn is_greeting(words: &[&str]) -> bool {
         "morning",
         "evening",
         "afternoon",
+        "greetings",
     ];
-    words.iter().any(|w| greetings.contains(w))
+    if words.iter().any(|w| greetings.contains(w)) {
+        return true;
+    }
+    // Gratitude counts as small talk only when it is (nearly) the
+    // whole message — "save my password, thanks" is a store, not a
+    // greeting.
+    let gratitude = ["thanks", "thank"];
+    if words.len() <= 4 && words.iter().any(|w| gratitude.contains(w)) {
+        return true;
+    }
+    // Small-talk phrases the word list cannot express.
+    let phrases = [
+        "how are you",
+        "how's it going",
+        "how is it going",
+        "how do you do",
+        "how have you been",
+        "what's up",
+        "whats up",
+    ];
+    phrases.iter().any(|phrase| lower.contains(phrase))
 }
 
 fn is_help(words: &[&str]) -> bool {
@@ -196,7 +239,31 @@ fn detect_retrieve(words: &[&str], full_text: &str) -> Option<Intent> {
     if name.is_empty() {
         return None;
     }
-    Some(Intent::RetrieveSecret { name })
+    Some(Intent::RetrieveSecret {
+        name,
+        field: extract_field_request(full_text),
+    })
+}
+
+/// The field a retrieval question asks for, if it names one
+/// ("password" in "what's my password for Google?").
+fn extract_field_request(full_text: &str) -> Option<String> {
+    const FIELD_WORDS: &[(&str, &str)] = &[
+        ("card number", "number"),
+        ("username", "username"),
+        ("user name", "username"),
+        ("password", "password"),
+        ("email", "email"),
+        ("phone", "phone"),
+        ("address", "address"),
+        ("cvv", "cvv"),
+        ("expiry", "expiry"),
+        ("website", "website"),
+    ];
+    FIELD_WORDS
+        .iter()
+        .find(|(word, _)| full_text.contains(word))
+        .map(|(_, field)| (*field).to_string())
 }
 
 fn detect_list(words: &[&str], full_text: &str) -> Option<Intent> {
