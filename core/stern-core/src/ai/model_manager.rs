@@ -492,23 +492,36 @@ impl ModelManager {
     /// Extract one entry of a ZIP archive (a wheel is a ZIP) to `dest`,
     /// via a `.part` file and an atomic rename, and mark it executable
     /// on Unix — a dlopen target needs the execute bit.
+    ///
+    /// The reader is hand-rolled on purpose: the archive reaching this
+    /// point has already been SHA-256-verified against the pinned
+    /// catalog hash, and a wheel entry is only ever stored or deflated,
+    /// so the small reader below is all Stern needs — no ZIP
+    /// dependency (the `zip` crate carried six `RustSec` advisories in
+    /// its general-purpose extraction APIs, none of which Stern used).
+    /// Entry CRCs are not checked; the whole-archive hash is the
+    /// integrity guarantee. ZIP64 archives are rejected — a wheel is
+    /// tens of megabytes, orders of magnitude below that limit.
     fn extract_zip_entry(
         archive_path: &Path,
         entry_name: &str,
         dest: &Path,
     ) -> Result<(), VaultError> {
-        let file = fs::File::open(archive_path)
+        let bytes = fs::read(archive_path)
             .map_err(|e| VaultError::Model(format!("open runtime archive: {e}")))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|e| VaultError::Model(format!("read runtime archive: {e}")))?;
-        let mut entry = archive
-            .by_name(entry_name)
-            .map_err(|e| VaultError::Model(format!("runtime library missing from archive: {e}")))?;
+        let (reader, uncompressed_size) = Self::zip_entry_data(&bytes, entry_name)?;
         let part_path = dest.with_extension("part");
         let mut out = fs::File::create(&part_path)
             .map_err(|e| VaultError::Model(format!("create runtime library file: {e}")))?;
-        std::io::copy(&mut entry, &mut out)
+        // Cap the output at the size the central directory declares,
+        // so a corrupt deflate stream cannot write unbounded data.
+        let written = std::io::copy(&mut reader.take(uncompressed_size), &mut out)
             .map_err(|e| VaultError::Model(format!("extract runtime library: {e}")))?;
+        if written != uncompressed_size {
+            return Err(VaultError::Model(format!(
+                "runtime library size mismatch: directory says {uncompressed_size} bytes, extracted {written}"
+            )));
+        }
         out.flush()
             .map_err(|e| VaultError::Model(format!("flush runtime library: {e}")))?;
         drop(out);
@@ -521,6 +534,114 @@ impl ModelManager {
         fs::rename(&part_path, dest)
             .map_err(|e| VaultError::Model(format!("move runtime library into place: {e}")))?;
         Ok(())
+    }
+
+    /// Locate `entry_name` in a ZIP archive's central directory and
+    /// return a reader over its decompressed bytes plus the declared
+    /// uncompressed size. Only stored (0) and deflated (8) entries are
+    /// supported — the two a wheel can contain.
+    // Offset arithmetic is inherent to parsing a binary format; every
+    // offset is bounds-checked through the helpers below (a miss is a
+    // `malformed` error, never a panic), and all directory fields are
+    // u32/u16, so no offset can overflow a 64-bit usize.
+    #[allow(clippy::arithmetic_side_effects)]
+    fn zip_entry_data<'a>(
+        archive: &'a [u8],
+        entry_name: &str,
+    ) -> Result<(Box<dyn Read + 'a>, u64), VaultError> {
+        fn malformed(what: &str) -> VaultError {
+            VaultError::Model(format!("read runtime archive: malformed {what}"))
+        }
+        fn u16_at(b: &[u8], at: usize) -> Option<u16> {
+            b.get(at..at + 2)
+                .and_then(|s| <[u8; 2]>::try_from(s).ok())
+                .map(u16::from_le_bytes)
+        }
+        fn u32_at(b: &[u8], at: usize) -> Option<u32> {
+            b.get(at..at + 4)
+                .and_then(|s| <[u8; 4]>::try_from(s).ok())
+                .map(u32::from_le_bytes)
+        }
+        fn sig_at(b: &[u8], at: usize, sig: [u8; 4]) -> bool {
+            b.get(at..at + 4).is_some_and(|s| s == sig)
+        }
+
+        if archive.len() < 22 {
+            return Err(malformed("archive (smaller than an end record)"));
+        }
+        // The end-of-central-directory record is the last thing in
+        // the file; scan backwards for its signature (a trailing
+        // comment can add up to 64 KiB after it).
+        let window = archive.len().min(22 + usize::from(u16::MAX));
+        let eocd = (archive.len() - window..=archive.len() - 22)
+            .rev()
+            .find(|&i| sig_at(archive, i, [0x50, 0x4b, 0x05, 0x06]))
+            .ok_or_else(|| malformed("end of central directory"))?;
+        let cd_count = usize::from(
+            u16_at(archive, eocd + 10).ok_or_else(|| malformed("end of central directory"))?,
+        );
+        let cd_offset =
+            u32_at(archive, eocd + 16).ok_or_else(|| malformed("end of central directory"))?;
+        if cd_offset == u32::MAX {
+            return Err(VaultError::Model(
+                "read runtime archive: ZIP64 archives are unsupported".to_string(),
+            ));
+        }
+        let mut pos = cd_offset as usize;
+        for _ in 0..cd_count {
+            if !sig_at(archive, pos, [0x50, 0x4b, 0x01, 0x02]) {
+                return Err(malformed("central directory"));
+            }
+            let fields = || -> Option<(u16, usize, usize, usize, usize, usize, usize)> {
+                Some((
+                    u16_at(archive, pos + 10)?,
+                    u32_at(archive, pos + 20)? as usize,
+                    u32_at(archive, pos + 24)? as usize,
+                    usize::from(u16_at(archive, pos + 28)?),
+                    usize::from(u16_at(archive, pos + 30)?),
+                    usize::from(u16_at(archive, pos + 32)?),
+                    u32_at(archive, pos + 42)? as usize,
+                ))
+            };
+            let (method, compressed, uncompressed, name_len, extra_len, comment_len, local_offset) =
+                fields().ok_or_else(|| malformed("central directory"))?;
+            let name = archive
+                .get(pos + 46..pos + 46 + name_len)
+                .ok_or_else(|| malformed("central directory"))?;
+            if name == entry_name.as_bytes() {
+                if !sig_at(archive, local_offset, [0x50, 0x4b, 0x03, 0x04]) {
+                    return Err(malformed("local file header"));
+                }
+                let local_name = usize::from(
+                    u16_at(archive, local_offset + 26)
+                        .ok_or_else(|| malformed("local file header"))?,
+                );
+                let local_extra = usize::from(
+                    u16_at(archive, local_offset + 28)
+                        .ok_or_else(|| malformed("local file header"))?,
+                );
+                let start = local_offset + 30 + local_name + local_extra;
+                let data = archive
+                    .get(start..start + compressed)
+                    .ok_or_else(|| malformed("entry data"))?;
+                let reader: Box<dyn Read> = match method {
+                    0 => Box::new(std::io::Cursor::new(data)),
+                    8 => Box::new(flate2::read::DeflateDecoder::new(std::io::Cursor::new(
+                        data,
+                    ))),
+                    _ => {
+                        return Err(VaultError::Model(format!(
+                            "unsupported runtime archive compression: {method}"
+                        )));
+                    }
+                };
+                return Ok((reader, uncompressed as u64));
+            }
+            pos += 46 + name_len + extra_len + comment_len;
+        }
+        Err(VaultError::Model(format!(
+            "runtime library missing from archive: {entry_name}"
+        )))
     }
 
     /// Path of one installed model's verified file, if it is recorded in
@@ -966,20 +1087,93 @@ mod tests {
         assert_eq!(legacy.runtime, None);
     }
 
+    /// Build a minimal ZIP archive (local headers, central directory,
+    /// end record) around `entries` — the test counterpart of the
+    /// hand-rolled reader in `ModelManager::zip_entry_data`. Entry
+    /// CRCs are zero: the reader does not check them (the production
+    /// caller verifies the whole archive's SHA-256 first). Each entry
+    /// is `(name, payload, deflate)`.
+    fn build_test_wheel(entries: &[(&str, &[u8], bool)]) -> Vec<u8> {
+        fn push_u16(out: &mut Vec<u8>, v: u16) {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        fn push_u32(out: &mut Vec<u8>, v: u32) {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        let mut out: Vec<u8> = Vec::new();
+        let mut central: Vec<u8> = Vec::new();
+        for (name, payload, deflate) in entries {
+            let compressed = if *deflate {
+                let mut enc =
+                    flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+                enc.write_all(payload).unwrap();
+                enc.finish().unwrap()
+            } else {
+                payload.to_vec()
+            };
+            let method: u16 = if *deflate { 8 } else { 0 };
+            let local_offset = out.len() as u32;
+            out.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+            push_u16(&mut out, 20);
+            push_u16(&mut out, 0);
+            push_u16(&mut out, method);
+            push_u16(&mut out, 0);
+            push_u16(&mut out, 0);
+            push_u32(&mut out, 0);
+            push_u32(&mut out, compressed.len() as u32);
+            push_u32(&mut out, payload.len() as u32);
+            push_u16(&mut out, name.len() as u16);
+            push_u16(&mut out, 0);
+            out.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(&compressed);
+            central.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+            push_u16(&mut central, 20);
+            push_u16(&mut central, 20);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, method);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u32(&mut central, 0);
+            push_u32(&mut central, compressed.len() as u32);
+            push_u32(&mut central, payload.len() as u32);
+            push_u16(&mut central, name.len() as u16);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u16(&mut central, 0);
+            push_u32(&mut central, 0);
+            push_u32(&mut central, local_offset);
+            central.extend_from_slice(name.as_bytes());
+        }
+        let cd_offset = out.len() as u32;
+        out.extend_from_slice(&central);
+        out.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        push_u16(&mut out, 0);
+        push_u16(&mut out, 0);
+        push_u16(&mut out, entries.len() as u16);
+        push_u16(&mut out, entries.len() as u16);
+        push_u32(&mut out, central.len() as u32);
+        push_u32(&mut out, cd_offset);
+        push_u16(&mut out, 0);
+        out
+    }
+
     #[test]
     fn extract_zip_entry_writes_the_library_file() {
         let dir = tempfile::tempdir().unwrap();
         let archive_path = dir.path().join("runtime.whl");
         let payload = b"fake onnxruntime library bytes";
-        {
-            let file = fs::File::create(&archive_path).unwrap();
-            let mut zip = zip::ZipWriter::new(file);
-            let options = zip::write::SimpleFileOptions::default();
-            zip.start_file("onnxruntime/capi/libonnxruntime.1.31.0.dylib", options)
-                .unwrap();
-            zip.write_all(payload).unwrap();
-            zip.finish().unwrap();
-        }
+        // Real wheels deflate their entries; cover the deflated path,
+        // a stored entry alongside it, and a missing entry.
+        let wheel = build_test_wheel(&[
+            (
+                "onnxruntime/capi/libonnxruntime.1.31.0.dylib",
+                payload,
+                true,
+            ),
+            ("onnxruntime/__init__.py", b"# stub", false),
+        ]);
+        fs::write(&archive_path, &wheel).unwrap();
         let dest = dir.path().join("libonnxruntime.1.31.0.dylib");
         ModelManager::extract_zip_entry(
             &archive_path,
@@ -994,6 +1188,16 @@ mod tests {
             let mode = fs::metadata(&dest).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o755);
         }
+        let stored_dest = dir.path().join("__init__.py");
+        ModelManager::extract_zip_entry(&archive_path, "onnxruntime/__init__.py", &stored_dest)
+            .unwrap();
+        assert_eq!(fs::read(&stored_dest).unwrap(), b"# stub");
+        assert!(ModelManager::extract_zip_entry(
+            &archive_path,
+            "onnxruntime/capi/absent.dylib",
+            &dir.path().join("absent.dylib"),
+        )
+        .is_err());
     }
 
     #[test]

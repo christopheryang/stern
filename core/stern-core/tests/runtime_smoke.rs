@@ -19,6 +19,12 @@ fn ensure_runtime_downloads_and_dlopen_works() {
         Ok(_) => panic!("a nonexistent model must not load"),
         Err(e) => format!("{e}"),
     };
-    assert!(!msg.contains("ONNX Runtime failed to load"), "runtime load failed: {msg}");
-    println!("runtime ok at {}; model-stage error as expected: {msg}", path.display());
+    assert!(
+        !msg.contains("ONNX Runtime failed to load"),
+        "runtime load failed: {msg}"
+    );
+    println!(
+        "runtime ok at {}; model-stage error as expected: {msg}",
+        path.display()
+    );
 }

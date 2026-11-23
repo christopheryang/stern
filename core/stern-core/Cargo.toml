@@ -40,7 +40,10 @@ tokio = { version = "1", default-features = false, features = ["fs", "io-util", 
 # downloaded on demand with the first model (see ai::model_manager).
 # The app therefore ships with no ONNX code or model at all.
 ort = { version = "=2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "tracing", "api-24", "load-dynamic"] }
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# Wheel (ZIP) extraction for the runtime download is hand-rolled in
+# ai::model_manager (stored/deflate entries only, over an archive whose
+# SHA-256 was verified first); flate2 supplies just the deflate codec.
+flate2 = "1"
 ureq = "3"
 ndarray = "0.16"
 data-encoding = "2"
