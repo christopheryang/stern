@@ -13,6 +13,16 @@ updates:
     groups:
       cargo-minor-patch:
         update-types: ["minor", "patch"]
+    ignore:
+      # glib 0.20.0 (the fix for GHSA-wrw7-89jp-8q8g, alert #1) is
+      # unreachable: Tauri's Linux GTK3 stack (gtk 0.18) pins glib to
+      # 0.18.x, so every Dependabot security-update attempt fails with
+      # security_update_not_possible. A versions-based ignore is
+      # honored by security updates too, so this stops the doomed
+      # attempts; the alert itself stays open as the reminder. Remove
+      # this once the GTK stack can move to glib >= 0.20.
+      - dependency-name: "glib"
+        versions: [">= 0.20.0"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
