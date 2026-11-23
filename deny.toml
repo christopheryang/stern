@@ -24,6 +24,11 @@ ignore = [
     { id = "RUSTSEC-2025-0081", reason = "unmaintained, transitive dep of ort" },
     { id = "RUSTSEC-2025-0098", reason = "unmaintained, transitive dep of ort" },
     { id = "RUSTSEC-2025-0100", reason = "unmaintained, transitive dep of ort" },
+    # zbus stack unmaintained — transitive deps of keyring's Linux
+    # secret-service backend, no fixed upgrade available
+    { id = "RUSTSEC-2026-0370", reason = "unmaintained, transitive dep of keyring" },
+    { id = "RUSTSEC-2026-0371", reason = "unmaintained, transitive dep of keyring" },
+    { id = "RUSTSEC-2026-0372", reason = "unmaintained, transitive dep of keyring" },
 ]
 
 [licenses]

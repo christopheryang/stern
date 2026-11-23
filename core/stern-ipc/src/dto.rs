@@ -110,6 +110,10 @@ pub struct ModelStatusDto {
     pub size_bytes: u64,
     /// Whether this is the active model (the one chat uses).
     pub is_active: bool,
+    /// Whether the ONNX Runtime library is installed on this device.
+    /// The same on every row: without the runtime no model can load,
+    /// so an active model only makes chat usable once this is true.
+    pub runtime_installed: bool,
     /// A download of this model is currently in flight.
     pub is_downloading: bool,
     /// Bytes downloaded so far (0 when not downloading).

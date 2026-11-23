@@ -55,8 +55,8 @@ desktop/
                               capabilities/, tauri.conf.json (packaging)
   stern-app/                  Leptos CSR entry point; Trunk serves it in
                               dev (port 1420) and builds dist/ for release
-  stern-ui/                   Leptos components (chat, sidebar, model
-                              setup card, app shell). Depends on no other
+  stern-ui/                   Leptos components (chat, settings/model
+                              picker, app shell). Depends on no other
                               crate in the workspace — it talks to the
                               shell through window.__TAURI__.core.invoke
                               and mirrors the DTOs it needs locally.

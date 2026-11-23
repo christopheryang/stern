@@ -1,4 +1,3 @@
-use super::model_setup::ModelSetup;
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -126,7 +125,6 @@ pub fn ChatView() -> impl IntoView {
 
     view! {
         <div style="display:flex;flex-direction:column;height:100%;">
-            <ModelSetup />
             <div style="flex:1;overflow-y:auto;padding:20px;">
                 {move || {
                     let msgs = messages.get();

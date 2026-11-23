@@ -1,15 +1,17 @@
 // Copyright (c) 2026 Christopher Yang
 // SPDX-License-Identifier: MIT
 
-//! Post-install AI model picker.
+//! Post-install AI model picker — the heart of the Settings view.
 //!
 //! AI models are not bundled with Stern; they are downloaded after
 //! install. Following the model-manager pattern popularized by Meetily,
 //! this card lists every model in the catalog with its size and a plain
 //! quality/speed note, and lets the user download, select, update, and
-//! remove models. Exactly one installed model is active at a time; chat
-//! falls back to the built-in rules when none is. While a download runs,
-//! the card polls `model_status` for progress.
+//! remove models. Exactly one installed model is active at a time;
+//! until one is, the app gates the chat behind choosing a model (the
+//! first download also fetches the ONNX Runtime — the app ships with
+//! no ONNX code at all). While a download runs, the card polls
+//! `model_status` for progress.
 
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -341,7 +343,7 @@ pub fn ModelSetup() -> impl IntoView {
                         }
                     }
                     Err(e) => {
-                        let label = if poll {
+                        let label = if cmd == "download_model" {
                             format!("Download failed: {e}")
                         } else {
                             e
@@ -361,8 +363,11 @@ pub fn ModelSetup() -> impl IntoView {
 
     let on_download =
         Callback::new(move |model_id: String| run_action("download_model", model_id, true));
+    // Select polls too: on a runtime-less device, selecting a model
+    // first downloads the runtime (~21-24 MB), and that fetch now
+    // reports through the same progress slot as a model download.
     let on_select =
-        Callback::new(move |model_id: String| run_action("select_model", model_id, false));
+        Callback::new(move |model_id: String| run_action("select_model", model_id, true));
     let on_remove =
         Callback::new(move |model_id: String| run_action("remove_model", model_id, false));
 
@@ -396,9 +401,10 @@ pub fn ModelSetup() -> impl IntoView {
                     <div style=CARD_STYLE>
                         <div style=TITLE_STYLE>"AI model"</div>
                         <div style=TEXT_STYLE>
-                            "Chat works with the built-in rules. Download a model to enable the \
-                            on-device AI — models are stored only on this device, and you can \
-                            switch or remove them at any time."
+                            "Stern needs an AI model to chat. Pick one and download it — the \
+                            first download also fetches the ONNX Runtime (~21 MB), and \
+                            everything is stored only on this device. You can switch or \
+                            remove models at any time."
                         </div>
                         {rows}
                     </div>

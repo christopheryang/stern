@@ -2,15 +2,78 @@ use crate::domain::vault::errors::VaultError;
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
+
+/// One-time ONNX Runtime initialization. The runtime library is not
+/// linked into the app (ort is built with `load-dynamic`); it is
+/// downloaded on demand and loaded from `runtime_path` here. Only a
+/// *successful* initialization is cached, exactly once per process —
+/// the first model load wins, and a runtime upgrade takes effect on
+/// the next app start. A failure is NOT cached: if loading fails
+/// because the runtime file is missing or corrupt and the runtime is
+/// later repaired or re-downloaded, the next model load retries
+/// instead of replaying the first error until the app restarts.
+/// `ORT_INIT_LOCK` serializes initialization attempts so two
+/// concurrent loads cannot race `ort::init_from`.
+static ORT_INIT: OnceLock<()> = OnceLock::new();
+static ORT_INIT_LOCK: Mutex<()> = Mutex::new(());
+
+fn ensure_ort_initialized(runtime_path: &Path) -> Result<(), VaultError> {
+    if ORT_INIT.get().is_some() {
+        return Ok(());
+    }
+    let _guard = ORT_INIT_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if ORT_INIT.get().is_some() {
+        return Ok(());
+    }
+    // Never hand `ort::init_from` a path that is not there. In ort
+    // rc.12's `load-dynamic` build, a failed library load does not
+    // return an error: building the error re-enters the API setup
+    // that the in-progress load itself owns, and the call deadlocks
+    // (found by the `failed_ort_init_is_not_cached` test hanging
+    // inside `ort::setup_api`). Fail here instead, with our own
+    // error — the missing-file case is also the realistic one
+    // (runtime not downloaded yet, or deleted after install). A
+    // file that exists but is corrupt still reaches `init_from`
+    // and remains exposed to that ort bug; there is no way to
+    // validate a dylib from outside it.
+    if !runtime_path.is_file() {
+        return Err(VaultError::Model(format!(
+            "ONNX Runtime is not installed: no library at {}",
+            runtime_path.display()
+        )));
+    }
+    let committed = ort::init_from(runtime_path)
+        .map(|builder| builder.with_name("stern-ai").commit())
+        .map_err(|e| {
+            VaultError::Model(format!(
+                "ONNX Runtime failed to load from {}: {e}",
+                runtime_path.display()
+            ))
+        })?;
+    if !committed {
+        return Err(VaultError::Model(format!(
+            "ONNX Runtime failed to load from {}: the environment was not created",
+            runtime_path.display()
+        )));
+    }
+    // Holding the lock with the `get` check above makes a lost race
+    // unreachable today; map it to success anyway — the environment
+    // exists either way, which is all this function promises.
+    match ORT_INIT.set(()) {
+        Ok(()) | Err(()) => Ok(()),
+    }
+}
 
 pub struct AiModel {
     session: Arc<Mutex<Session>>,
 }
 
 impl AiModel {
-    pub fn new(model_path: &Path) -> Result<Self, VaultError> {
-        let _env = ort::environment::init().with_name("stern-ai");
+    pub fn new(runtime_path: &Path, model_path: &Path) -> Result<Self, VaultError> {
+        ensure_ort_initialized(runtime_path)?;
 
         let session = Session::builder()
             .map_err(|e| VaultError::KeyDerivationFailed(format!("builder: {e}")))?
@@ -165,5 +228,32 @@ impl SimpleTokenizer {
 impl Default for SimpleTokenizer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    /// Regression test for the PR #18 review: a failed `init_from`
+    /// must not be cached for the process lifetime. Two loads with
+    /// two different bad runtime paths must each report their own
+    /// path — if the first error were cached, the second call would
+    /// replay it and name the first path.
+    #[test]
+    fn failed_ort_init_is_not_cached() {
+        let first = ensure_ort_initialized(Path::new("/nonexistent/first/libonnxruntime.dylib"))
+            .unwrap_err()
+            .to_string();
+        assert!(first.contains("first"), "unexpected first error: {first}");
+        let second = ensure_ort_initialized(Path::new("/nonexistent/second/libonnxruntime.dylib"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            second.contains("second"),
+            "init error was cached instead of retried: {second}"
+        );
     }
 }

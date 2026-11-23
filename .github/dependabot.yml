@@ -4,6 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # One open Dependabot PR at a time per ecosystem (Christopher's
+    # rule, Nov 22, 2026): the first weekly run after this file landed
+    # opened ten PRs at once. New updates queue behind the open one.
+    open-pull-requests-limit: 1
     # precommit-check.yml validates Conventional Commits messages, so
     # Dependabot's default "Bump ..." subjects would fail the gate.
     commit-message:
@@ -27,6 +31,10 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # One open Dependabot PR at a time per ecosystem (Christopher's
+    # rule, Nov 22, 2026): the first weekly run after this file landed
+    # opened ten PRs at once. New updates queue behind the open one.
+    open-pull-requests-limit: 1
     commit-message:
       prefix: "chore(deps)"
     groups:

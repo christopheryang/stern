@@ -56,20 +56,27 @@ pub fn run() {
                     .map_err(|e| format!("failed to open database: {e}"))?,
             );
 
-            // The AI model is downloaded after install, never bundled.
-            // The chat handler starts model-less and the verified active
-            // model (if one is on disk) is loaded on a background thread:
-            // loading a 273–483 MB model synchronously here would block
-            // window startup. Until the load lands, chat uses the
-            // built-in rule-based classifier.
+            // The AI model — and the ONNX Runtime library itself — are
+            // downloaded after install, never bundled; the app ships
+            // with no AI at all, and the user picks a model first. The
+            // chat handler starts model-less and the verified active
+            // model (if one is on disk, with its runtime) is loaded on a
+            // background thread: loading a 273–483 MB model
+            // synchronously here would block window startup. No download
+            // ever happens at startup: a device with a model but no
+            // runtime record fetches the runtime when the user next
+            // selects or downloads a model.
             let model_manager = Arc::new(ModelManager::new(app_dir.join("models")));
             let chat_handler = Arc::new(ChatHandler::new(None));
             {
                 let model_manager = model_manager.clone();
                 let chat_handler = chat_handler.clone();
                 std::thread::spawn(move || {
-                    if let Some(path) = model_manager.active_model_path() {
-                        match AiModel::new(&path) {
+                    if let (Some(runtime_path), Some(path)) = (
+                        model_manager.runtime_path(),
+                        model_manager.active_model_path(),
+                    ) {
+                        match AiModel::new(&runtime_path, &path) {
                             Ok(model) => chat_handler.set_model(Some(Arc::new(model))),
                             Err(e) => {
                                 eprintln!("stern: failed to load AI model: {e}");

@@ -2,7 +2,7 @@
 
 use crate::AppState;
 use std::sync::Arc;
-use stern_core::ai::model_manager::{catalog_model, ModelState, MODEL_CATALOG};
+use stern_core::ai::model_manager::{catalog_model, current_runtime, ModelState, MODEL_CATALOG};
 use stern_core::ai::AiModel;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
@@ -817,6 +817,7 @@ fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
         .lock()
         .ok()
         .and_then(|guard| guard.clone());
+    let runtime_installed = state.model_manager.runtime_path().is_some();
     MODEL_CATALOG
         .iter()
         .map(|descriptor| {
@@ -841,6 +842,7 @@ fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
                 latest_version: descriptor.version.to_string(),
                 size_bytes: descriptor.size_bytes,
                 is_active: info.is_active,
+                runtime_installed,
                 is_downloading,
                 downloaded_bytes,
                 total_bytes,
@@ -864,12 +866,74 @@ impl Drop for DownloadProgressGuard {
     }
 }
 
+/// The installed ONNX Runtime library path, installing the runtime
+/// first if this device does not have it. The install is a ~21–24 MB
+/// download, so it runs on the blocking pool; it only ever happens as
+/// part of a user-initiated model action (download/select), never at
+/// startup. Devices whose manifest predates the runtime download have
+/// models installed but no runtime — this is where they catch up.
+async fn ensure_runtime_path(
+    state: &AppState,
+    progress_id: Option<&str>,
+) -> Result<std::path::PathBuf, VaultError> {
+    if let Some(path) = state.model_manager.runtime_path() {
+        return Ok(path);
+    }
+    // Report the runtime download through the same progress slot a
+    // model download uses, keyed by the model the user just picked,
+    // so the UI's poller shows the ~21-24 MB fetch instead of a
+    // silent wait. The slot is only reserved when it is free (a
+    // model download may already own it), and only a slot reserved
+    // here is cleared here — the guard never steals another
+    // download's progress.
+    let total = current_runtime().map_or(0, |runtime| runtime.size_bytes);
+    let reserved = match progress_id {
+        Some(id) => {
+            let mut guard = state
+                .download_progress
+                .lock()
+                .map_err(|e| VaultError::Model(e.to_string()))?;
+            if guard.is_none() {
+                *guard = Some((id.to_string(), 0, total));
+                true
+            } else {
+                false
+            }
+        }
+        None => false,
+    };
+    let _progress_guard = reserved.then(|| DownloadProgressGuard {
+        progress: state.download_progress.clone(),
+    });
+    let progress = state.download_progress.clone();
+    let progress_key = progress_id.map(str::to_string);
+    let manager = state.model_manager.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        manager.ensure_runtime(&mut |downloaded, total_bytes| {
+            if let Some(key) = &progress_key {
+                if let Ok(mut guard) = progress.lock() {
+                    // Only ever update the slot while it still
+                    // belongs to this action's model.
+                    if guard.as_ref().is_some_and(|(id, _, _)| id == key) {
+                        *guard = Some((key.clone(), downloaded, total_bytes));
+                    }
+                }
+            }
+        })
+    })
+    .await
+    .map_err(|e| VaultError::Model(format!("runtime install task failed: {e}")))?
+}
+
 /// Load one model file on the blocking pool. Loading a 100–500 MB model
 /// must never run on a Tokio worker, and a failure is returned to the
 /// caller (and shown in the UI) instead of being swallowed.
-async fn load_model_at(path: std::path::PathBuf) -> Result<Arc<AiModel>, VaultError> {
+async fn load_model_at(
+    runtime_path: std::path::PathBuf,
+    path: std::path::PathBuf,
+) -> Result<Arc<AiModel>, VaultError> {
     tauri::async_runtime::spawn_blocking(move || {
-        AiModel::new(&path)
+        AiModel::new(&runtime_path, &path)
             .map(Arc::new)
             .map_err(|e| VaultError::Model(format!("model {} failed to load: {e}", path.display())))
     })
@@ -882,7 +946,12 @@ async fn load_model_at(path: std::path::PathBuf) -> Result<Arc<AiModel>, VaultEr
 async fn sync_chat_model(state: &AppState) -> Result<(), VaultError> {
     match state.model_manager.active_model_path() {
         Some(path) => {
-            let model = load_model_at(path).await?;
+            let active_id = state
+                .model_manager
+                .active_model()
+                .map(|active| active.model_id);
+            let runtime_path = ensure_runtime_path(state, active_id.as_deref()).await?;
+            let model = load_model_at(runtime_path, path).await?;
             state.chat_handler.set_model(Some(model));
         }
         None => state.chat_handler.set_model(None),
@@ -978,7 +1047,8 @@ pub async fn select_model(
                 "model {model_id} is not installed or its file is missing"
             ))
         })?;
-    let model = load_model_at(path).await?;
+    let runtime_path = ensure_runtime_path(&state, Some(&model_id)).await?;
+    let model = load_model_at(runtime_path, path).await?;
     state.model_manager.set_active_model(&model_id)?;
     state.chat_handler.set_model(Some(model));
     Ok(model_status_dtos(&state))
