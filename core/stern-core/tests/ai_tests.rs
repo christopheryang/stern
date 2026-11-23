@@ -817,10 +817,7 @@ fn the_gate_intercepts_before_a_pending_choice() {
     );
     let response = handler.process_message("b");
     assert!(
-        matches!(
-            &response.action,
-            Some(Action::UnlockVaultWith { .. })
-        ),
+        matches!(&response.action, Some(Action::UnlockVaultWith { .. })),
         "the password must go to the gate, got: {:?}",
         response.action
     );
@@ -874,8 +871,14 @@ fn action_debug_redacts_secrets() {
         fields: vec![("password".to_string(), "hunter2".to_string())],
     };
     let rendered = format!("{store:?}");
-    assert!(!rendered.contains("hunter2"), "debug leaked a value: {rendered}");
-    assert!(rendered.contains("password"), "field keys stay visible: {rendered}");
+    assert!(
+        !rendered.contains("hunter2"),
+        "debug leaked a value: {rendered}"
+    );
+    assert!(
+        rendered.contains("password"),
+        "field keys stay visible: {rendered}"
+    );
     let setup = Action::SetupVault {
         password: zeroize::Zeroizing::new("Correct-Horse-9!".to_string()),
     };
