@@ -40,18 +40,22 @@ it is useful for layout work only.
 
 1. Fresh state: delete the app data dir (`com.stern.app` — macOS:
    `~/Library/Application Support/com.stern.app/`).
-2. `just dev`, create a vault (master password), unlock it.
-3. Add an entry through the entry UI; lock and unlock; confirm the entry
-   decrypts. Copy a secret and confirm the clipboard auto-clears.
-4. Chat: "show all passwords", "get my <service> credentials",
-   "save my GitHub password" (secret goes in the form, not chat).
-5. Model card (top of Chat): Download → progress bar → installed
-   version shown. Remove → card returns to "not installed" and chat
-   still answers via rules.
+2. `just dev` — the setup screen creates the vault (master password).
+   Quit and relaunch: the login screen now asks for it before anything
+   else.
+3. Store an entry in chat (step 4); lock (the header Lock button) and
+   unlock; ask for the entry and confirm it decrypts. Copy a secret
+   and confirm the clipboard auto-clears.
+4. Chat: "show all passwords", "what's my password for <service>?",
+   "save my GitHub password" (a named store files immediately; a bare
+   "store" runs the guided conversation — secret fields use the
+   peek-mask input and never appear in the transcript).
+5. Settings (gear) → model picker: Download → progress → installed.
+   Remove → the picker shows it gone and chat still answers via rules.
 6. Model update drill: bump the catalog `version` string in
    `core/stern-core/src/ai/model_manager.rs` locally, restart — the
-   card offers an update; downloading swaps versions and prunes the old
-   directory under `models/smollm-135m/`.
+   picker offers an update; downloading swaps versions and prunes the
+   old directory under `models/smollm-135m/`.
 
 ## Testing
 

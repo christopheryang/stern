@@ -15,8 +15,11 @@ and an ADR disagree, the ADR wins.
   store, retrieve, list, update, and delete secrets, plus create and
   unlock the vault, export, import, and help
   ([ADR-0005](../adr/0005-Rule-Based-Intent-First.md)).
-- **Secret values never pass through chat.** Chat classifies intent
-  only; values are entered and shown in the entry UI.
+- **Secrets pass through chat only under mask.** Chat classifies
+  intent; a guided conversation may collect a secret value, but only
+  at a prompt flagged sensitive — the input peek-masks, the value is
+  never echoed in a response or shown in the transcript, and the
+  model never writes the replies (it only parses, on-device).
 - **Destructive actions need confirmation.** Deleting a secret
   requires an explicit confirmation in the UI, whichever classifier
   produced the intent.
