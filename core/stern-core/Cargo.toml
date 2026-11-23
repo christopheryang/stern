@@ -30,7 +30,7 @@ base64 = "0.22"
 tracing = { version = "0.1", features = ["attributes"] }
 arboard = { version = "3", default-features = false }
 indexmap = { version = "2", features = ["serde"] }
-region = "3"
+region = "4"
 uuid = { version = "1", features = ["v4"] }
 blake3 = "1"
 tempfile = "3"
