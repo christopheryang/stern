@@ -168,7 +168,7 @@ anything else:
 
 - **First run — setup screen.** Choose a master password (typed
   twice; policy: 8+ characters with a lowercase letter, an
-  uppercase letter, a number, and a symbol — enforced here and
+  uppercase letter, a number, and a symbol (a space is not one) — enforced here and
   in the chat gate). The screen itself is deliberately brief —
   labeled fields and one requirements line, the pattern
   Bitwarden and other open-source vaults use — and the

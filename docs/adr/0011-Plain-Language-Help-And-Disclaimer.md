@@ -22,9 +22,14 @@ that holds people's passwords and whose password cannot be recovered.
   prose beyond the tier's download size. Settings has a one-line
   explanation; everything longer lives in Help.
 - **Errors are sentences, not codes.** `friendly_error` maps backend and
-  bridge errors to one plain sentence and keeps the original text as
-  small print under it when it may help someone supporting the user. The
-  chat's `Error: …` replies use the same mapping.
+  bridge errors to one plain sentence. Only a failed model download keeps
+  its original text as small print, because that is where it helps
+  someone sort out a network or proxy problem; every other error shows
+  the sentence alone, so backend or database diagnostics never reach the
+  screen. A message counts as a download failure only when the model
+  manager raised it, so an unrelated error that merely mentions a
+  "Downloads" folder is not mistaken for one. The chat's `Error: …`
+  replies use the same mapping.
 - **A Help page** (`docs/Help.md`) of short questions and answers,
   reachable from the top bar at any time — including before the vault
   is set up or unlocked, since it is static text.
@@ -54,7 +59,8 @@ that holds people's passwords and whose password cannot be recovered.
   lawyer.** Enforceability varies by jurisdiction; it should be reviewed
   before a public release.
 - Hiding detail has a cost: someone debugging sees less in the UI. The
-  technical text remains as small print on download and unknown errors,
-  and the Runbook still maps symptoms to causes.
+  technical text remains as small print on download failures only, and
+  the Runbook still maps symptoms to causes. Anything else must be found
+  in the log.
 - The reader is deliberately minimal; adding bold, links, or tables to
   Help or the Disclaimer means extending it (the test will say so).

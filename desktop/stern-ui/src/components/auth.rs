@@ -173,17 +173,21 @@ fn password_rules(password: &str) -> [(&'static str, &'static str, bool); 5] {
         (
             "A symbol, like ! or ?",
             "a symbol",
-            password.chars().any(|c| !c.is_alphanumeric()),
+            password
+                .chars()
+                .any(|c| !c.is_alphanumeric() && !c.is_whitespace()),
         ),
     ]
 }
 
-/// What a candidate master password is still missing under the
-/// policy (at least 8 characters, a lowercase letter, an
-/// uppercase letter, a number, and a symbol), as one brief
-/// comma-joined phrase — or nothing when it passes. Mirrors the
-/// chat gate's check in stern-core.
-fn password_gap(password: &str) -> Option<String> {
+/// What a candidate master password is still missing, or nothing.
+///
+/// The policy is at least 8 characters, a lowercase letter, an
+/// uppercase letter, a number, and a symbol (not a space), given as one
+/// brief comma-joined phrase. It mirrors the chat gate's check in
+/// stern-core.
+#[must_use]
+pub fn password_gap(password: &str) -> Option<String> {
     let missing: Vec<&str> = password_rules(password)
         .into_iter()
         .filter(|(_, _, met)| !met)
@@ -273,13 +277,12 @@ fn RecoveryWarning(
 fn SetupForm(
     password: RwSignal<String>,
     confirm: RwSignal<String>,
+    agreed: RwSignal<bool>,
     on_valid: Callback<()>,
     on_disclaimer: Callback<()>,
 ) -> impl IntoView {
     let (show, set_show) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
-    let (agreed, set_agreed) = signal(false);
-
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let pw = password.get();
@@ -321,7 +324,7 @@ fn SetupForm(
                 <input
                     type="checkbox"
                     prop:checked=agreed
-                    on:change=move |ev| set_agreed.set(event_target_checked(&ev))
+                    on:change=move |ev| agreed.set(event_target_checked(&ev))
                 />
                 <span>
                     "I understand that Stern is used at my own risk. "
@@ -353,6 +356,9 @@ pub fn SetupView(
 ) -> impl IntoView {
     let password = RwSignal::new(String::new());
     let confirm = RwSignal::new(String::new());
+    // Held here, with the passwords, so going Back from the recovery
+    // warning does not silently untick the agreement.
+    let agreed = RwSignal::new(false);
     let (error, set_error) = signal(Option::<String>::None);
     let (busy, set_busy) = signal(false);
     let (warn, set_warn) = signal(false);
@@ -392,6 +398,7 @@ pub fn SetupView(
                             <SetupForm
                                 password=password
                                 confirm=confirm
+                                agreed=agreed
                                 on_valid=next
                                 on_disclaimer=on_disclaimer
                             />

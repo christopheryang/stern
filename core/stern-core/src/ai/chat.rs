@@ -92,7 +92,11 @@ fn master_password_gap(password: &str) -> Option<String> {
     if !password.chars().any(|c| c.is_ascii_digit()) {
         missing.push("a number");
     }
-    if !password.chars().any(|c| !c.is_alphanumeric()) {
+    // A space is not a symbol: the rule is about punctuation and the like.
+    if !password
+        .chars()
+        .any(|c| !c.is_alphanumeric() && !c.is_whitespace())
+    {
         missing.push("a symbol");
     }
     if missing.is_empty() {
@@ -725,8 +729,8 @@ impl ChatHandler {
                 input_sensitive: false,
             },
             Intent::Greeting => ChatResponse {
-                message: "I'm doing well, thanks! I'm Stern, your local secrets manager — \
-                    everything stays encrypted on this device.\n\n\
+                message: "I'm doing well, thanks! I'm Stern. I keep your notes and documents \
+                    private, and everything stays on this computer.\n\n\
                     I can save a note or a document for you, and find it again. Try \"save a \
                     note\", or ask \"find my shopping list\"."
                     .to_string(),

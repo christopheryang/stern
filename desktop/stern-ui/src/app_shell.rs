@@ -319,12 +319,17 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
                     set.lock_error.set(None);
                     spawn_local(async move {
                         if crate::components::auth::lock_vault().await.is_ok() {
+                            // Back to the main view, so the sign-in screen never
+                            // inherits an open Settings or Help page.
+                            set.page.set(Page::Main);
                             set.auth.set(Some(AuthPhase::Login));
                         } else {
                             set.lock_error
                                 .set(Some("Couldn't lock Stern. Please try again.".to_string()));
-                            set.locking.set(false);
                         }
+                        // The shell outlives the lock, so the button must be
+                        // usable again after the next sign-in.
+                        set.locking.set(false);
                     });
                 }
             >

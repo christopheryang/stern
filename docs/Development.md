@@ -60,7 +60,8 @@ it is useful for layout work only.
    screen, the login screen, and the chat: Back must return to where
    you were, with anything typed still there. Break the network and
    try a download: the message should be one plain sentence, with the
-   technical text as small print beneath it.
+   technical text as small print beneath it. Any other error should show
+   the plain sentence alone.
    Check both themes (Settings → Look; light is the default, and the choice survives a restart) and a short
    window (resize to the 400 px minimum height): nothing should clip
    or overflow, and the setup screen's requirements checklist should

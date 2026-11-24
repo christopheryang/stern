@@ -74,7 +74,7 @@ remaining inline style is the download progress bar's computed width.
   Download / Use this / Update / Remove. The first-run gate shows the
   same card, so a new user picks and downloads right there; a percentage and a gradient bar show downloads. A failed
   download shows one plain sentence with the technical text as small
-  print.
+  print (other errors show the sentence alone).
 - **Help and Disclaimer** — Help is a list of collapsible questions
   (the first open) built from `docs/Help.md`; the Disclaimer is a plain
   document built from `docs/Disclaimer.md`. Both are embedded at compile
@@ -119,8 +119,9 @@ model"; never name a technology or a model; put anything longer in Help.
 Raw errors are mapped by `friendly_error`
 (`desktop/stern-ui/src/components/friendly.rs`) — known cases (wrong
 password, lockout, locked, download) get a tailored sentence, anything
-else gets "Something went wrong. Please try again." — and the original
-text is kept as small print where it helps whoever supports the user.
+else gets "Something went wrong. Please try again." Only a failed
+model download keeps its original text as small print; other errors
+never show backend diagnostics.
 
 ## Verification
 

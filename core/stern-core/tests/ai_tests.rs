@@ -964,3 +964,29 @@ fn unknown_fields_and_unknown_kinds_are_masked_by_default() {
     assert_eq!(kind_word("api key"), "password");
     assert_eq!(kind_word("biometric"), "biometric");
 }
+
+#[test]
+fn the_setup_gate_does_not_accept_a_space_as_a_symbol() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(false, false);
+    let _ = handler.process_message("store");
+
+    let spaces_only = handler.process_message("Correct horse 9");
+    assert!(spaces_only.input_sensitive);
+    assert!(
+        spaces_only.message.contains("a symbol"),
+        "{}",
+        spaces_only.message
+    );
+
+    let ok = handler.process_message("Correct horse 9!");
+    assert!(!ok.message.contains("still needs"), "{}", ok.message);
+}
+
+#[test]
+fn the_greeting_speaks_plainly_about_notes_and_documents() {
+    let handler = ChatHandler::new(None);
+    let reply = handler.process_message("how are you?").message;
+    assert!(reply.contains("notes and documents"), "{reply}");
+    assert!(!reply.contains("secrets manager"), "{reply}");
+}

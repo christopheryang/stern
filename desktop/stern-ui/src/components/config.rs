@@ -17,13 +17,36 @@ use leptos::prelude::*;
 #[component]
 fn Appearance() -> impl IntoView {
     let current = expect_context::<ThemeSignal>();
-    let option = move |value: Theme, label: &'static str, icon: IconKind| {
+    let light_ref = NodeRef::<leptos::html::Button>::new();
+    let dark_ref = NodeRef::<leptos::html::Button>::new();
+    // One radio is in the tab order (the chosen one); an arrow key
+    // moves to the other and picks it, as a native radio group does.
+    let option = move |value: Theme,
+                       label: &'static str,
+                       icon: IconKind,
+                       this: NodeRef<leptos::html::Button>,
+                       other: NodeRef<leptos::html::Button>| {
         view! {
             <button
+                type="button"
+                node_ref=this
                 class="theme-option"
                 role="radio"
-                aria-checked=move || (current.get() == value).to_string()
+                aria-checked=move || if current.get() == value { "true" } else { "false" }
+                tabindex=move || if current.get() == value { "0" } else { "-1" }
                 on:click=move |_| theme::choose(current, value)
+                on:keydown=move |ev| {
+                    if matches!(
+                        ev.key().as_str(),
+                        "ArrowLeft" | "ArrowRight" | "ArrowUp" | "ArrowDown"
+                    ) {
+                        ev.prevent_default();
+                        theme::choose(current, value.other());
+                        if let Some(button) = other.get() {
+                            drop(button.focus());
+                        }
+                    }
+                }
             >
                 <Icon kind=icon class="icon-sm" />
                 {label}
@@ -40,8 +63,8 @@ fn Appearance() -> impl IntoView {
                 <p class="section-text">"Pick light or dark."</p>
             </div>
             <div class="theme-options" role="radiogroup" aria-label="Look">
-                {option(Theme::Light, "Light", IconKind::Sun)}
-                {option(Theme::Dark, "Dark", IconKind::Moon)}
+                {option(Theme::Light, "Light", IconKind::Sun, light_ref, dark_ref)}
+                {option(Theme::Dark, "Dark", IconKind::Moon, dark_ref, light_ref)}
             </div>
         </div>
     }

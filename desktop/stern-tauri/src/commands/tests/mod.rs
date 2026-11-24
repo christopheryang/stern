@@ -422,6 +422,74 @@ fn import_rejects_missing_non_json_and_non_file_paths() {
 }
 
 #[test]
+fn import_enforces_the_size_limit_on_what_it_reads() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("export.json");
+    std::fs::write(&path, b"0123456789").unwrap();
+    assert_eq!(read_export_file_limited(&path, 10).unwrap(), b"0123456789");
+    let too_big = read_export_file_limited(&path, 9).unwrap_err();
+    assert!(too_big.to_string().contains("too large"), "{too_big}");
+}
+
+#[test]
+fn import_errors_carry_no_os_detail() {
+    let dir = tempfile::tempdir().unwrap();
+    let missing = dir.path().join("gone.json");
+    let err = read_export_file(&missing).unwrap_err().to_string();
+    assert!(!err.contains("os error"), "{err}");
+    assert!(!err.contains(dir.path().to_str().unwrap()), "{err}");
+}
+
+/// A writer that accepts nothing, like a full disk.
+struct FullDisk;
+
+impl std::io::Write for FullDisk {
+    fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("no space left on device"))
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_failed_export_write_removes_the_partial_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("stern-export-test.json");
+    std::fs::write(&path, b"partial").unwrap();
+
+    let err = fill_export_file(FullDisk, &path, b"secret").unwrap_err();
+
+    assert!(!path.exists(), "the partial export was left behind");
+    let text = err.to_string();
+    assert!(!text.contains("no space"), "{text}");
+    assert!(!text.contains(dir.path().to_str().unwrap()), "{text}");
+}
+
+#[test]
+fn a_successful_export_write_keeps_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_new_export_file(dir.path(), b"payload").unwrap();
+    assert_eq!(std::fs::read(path).unwrap(), b"payload");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_export_that_cannot_be_created_says_nothing_about_the_os() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+    let result = write_new_export_file(dir.path(), b"x");
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    // Running as root can still create the file; only check when refused.
+    if let Err(e) = result {
+        let text = e.to_string();
+        assert!(!text.contains("os error"), "{text}");
+        assert!(!text.contains(dir.path().to_str().unwrap()), "{text}");
+    }
+}
+
+#[test]
 fn import_errors_do_not_echo_the_path() {
     let err = read_export_file(std::path::Path::new("/Users/someone/secret.json")).unwrap_err();
     assert!(!err.to_string().contains("someone"), "{err}");

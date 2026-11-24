@@ -40,10 +40,7 @@ fn download_failures_hide_jargon_but_keep_the_detail() {
 fn unknown_errors_fall_back_to_a_generic_sentence() {
     let error = friendly_error("database error: disk I/O error");
     assert_eq!(error.message, "Something went wrong. Please try again.");
-    assert_eq!(
-        error.detail.as_deref(),
-        Some("database error: disk I/O error")
-    );
+    assert!(error.detail.is_none());
 }
 
 #[test]
@@ -121,4 +118,41 @@ fn help_explains_what_an_ai_model_is_and_how_to_choose() {
         .any(|h| h == "Which AI model should I choose?"));
     assert!(!HELP.contains("Medium"), "Medium no longer exists");
     assert!(!HELP.to_lowercase().contains("a size"));
+}
+
+#[test]
+fn a_space_does_not_count_as_a_symbol() {
+    use stern_ui::components::auth::password_gap;
+
+    assert_eq!(
+        password_gap("Correct Horse 9"),
+        Some("a symbol".to_string())
+    );
+    assert_eq!(
+        password_gap("Correct Horse 9\t"),
+        Some("a symbol".to_string())
+    );
+    assert_eq!(password_gap("Correct Horse 9!"), None);
+    assert_eq!(password_gap("Correct-Horse-9"), None);
+}
+
+#[test]
+fn an_unrelated_error_that_mentions_downloads_is_not_a_download_failure() {
+    let error = friendly_error("io error: /Users/sam/Downloads/export.json: permission denied");
+    assert_eq!(error.message, "Something went wrong. Please try again.");
+    assert!(error.detail.is_none());
+}
+
+#[test]
+fn raw_backend_diagnostics_never_become_small_print() {
+    for raw in [
+        "database error: no such table: vault_meta",
+        "keychain error: item not found",
+        "serialization error: expected value at line 1 column 1",
+        "model error: model smollm2 has no tokenizer",
+    ] {
+        let error = friendly_error(raw);
+        assert!(error.detail.is_none(), "{raw} leaked its detail");
+        assert!(!error.message.contains("table"), "{raw}");
+    }
 }

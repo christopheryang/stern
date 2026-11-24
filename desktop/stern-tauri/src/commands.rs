@@ -654,6 +654,26 @@ fn handle_reveal_entry(
     answer_entry(state, entry, &kek, field)
 }
 
+/// Write `data` into a freshly created export file at `path`.
+///
+/// If the write or flush fails, the partial file is removed rather than
+/// left behind, and the error says nothing about the OS or the path.
+fn fill_export_file<W: std::io::Write>(
+    mut file: W,
+    path: &std::path::Path,
+    data: &[u8],
+) -> Result<(), VaultError> {
+    if let Err(e) = file.write_all(data).and_then(|()| file.flush()) {
+        drop(file);
+        drop(std::fs::remove_file(path));
+        tracing::warn!("export write failed: {e}");
+        return Err(VaultError::Io(
+            "Couldn't write the export file.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Write an export next to the vault without ever replacing a file.
 ///
 /// The name carries the time (`stern-export-YYYYMMDD-HHMMSS.json`);
@@ -663,8 +683,6 @@ fn write_new_export_file(
     dir: &std::path::Path,
     data: &[u8],
 ) -> Result<std::path::PathBuf, VaultError> {
-    use std::io::Write;
-
     let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
     for attempt in 1u32..=1000 {
         let name = if attempt == 1 {
@@ -681,17 +699,21 @@ fn write_new_export_file(
             options.mode(0o600);
         }
         match options.open(&path) {
-            Ok(mut file) => {
-                file.write_all(data)
-                    .map_err(|e| VaultError::Io(e.to_string()))?;
+            Ok(file) => {
+                fill_export_file(file, &path, data)?;
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(e) => return Err(VaultError::Io(e.to_string())),
+            Err(e) => {
+                tracing::warn!("export file could not be created: {e}");
+                return Err(VaultError::Io(
+                    "Couldn't create the export file.".to_string(),
+                ));
+            }
         }
     }
     Err(VaultError::Io(
-        "could not find a free export file name".to_string(),
+        "Couldn't find a free export file name.".to_string(),
     ))
 }
 
@@ -774,8 +796,25 @@ const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Read an export file for import, after checking it is what it should
 /// be: a regular `.json` file (symlinks resolved first) of sane size.
-/// Error text never includes the path, which may name the user.
+/// Error text never includes the path or an OS error, which may name
+/// the user.
 fn read_export_file(path: &std::path::Path) -> Result<Vec<u8>, VaultError> {
+    read_export_file_limited(path, MAX_IMPORT_BYTES)
+}
+
+/// [`read_export_file`] with the size limit as a parameter.
+///
+/// The file is opened once and every later check uses that handle, so
+/// it cannot be swapped between the check and the read; the read itself
+/// is capped, so a file that grows after the check still cannot exhaust
+/// memory.
+fn read_export_file_limited(path: &std::path::Path, limit: u64) -> Result<Vec<u8>, VaultError> {
+    use std::io::Read;
+
+    let io_error = |what: &str, e: &std::io::Error| {
+        tracing::warn!("import {what} failed: {e}");
+        VaultError::Io("Couldn't read the import file.".to_string())
+    };
     let resolved = path
         .canonicalize()
         .map_err(|_| VaultError::Io("Import file not found.".to_string()))?;
@@ -787,14 +826,22 @@ fn read_export_file(path: &std::path::Path) -> Result<Vec<u8>, VaultError> {
             "Import file must be a .json file.".to_string(),
         ));
     }
-    let meta = std::fs::metadata(&resolved).map_err(|e| VaultError::Io(e.to_string()))?;
+    let file = std::fs::File::open(&resolved).map_err(|e| io_error("open", &e))?;
+    let meta = file.metadata().map_err(|e| io_error("stat", &e))?;
     if !meta.is_file() {
         return Err(VaultError::Io("Import path is not a file.".to_string()));
     }
-    if meta.len() > MAX_IMPORT_BYTES {
+    if meta.len() > limit {
         return Err(VaultError::Io("Import file is too large.".to_string()));
     }
-    std::fs::read(&resolved).map_err(|e| VaultError::Io(e.to_string()))
+    let mut data = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut data)
+        .map_err(|e| io_error("read", &e))?;
+    if u64::try_from(data.len()).unwrap_or(u64::MAX) > limit {
+        return Err(VaultError::Io("Import file is too large.".to_string()));
+    }
+    Ok(data)
 }
 
 #[tauri::command]
