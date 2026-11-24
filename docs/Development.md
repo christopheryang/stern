@@ -108,6 +108,24 @@ clippy's `--all-targets` is *not* part of the gate: the older test
 files predate the pedantic set. New test files should still be
 clippy-clean (run `cargo clippy -p <crate> --test <name> -- -D warnings`).
 
+## Regenerating the User's Guide screenshots
+
+The screenshots in [guide/](guide/User-Guide.md) are generated, not
+hand-drawn, so they can be redone whenever a screen changes:
+
+```bash
+tools/screenshots/capture.sh
+```
+
+It builds the frontend, serves a copy with
+`tools/screenshots/capture-stub.js` standing in for the Tauri bridge
+(no vault, model or network is involved), and takes 900x700 shots, the
+real window size, with headless Chrome (`CHROME=...` overrides the
+macOS path; Node 22+ is needed). The stub replays the real replies of
+the chat handler, so when chat wording changes, update the stub's
+replies too. Look at every image before committing; the file names are
+`User-Guide - <Image name>.png` and the guide links to them by name.
+
 ## Packaging
 
 ```bash

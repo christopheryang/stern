@@ -22,6 +22,9 @@ desktop/
   stern-app/      Leptos CSR entry point (Trunk serves this on :1420)
   stern-ui/       Leptos component library (depends on nothing internal
                   except via the Tauri JS bridge — see Gotchas)
+tools/
+  screenshots/    Regenerates the User's Guide screenshots (docs/guide/)
+                  from the built frontend; see docs/Development.md
 mobile/           Planned; does not exist yet
 ```
 

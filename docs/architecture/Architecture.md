@@ -65,6 +65,9 @@ desktop/
                               crate in the workspace — it talks to the
                               shell through window.__TAURI__.core.invoke
                               and mirrors the DTOs it needs locally.
+tools/
+  screenshots/                Regenerates the User's Guide screenshots
+                              (docs/guide/) from the built frontend
 ```
 
 ## Runtime structure

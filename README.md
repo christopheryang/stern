@@ -4,6 +4,8 @@ A local-first, AI-powered secrets manager. Everything stays encrypted on your de
 
 Built with Rust + Tauri v2 + Leptos (WASM). Chat with Stern in natural language to store, retrieve, and manage your secrets and documents.
 
+**New to Stern? Read the [User's Guide](docs/guide/User-Guide.md)** — a step-by-step walkthrough with screenshots, from creating your password to saving and finding your first note.
+
 ## Architecture
 
 ```
@@ -18,6 +20,8 @@ Stern/
 │   └── stern-ui/                 # Leptos component library, stylesheet, brand assets
 │
 ├── mobile/                       # Mobile client (Android/iOS) — planned
+│
+├── tools/screenshots/            # Regenerates the User's Guide screenshots
 │
 └── Cargo.toml                    # Workspace root
 ```
@@ -140,6 +144,7 @@ configured yet, so local builds are unsigned.
 
 ## Documentation
 
+- [docs/guide/User-Guide.md](docs/guide/User-Guide.md) — the user's guide, with screenshots
 - [docs/](docs/README.md) — design documentation index
 - [docs/architecture/Architecture.md](docs/architecture/Architecture.md) — how the app is put together
 - [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md) — the vault cryptography in detail
