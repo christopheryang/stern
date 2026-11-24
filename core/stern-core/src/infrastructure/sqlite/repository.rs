@@ -1,3 +1,4 @@
+use crate::domain::vault::crypto_constants::NONCE_LEN;
 use crate::domain::vault::crypto_constants::{SECRET_KEY_LEN, VAULT_SALT_LEN, VERIFY_HASH_LEN};
 use crate::domain::vault::entry::EncryptedEntry;
 use crate::domain::vault::errors::VaultError;
@@ -19,6 +20,50 @@ pub struct StoredPayload<'a> {
     pub name: &'a str,
     pub version: u64,
     pub updated_at: &'a str,
+}
+
+/// The encrypted bytes of a stored file, kept beside its entry.
+#[derive(Debug, Clone)]
+pub struct EncryptedBlob {
+    pub dek_wrapped: Vec<u8>,
+    pub nonce: [u8; NONCE_LEN],
+    pub ciphertext: Vec<u8>,
+    pub byte_len: u64,
+    pub mime_type: String,
+    pub is_text: bool,
+}
+
+/// Insert one entry row. Shared by `insert_entry` and the file
+/// transaction, so both write the same shape.
+fn insert_entry_row(conn: &Connection, entry: &EncryptedEntry) -> Result<(), VaultError> {
+    let kind_str = match entry.kind {
+        crate::domain::vault::entry::EntryKind::Login => "login",
+        crate::domain::vault::entry::EntryKind::Note => "note",
+        crate::domain::vault::entry::EntryKind::Document => "document",
+    };
+    let tags_json = serde_json::to_string(&entry.tags).unwrap_or_default();
+    conn.execute(
+        "INSERT INTO entries (id, kind, name, tags, dek_wrapped, nonce, ciphertext, version, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            entry.id,
+            kind_str,
+            entry.name,
+            tags_json,
+            entry.dek_wrapped,
+            entry.nonce.as_slice(),
+            entry.ciphertext,
+            entry.version.cast_signed(),
+            entry.created_at.to_rfc3339(),
+            entry.updated_at.to_rfc3339(),
+        ],
+    )
+    .map_err(|e| VaultError::Database(e.to_string()))?;
+    Ok(())
+}
+
+fn into_rusqlite(e: VaultError) -> rusqlite::Error {
+    rusqlite::Error::ToSqlConversionFailure(Box::new(e))
 }
 
 impl SqliteRepository {
@@ -50,6 +95,16 @@ impl SqliteRepository {
                 version INTEGER NOT NULL DEFAULT 1,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS blobs (
+                entry_id TEXT PRIMARY KEY REFERENCES entries(id) ON DELETE CASCADE,
+                dek_wrapped BLOB NOT NULL,
+                nonce BLOB NOT NULL,
+                ciphertext BLOB NOT NULL,
+                byte_len INTEGER NOT NULL,
+                mime_type TEXT NOT NULL,
+                is_text INTEGER NOT NULL
             );
             ",
         )
@@ -94,31 +149,50 @@ impl SqliteRepository {
         f(&conn).map_err(|e| VaultError::Database(e.to_string()))
     }
 
-    pub fn insert_entry(&self, entry: &EncryptedEntry) -> Result<(), VaultError> {
+    /// Store an encrypted file: its entry and its blob, in one
+    /// transaction, so a file is either fully stored or not stored.
+    pub fn insert_file(
+        &self,
+        entry: &EncryptedEntry,
+        blob: &EncryptedBlob,
+    ) -> Result<(), VaultError> {
+        let mut guard = self
+            .conn
+            .lock()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        let tx = guard
+            .transaction()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        insert_entry_row(&tx, entry)?;
+        tx.execute(
+            "INSERT INTO blobs (entry_id, dek_wrapped, nonce, ciphertext, byte_len, mime_type, is_text)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            rusqlite::params![
+                entry.id,
+                blob.dek_wrapped,
+                blob.nonce.as_slice(),
+                blob.ciphertext,
+                i64::try_from(blob.byte_len).unwrap_or(i64::MAX),
+                blob.mime_type,
+                i64::from(blob.is_text),
+            ],
+        )
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        drop(guard);
+        Ok(())
+    }
+
+    /// Remove an entry. Its blob, if it has one, goes with it (the
+    /// `blobs` table cascades on delete).
+    pub fn delete_entry(&self, entry_id: &str) -> Result<bool, VaultError> {
         self.execute(|conn| {
-            let kind_str = match entry.kind {
-                crate::domain::vault::entry::EntryKind::Login => "login",
-                crate::domain::vault::entry::EntryKind::Note => "note",
-                crate::domain::vault::entry::EntryKind::Document => "document",
-            };
-            let tags_json = serde_json::to_string(&entry.tags).unwrap_or_default();
-            conn.execute(
-                "INSERT INTO entries (id, kind, name, tags, dek_wrapped, nonce, ciphertext, version, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-                rusqlite::params![
-                    entry.id,
-                    kind_str,
-                    entry.name,
-                    tags_json,
-                    entry.dek_wrapped,
-                    entry.nonce.as_slice(),
-                    entry.ciphertext,
-                    entry.version.cast_signed(),
-                    entry.created_at.to_rfc3339(),
-                    entry.updated_at.to_rfc3339(),
-                ],
+            let removed = conn.execute(
+                "DELETE FROM entries WHERE id = ?1",
+                rusqlite::params![entry_id],
             )?;
-            Ok(())
+            Ok(removed > 0)
         })
     }
 
@@ -156,6 +230,39 @@ impl SqliteRepository {
             )?;
             Ok(changed > 0)
         })
+    }
+
+    /// The encrypted blob stored for an entry, if it has one.
+    pub fn get_blob(&self, entry_id: &str) -> Result<Option<EncryptedBlob>, VaultError> {
+        self.execute(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT dek_wrapped, nonce, ciphertext, byte_len, mime_type, is_text
+                 FROM blobs WHERE entry_id = ?1",
+            )?;
+            let mut rows = stmt.query(rusqlite::params![entry_id])?;
+            let Some(row) = rows.next()? else {
+                return Ok(None);
+            };
+            let nonce: Vec<u8> = row.get(1)?;
+            let nonce: [u8; crate::domain::vault::crypto_constants::NONCE_LEN] = nonce
+                .as_slice()
+                .try_into()
+                .map_err(|_| rusqlite::Error::InvalidQuery)?;
+            let byte_len: i64 = row.get(3)?;
+            let is_text: i64 = row.get(5)?;
+            Ok(Some(EncryptedBlob {
+                dek_wrapped: row.get(0)?,
+                nonce,
+                ciphertext: row.get(2)?,
+                byte_len: u64::try_from(byte_len).unwrap_or(0),
+                mime_type: row.get(4)?,
+                is_text: is_text != 0,
+            }))
+        })
+    }
+
+    pub fn insert_entry(&self, entry: &EncryptedEntry) -> Result<(), VaultError> {
+        self.execute(|conn| insert_entry_row(conn, entry).map_err(into_rusqlite))
     }
 
     #[allow(clippy::indexing_slicing)]

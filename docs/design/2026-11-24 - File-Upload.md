@@ -198,12 +198,20 @@ The migration only adds a table, so existing vaults open unchanged.
 2. Write the bytes to the path the user chose in the native save dialog.
    The file is created with owner-only permissions on Unix, as exports are.
 
-### Commands and chat
+### Commands
 
-- `add_file(path)` and `get_file(entry_id, destination)`, both in
-  `desktop/stern-tauri/src/commands.rs`.
-- Chat: "save a file" opens the native picker and stores the result as a
-  `Document`-kind entry. Chat never receives file bytes.
+Implemented in `desktop/stern-tauri/src/files.rs`:
+
+- `add_file_from_picker` opens the native file picker, then stores the
+  chosen file. It returns the new entry id, or nothing if the user cancels.
+- `save_file_to_picker(entry_id, suggested_name)` decrypts a stored file
+  and writes it where the user chooses, through the native save dialog. It
+  never replaces an existing file.
+- `delete_stored_file(entry_id)` removes the entry and its blob.
+
+**Not yet built:** a chat "save a file" intent, and a frontend control that
+calls these commands. Until the frontend control exists, the commands are
+reachable only through tests. Chat never receives file bytes.
 
 ## Test Cases
 
@@ -222,6 +230,9 @@ The migration only adds a table, so existing vaults open unchanged.
 | Vault locked | Add and get are refused with "vault locked" |
 
 ## Caveats / Follow-Ups
+
+- **Frontend and chat are not wired.** The commands exist and are tested,
+  but no button or chat intent calls them yet.
 
 - **Size reveals information.** A blob's ciphertext length reveals the
   file's approximate size. Padding to fixed sizes would hide it at a cost

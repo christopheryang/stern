@@ -904,3 +904,84 @@ fn locking_cancels_a_download_that_started_before_it() {
     state.model_manager.cancel_downloads();
     assert_ne!(state.model_manager.download_epoch(), epoch);
 }
+
+#[test]
+fn a_file_is_stored_and_comes_back_byte_for_byte() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("scan.pdf");
+    let bytes: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(&src, &bytes).unwrap();
+
+    let id = crate::files::add_file(&state, &src).unwrap();
+    let back = crate::files::read_stored(&state, &id).unwrap();
+    assert_eq!(back.as_slice(), bytes.as_slice());
+
+    let out = dir.path().join("restored.pdf");
+    crate::files::write_retrieved(&out, &back).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap(), bytes);
+}
+
+#[test]
+fn a_text_file_is_stored_as_text() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("shopping.txt");
+    std::fs::write(&src, "eggs, milk and bread").unwrap();
+
+    let id = crate::files::add_file(&state, &src).unwrap();
+    let blob = state.repository.get_blob(&id).unwrap().unwrap();
+    assert!(blob.is_text);
+    assert_eq!(blob.mime_type, "text/plain");
+    assert_eq!(blob.byte_len, "eggs, milk and bread".len() as u64);
+}
+
+#[test]
+fn a_file_over_the_limit_is_refused_before_it_is_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("big.bin");
+    std::fs::write(&src, vec![0u8; 64]).unwrap();
+    let err = crate::files::read_file_limited_for_test(&src, 63).unwrap_err();
+    assert!(err.to_string().contains("too big"), "{err}");
+    assert!(crate::files::read_file_limited_for_test(&src, 64).is_ok());
+}
+
+#[test]
+fn a_file_cannot_be_read_while_the_vault_is_locked() {
+    let (state, _path) = make_test_app_state();
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("a.txt");
+    std::fs::write(&src, "x").unwrap();
+    assert!(crate::files::add_file(&state, &src).is_err());
+}
+
+#[test]
+fn a_stored_file_cannot_be_moved_to_another_entry() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("a.txt");
+    std::fs::write(&src, "secret contents").unwrap();
+    let first = crate::files::add_file(&state, &src).unwrap();
+    let second = crate::files::add_file(&state, &src).unwrap();
+
+    // Put the first file's blob (ciphertext, DEK, nonce) under the second
+    // entry's id. Its AAD was bound to the first id, so it must not open.
+    let first_blob = state.repository.get_blob(&first).unwrap().unwrap();
+    state.repository.delete_entry(&second).unwrap();
+    let entry = state
+        .repository
+        .list_all_entries()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == first)
+        .unwrap();
+    let mut moved = entry;
+    moved.id = second.clone();
+    state.repository.insert_file(&moved, &first_blob).unwrap();
+
+    let err = crate::files::read_stored(&state, &second).unwrap_err();
+    assert!(err.to_string().contains("decryption"), "{err}");
+}

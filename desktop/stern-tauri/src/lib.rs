@@ -9,6 +9,7 @@
 #![recursion_limit = "256"]
 
 mod commands;
+mod files;
 mod notes;
 
 use std::sync::Arc;
@@ -116,6 +117,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            files::add_file_from_picker,
+            files::save_file_to_picker,
+            files::delete_stored_file,
             commands::vault_status,
             commands::create_vault,
             commands::unlock_vault,

@@ -286,3 +286,80 @@ fn insert_all_entry_kinds() {
     let entries = repo.list_all_entries().expect("list");
     assert_eq!(entries.len(), 3);
 }
+
+#[test]
+fn a_stored_file_round_trips_and_is_removed_with_its_entry() {
+    use stern_core::domain::vault::crypto_constants::NONCE_LEN;
+    use stern_core::infrastructure::sqlite::repository::EncryptedBlob;
+
+    let (repo, _tmp) = temp_repo();
+    let entry = stern_core::domain::vault::entry::EncryptedEntry {
+        id: "file-1".to_string(),
+        kind: stern_core::domain::vault::entry::EntryKind::Document,
+        name: "scan.pdf".to_string(),
+        tags: vec![],
+        dek_wrapped: vec![1; 40],
+        nonce: [2; NONCE_LEN],
+        ciphertext: vec![3; 16],
+        version: 1,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let blob = EncryptedBlob {
+        dek_wrapped: vec![4; 40],
+        nonce: [5; NONCE_LEN],
+        ciphertext: vec![6; 2048],
+        byte_len: 2032,
+        mime_type: "application/pdf".to_string(),
+        is_text: false,
+    };
+    repo.insert_file(&entry, &blob).expect("store file");
+
+    let back = repo.get_blob("file-1").expect("read").expect("present");
+    assert_eq!(back.ciphertext, blob.ciphertext);
+    assert_eq!(back.nonce, blob.nonce);
+    assert_eq!(back.byte_len, 2032);
+    assert_eq!(back.mime_type, "application/pdf");
+    assert!(!back.is_text);
+
+    assert!(repo.delete_entry("file-1").expect("delete"));
+    assert!(
+        repo.get_blob("file-1").expect("read").is_none(),
+        "blob outlived its entry"
+    );
+    assert_eq!(repo.count_entries().unwrap(), 0);
+}
+
+#[test]
+fn a_file_whose_entry_already_exists_stores_nothing() {
+    use stern_core::domain::vault::crypto_constants::NONCE_LEN;
+    use stern_core::infrastructure::sqlite::repository::EncryptedBlob;
+
+    let (repo, _tmp) = temp_repo();
+    let entry = stern_core::domain::vault::entry::EncryptedEntry {
+        id: "dup".to_string(),
+        kind: stern_core::domain::vault::entry::EntryKind::Note,
+        name: "a".to_string(),
+        tags: vec![],
+        dek_wrapped: vec![1; 40],
+        nonce: [2; NONCE_LEN],
+        ciphertext: vec![3; 8],
+        version: 1,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    repo.insert_entry(&entry).unwrap();
+    let blob = EncryptedBlob {
+        dek_wrapped: vec![4; 40],
+        nonce: [5; NONCE_LEN],
+        ciphertext: vec![6; 8],
+        byte_len: 8,
+        mime_type: "text/plain".to_string(),
+        is_text: true,
+    };
+    assert!(repo.insert_file(&entry, &blob).is_err());
+    assert!(
+        repo.get_blob("dup").unwrap().is_none(),
+        "a partial write was kept"
+    );
+}
