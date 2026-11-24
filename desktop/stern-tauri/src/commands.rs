@@ -652,6 +652,47 @@ fn handle_reveal_entry(
     answer_entry(state, entry, &kek, field)
 }
 
+/// Write an export next to the vault without ever replacing a file.
+///
+/// The name carries the time (`stern-export-YYYYMMDD-HHMMSS.json`);
+/// a clash adds `-2`, `-3`, and so on. The file is created owner-only
+/// on Unix, since it holds the key that opens it.
+fn write_new_export_file(
+    dir: &std::path::Path,
+    data: &[u8],
+) -> Result<std::path::PathBuf, VaultError> {
+    use std::io::Write;
+
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    for attempt in 1u32..=1000 {
+        let name = if attempt == 1 {
+            format!("stern-export-{stamp}.json")
+        } else {
+            format!("stern-export-{stamp}-{attempt}.json")
+        };
+        let path = dir.join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(mut file) => {
+                file.write_all(data)
+                    .map_err(|e| VaultError::Io(e.to_string()))?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(VaultError::Io(e.to_string())),
+        }
+    }
+    Err(VaultError::Io(
+        "could not find a free export file name".to_string(),
+    ))
+}
+
 #[tauri::command]
 
 pub async fn export_vault(
@@ -713,21 +754,45 @@ pub async fn export_vault(
         updated_at: chrono::Utc::now(),
     };
 
-    let export_path = state
-        .db_path
-        .parent()
-        .unwrap_or(&state.db_path)
-        .join("stern-export.json");
-
     let export_json = serde_json::to_vec_pretty(&(&salt, &*secret_key, &export_file))
         .map_err(|e| VaultError::Serialization(e.to_string()))?;
 
-    std::fs::write(&export_path, &export_json).map_err(|e| VaultError::Io(e.to_string()))?;
+    let export_dir = state.db_path.parent().unwrap_or(&state.db_path);
+    let export_path = write_new_export_file(export_dir, &export_json)?;
 
     Ok(ExportResponse {
         path: export_path.to_string_lossy().to_string(),
         entry_count: plaintext_entries.len(),
     })
+}
+
+/// The largest export file an import will read. A vault export is
+/// JSON text, so anything near this size is not one of ours.
+const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read an export file for import, after checking it is what it should
+/// be: a regular `.json` file (symlinks resolved first) of sane size.
+/// Error text never includes the path, which may name the user.
+fn read_export_file(path: &std::path::Path) -> Result<Vec<u8>, VaultError> {
+    let resolved = path
+        .canonicalize()
+        .map_err(|_| VaultError::Io("Import file not found.".to_string()))?;
+    if !resolved
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    {
+        return Err(VaultError::Io(
+            "Import file must be a .json file.".to_string(),
+        ));
+    }
+    let meta = std::fs::metadata(&resolved).map_err(|e| VaultError::Io(e.to_string()))?;
+    if !meta.is_file() {
+        return Err(VaultError::Io("Import path is not a file.".to_string()));
+    }
+    if meta.len() > MAX_IMPORT_BYTES {
+        return Err(VaultError::Io("Import file is too large.".to_string()));
+    }
+    std::fs::read(&resolved).map_err(|e| VaultError::Io(e.to_string()))
 }
 
 #[tauri::command]
@@ -746,24 +811,7 @@ pub async fn import_vault(
     let kek = Zeroizing::new(*session.kek()?);
     drop(session);
 
-    let path = std::path::PathBuf::from(&request.path);
-    if !path.exists() {
-        return Err(VaultError::Io(format!(
-            "Import file not found: {}",
-            request.path
-        )));
-    }
-    if !path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-    {
-        return Err(VaultError::Io(format!(
-            "Import file must be a .json file, got: {}",
-            request.path
-        )));
-    }
-
-    let data = std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
+    let data = read_export_file(std::path::Path::new(&request.path))?;
 
     let (salt, secret_key, export_file): (
         [u8; VAULT_SALT_LEN],
@@ -1209,6 +1257,50 @@ mod tests {
         let done = chat(&state, "yes");
         assert_eq!(done.action.as_deref(), Some("store"));
         assert_eq!(state.repository.count_entries().unwrap(), 1);
+    }
+
+    #[test]
+    fn exports_never_overwrite_an_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write_new_export_file(dir.path(), b"one").unwrap();
+        let second = write_new_export_file(dir.path(), b"two").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(std::fs::read(&first).unwrap(), b"one");
+        assert_eq!(std::fs::read(&second).unwrap(), b"two");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn export_files_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_new_export_file(dir.path(), b"x").unwrap();
+        let mode = std::fs::metadata(path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0);
+    }
+
+    #[test]
+    fn import_rejects_missing_non_json_and_non_file_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_export_file(&dir.path().join("nope.json")).is_err());
+
+        let text = dir.path().join("notes.txt");
+        std::fs::write(&text, b"[]").unwrap();
+        assert!(read_export_file(&text).is_err());
+
+        let folder = dir.path().join("folder.json");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(read_export_file(&folder).is_err());
+
+        let good = dir.path().join("export.json");
+        std::fs::write(&good, b"[]").unwrap();
+        assert_eq!(read_export_file(&good).unwrap(), b"[]");
+    }
+
+    #[test]
+    fn import_errors_do_not_echo_the_path() {
+        let err = read_export_file(std::path::Path::new("/Users/someone/secret.json")).unwrap_err();
+        assert!(!err.to_string().contains("someone"), "{err}");
     }
 
     #[test]

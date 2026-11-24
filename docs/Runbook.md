@@ -87,6 +87,28 @@ lower the KDF parameters to make it faster.
 Repeated failed attempts trigger a lockout. Wait for it to expire
 and retry; do not delete anything.
 
+The lockout counter lives in memory only, so quitting and reopening
+Stern resets it. This is a known limit of a local app: someone who
+can copy `stern.db` can guess offline and never needs the app at all.
+What protects the vault in that case is the Argon2id key derivation
+and the secret key (ADR-0003), not the lockout.
+
+## Export files
+
+Exports are written next to the vault as
+`stern-export-YYYYMMDD-HHMMSS.json`. An export never replaces an
+existing file (a clash gets `-2`, `-3`, ...), and on macOS and Linux
+it is readable by its owner only. The file holds the key that opens
+it, protected by the export password, so keep it somewhere safe.
+
+An import accepts only a regular `.json` file of up to 64 MB; the path
+is resolved first and error messages never repeat it.
+
+**Format change:** export files hold the vault salt, the secret key,
+and the encrypted entries. Files written by older builds hold only the
+salt and the entries and cannot be imported; open that vault in the
+current build and export it again.
+
 ## Reset to first-run state
 
 1. Quit Stern.
