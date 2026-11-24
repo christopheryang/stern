@@ -50,8 +50,8 @@ remaining inline style is the download progress bar's computed width.
   "Don't lose your password" step comes before the vault is created. The
   checklist and the submit-time check share one rule table
   (`password_rules`), so they cannot disagree.
-- **Login** — brand mark, "Welcome back", a password field, **Open**, and
-  a small Disclaimer link.
+- **Login** — "Welcome back" (no mark: the top bar already shows the
+  logo), a password field, **Open**, and a small Disclaimer link.
 - **Gates** — "Choose a size to get started" and one shared "Something
   went wrong" card (used for both the vault and the helper status
   checks) are centered cards with an icon badge and one action.

@@ -441,7 +441,6 @@ pub fn LoginView(
     view! {
         <div class="stage">
             <div class="card">
-                <BrandMark />
                 <h2 class="title">"Welcome back"</h2>
                 <p class="subtitle">"Enter your password to open Stern."</p>
                 <form class="form" on:submit=submit>
