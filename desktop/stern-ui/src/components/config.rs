@@ -3,7 +3,8 @@
 
 //! The configuration view, opened from the gear button in the header.
 //!
-//! It holds the look (light or dark) and the AI model picker. Stern
+//! It holds the look (light or dark) and the AI model picker. The look
+//! is always available; the model can only be changed once unlocked. Stern
 //! ships with no model and no ONNX Runtime, so choosing and
 //! downloading a model here is the first thing a new user does — the
 //! chat stays gated until one is active.
@@ -70,8 +71,11 @@ fn Appearance() -> impl IntoView {
     }
 }
 
+/// The Settings page. The look can be changed at any time. The AI model
+/// can only be changed once the vault is unlocked; before that the list
+/// is shown read-only so the user can see what is installed.
 #[component]
-pub fn ConfigView() -> impl IntoView {
+pub fn ConfigView(#[prop(optional)] locked: bool) -> impl IntoView {
     view! {
         <div class="page">
             <div class="page-inner">
@@ -80,7 +84,10 @@ pub fn ConfigView() -> impl IntoView {
                 </div>
                 <Appearance />
                 <div class="section-gap"></div>
-                <ModelSetup />
+                {locked.then(|| view! {
+                    <p class="muted settings-note">"Unlock your vault to change the AI model."</p>
+                })}
+                <ModelSetup locked=locked />
             </div>
         </div>
     }

@@ -935,6 +935,21 @@ mod tests;
 // manager); exactly one installed model is active at a time.
 // ---------------------------------------------------------------------------
 
+/// Refuse a model change until the vault is unlocked. Choosing, downloading
+/// or removing a model is allowed only after sign-in, so the list of models
+/// can be seen before unlocking but not changed.
+fn require_unlocked(state: &AppState) -> Result<(), VaultError> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+    if session.is_unlocked {
+        Ok(())
+    } else {
+        Err(VaultError::VaultLocked)
+    }
+}
+
 fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
     let progress = state
         .download_progress
@@ -1109,6 +1124,7 @@ pub async fn download_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    require_unlocked(&state)?;
     let descriptor = catalog_model(&model_id)
         .copied()
         .ok_or_else(|| VaultError::Model(format!("unknown model: {model_id}")))?;
@@ -1176,6 +1192,7 @@ pub async fn select_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    require_unlocked(&state)?;
     // Load *before* persisting the selection: if the load fails, the
     // manifest, the UI's active badge, and the chat handler all stay on
     // the previously active model instead of desyncing.
@@ -1211,6 +1228,7 @@ pub async fn remove_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    require_unlocked(&state)?;
     let was_active = state
         .model_manager
         .active_model()

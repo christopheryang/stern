@@ -639,3 +639,25 @@ fn an_edited_note_cannot_be_swapped_back_to_an_older_version() {
         .unwrap();
     assert!(crate::notes::load(&state, &first.id).is_err());
 }
+
+#[test]
+fn model_changes_are_refused_until_the_vault_is_unlocked() {
+    let (state, _path) = make_test_app_state();
+    assert!(matches!(
+        require_unlocked(&state),
+        Err(VaultError::VaultLocked)
+    ));
+    unlock_test_session(&state);
+    assert!(require_unlocked(&state).is_ok());
+}
+
+#[test]
+fn model_changes_are_refused_again_after_lock() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    state.session.lock().unwrap().lock();
+    assert!(matches!(
+        require_unlocked(&state),
+        Err(VaultError::VaultLocked)
+    ));
+}

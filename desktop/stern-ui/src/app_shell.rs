@@ -240,36 +240,9 @@ struct HeaderSetters {
     lock_error: WriteSignal<Option<String>>,
 }
 
-/// The light/dark switch. It lives in the top bar, so it works on every
-/// screen, including the ones shown before the vault is unlocked.
-#[component]
-fn ThemeToggle() -> impl IntoView {
-    let current = expect_context::<theme::ThemeSignal>();
-    view! {
-        <button
-            class="btn-icon"
-            aria-label=move || {
-                if current.get() == theme::Theme::Light { "Switch to dark" } else { "Switch to light" }
-            }
-            title=move || {
-                if current.get() == theme::Theme::Light { "Switch to dark" } else { "Switch to light" }
-            }
-            on:click=move |_| theme::choose(current, current.get_untracked().other())
-        >
-            {move || {
-                if current.get() == theme::Theme::Light {
-                    view! { <Icon kind=IconKind::Moon /> }.into_any()
-                } else {
-                    view! { <Icon kind=IconKind::Sun /> }.into_any()
-                }
-            }}
-        </button>
-    }
-}
-
-/// The top bar's right-hand side: Help alone before authentication,
-/// a Back button on any page, and Lock / Help / Settings on the main
-/// view once unlocked.
+/// The top bar's right-hand side: Settings and Help before
+/// authentication, a Back button on any page, and Lock / Notes / Help /
+/// Settings on the main view once unlocked.
 fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicBool>) -> AnyView {
     if state.page != Page::Main {
         return view! {
@@ -308,9 +281,19 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
             "Notes"
         </button>
     };
+    let settings_button = view! {
+        <button
+            class="btn-icon"
+            aria-label="Settings"
+            title="Settings"
+            on:click=move |_| set.page.set(Page::Settings)
+        >
+            <Icon kind=IconKind::Settings />
+        </button>
+    };
     if state.auth != Some(AuthPhase::Unlocked) {
-        // Settings (and its downloads) wait for an unlocked vault.
-        return view! { {help_button} }.into_any();
+        // Before sign-in: Help and Settings (theme only; model is locked).
+        return view! { {settings_button} {help_button} }.into_any();
     }
     let locking = state.locking;
     view! {
@@ -350,14 +333,7 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
             </button>
             {notes_button}
             {help_button}
-            <button
-                class="btn-icon"
-                aria-label="Settings"
-                title="Settings"
-                on:click=move |_| set.page.set(Page::Settings)
-            >
-                <Icon kind=IconKind::Settings />
-            </button>
+            {settings_button}
         </div>
     }
     .into_any()
@@ -457,8 +433,9 @@ pub fn AppShell() -> impl IntoView {
     // The pages beside the main view. Settings only counts once the
     // vault is unlocked, however it was reached.
     let side_page = move || match page.get() {
-        Page::Settings if auth.get() == Some(AuthPhase::Unlocked) => {
-            view! { <ConfigView /> }.into_any()
+        Page::Settings => {
+            let locked = auth.get() != Some(AuthPhase::Unlocked);
+            view! { <ConfigView locked=locked /> }.into_any()
         }
         Page::Help => {
             let to_disclaimer = Callback::new(move |()| set_page.set(Page::Disclaimer));
@@ -476,7 +453,6 @@ pub fn AppShell() -> impl IntoView {
             <header class="topbar">
                 <BrandLogo />
                 <div class="topbar-actions">
-                <ThemeToggle />
                 {move || header_actions(
                     HeaderState {
                         auth: auth.get(),

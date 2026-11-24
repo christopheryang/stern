@@ -271,6 +271,7 @@ button:disabled { cursor: not-allowed; }
 .notes-editor { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .notes-text { height: auto; min-height: 320px; padding: 12px 14px; resize: vertical; font-family: inherit; line-height: 1.5; }
 .notes-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.settings-note { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); }
 .notes-actions .muted { font-size: 13px; color: var(--text-dim); }
 @media (max-width: 640px) { .notes { grid-template-columns: 1fr; } }
 

@@ -199,6 +199,7 @@ fn megabytes(bytes: u64) -> u64 {
 fn ModelRow(
     status: ModelStatus,
     any_downloading: bool,
+    locked: bool,
     on_download: Callback<String>,
     on_select: Callback<String>,
     on_remove: Callback<String>,
@@ -255,7 +256,7 @@ fn ModelRow(
                     {update_note.map(|note| view! { <div class="model-update">{note}</div> })}
                 </div>
                 <div class="model-actions">
-                    {(!downloading && !any_downloading).then(|| {
+                    {(!downloading && !any_downloading && !locked).then(|| {
                         let state = status.state.clone();
                         let is_active = status.is_active;
                         view! {
@@ -336,7 +337,10 @@ fn SectionHead() -> impl IntoView {
 /// or removal finishes, so a host (the first-run gate) can re-check
 /// whether chat is ready.
 #[component]
-pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl IntoView {
+pub fn ModelSetup(
+    #[prop(optional)] on_change: Option<Callback<()>>,
+    #[prop(optional)] locked: bool,
+) -> impl IntoView {
     let (models, set_models) = signal(Vec::<ModelStatus>::new());
     let (error, set_error) = signal(Option::<FriendlyError>::None);
     let (action_in_flight, set_action_in_flight) = signal(false);
@@ -420,6 +424,7 @@ pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl Int
                             <ModelRow
                                 status=m
                                 any_downloading=any_downloading
+                                locked=locked
                                 on_download=on_download
                                 on_select=on_select
                                 on_remove=on_remove

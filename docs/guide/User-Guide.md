@@ -131,23 +131,23 @@ info. You can tap a button or type its letter.
 
 ## 6. Settings, light and dark, and Help
 
-Along the top right are four buttons. The sun or moon switches between
-light and dark, the question mark opens Help, the gear opens Settings,
-and **Lock** locks Stern.
+Along the top right are the buttons. The gear opens Settings, the
+question mark opens Help, and **Lock** locks Stern.
 
 ### Light and dark
 
-Tap the **moon** to switch to dark, and the **sun** to switch back. It
-works on every screen, even before you sign in, and Stern remembers your
-choice. Light is what you get the first time.
+Open **Settings** and pick Light or Dark under **Look**. It works before
+you sign in too, and Stern remembers your choice. Light is what you get
+the first time.
 
 ![Stern in dark mode](User-Guide%20-%20Dark%20Theme.png)
 
 ### Settings
 
-The gear opens Settings. **Look** is the same light and dark choice. **AI
+The gear opens Settings. **Look** is the light and dark choice. **AI
 model** lets you download the other model, switch between them with
-**Use this**, or free up space with **Remove**.
+**Use this**, or free up space with **Remove**. Before you sign in, the
+model list is shown but cannot be changed; unlock your vault to change it.
 
 ![Settings](User-Guide%20-%20Settings.png)
 

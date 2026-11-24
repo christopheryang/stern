@@ -34,7 +34,7 @@ Nobody can get your information back, not even the people who made Stern. That i
 
 ## Can I change how Stern looks?
 
-Yes. Tap the sun or moon at the top right, on any screen, even before you sign in. You can also pick Light or Dark under Look in Settings. Stern remembers your choice. Light is what you get the first time.
+Yes. Open Settings (the gear at the top right) and pick Light or Dark under Look. You can do this before you sign in too. Stern remembers your choice. Light is what you get the first time.
 
 ## What is an AI model?
 
@@ -42,7 +42,7 @@ It is a small program that understands what you type. When you say "save a note"
 
 ## Which AI model should I choose?
 
-Small is quick and a small download. It handles short, simple requests well, but it can misread longer or unusual wording. Large understands more ways of saying things and makes fewer mistakes, but it takes a few seconds to reply, is several times bigger to download, and uses more of your computer's memory. Not sure? Choose Small. You can switch or remove a model at any time in Settings.
+Small is quick and a small download. It handles short, simple requests well, but it can misread longer or unusual wording. Large understands more ways of saying things and makes fewer mistakes, but it takes a few seconds to reply, is several times bigger to download, and uses more of your computer's memory. Not sure? Choose Small. You can switch or remove a model in Settings, once you have signed in. Before you sign in, Settings shows your models but cannot change them.
 
 ## Why does Stern download something?
 

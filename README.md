@@ -116,10 +116,10 @@ just build
 3. On later launches, the login screen asks for the password
    before anything else is reachable. After unlocking, choose an AI model
    (Small or Large) on the first-run screen or in Settings (the gear,
-   top right) — the first download also fetches the ONNX Runtime. The
-   sun/moon button in the top bar switches between light and dark on
-   any screen, including before you sign in. The help button (the
-   question mark) opens [plain-language help](docs/Help.md) at any
+   top right); changing the model needs the vault unlocked, and the first
+   download also fetches the ONNX Runtime. Settings also holds the light
+   and dark choice, which works before you sign in too. The help button
+   (the question mark) opens [plain-language help](docs/Help.md) at any
    time, including before you unlock.
 4. In chat, try "show all passwords", "what's my password for Gmail?",
    or "save a note". Storing runs as a short guided
