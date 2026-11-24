@@ -921,3 +921,46 @@ fn chat_suggestions_lead_with_notes_not_passwords() {
     assert!(unknown.contains("save a note"), "unknown: {unknown}");
     assert!(!unknown.contains("GitHub"), "unknown: {unknown}");
 }
+
+#[test]
+fn a_saved_secret_is_never_echoed_back_in_the_reply() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let _ = handler.process_message("save a note");
+    let _ = handler.process_message("Groceries");
+    let _ = handler.process_message("secret-note-text-123");
+    let done = handler.process_message("yes");
+    assert!(matches!(done.action, Some(Action::StoreEntry { .. })));
+    assert!(
+        !done.message.contains("secret-note-text-123"),
+        "{}",
+        done.message
+    );
+    assert!(
+        done.message.contains("Saved your note \"Groceries\""),
+        "{}",
+        done.message
+    );
+
+    let _ = handler.process_message("save a password");
+    let _ = handler.process_message("GitHub");
+    let _ = handler.process_message("chris");
+    let _ = handler.process_message("hunter2-secret");
+    let done = handler.process_message("yes");
+    assert!(!done.message.contains("hunter2-secret"), "{}", done.message);
+    assert!(done.message.contains("username: chris"), "{}", done.message);
+    assert!(done.message.contains("password: ••••"), "{}", done.message);
+}
+
+#[test]
+fn unknown_fields_and_unknown_kinds_are_masked_by_default() {
+    use stern_core::ai::conversation::{is_sensitive_field, kind_word};
+    assert!(is_sensitive_field("password", "password"));
+    assert!(!is_sensitive_field("password", "username"));
+    assert!(is_sensitive_field("password", "mystery"));
+    assert!(is_sensitive_field("biometric", "anything"));
+    assert!(is_sensitive_field("note", "text"));
+    assert_eq!(kind_word("text"), "note");
+    assert_eq!(kind_word("api key"), "password");
+    assert_eq!(kind_word("biometric"), "biometric");
+}

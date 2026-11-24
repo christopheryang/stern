@@ -205,6 +205,30 @@ fn kind_for_intent_kind(intent_kind: &str) -> Option<&'static KindSpec> {
     KINDS.iter().find(|kind| kind.id == id)
 }
 
+/// The word for a stored kind in sentences ("note", "document",
+/// "login"), whichever spelling the kind arrived with.
+#[must_use]
+pub fn kind_word(intent_kind: &str) -> String {
+    kind_for_intent_kind(intent_kind).map_or_else(
+        || intent_kind.to_string(),
+        |kind| match kind.id {
+            "text" => "note".to_string(),
+            "login" => "password".to_string(),
+            _ => kind.label.to_string(),
+        },
+    )
+}
+
+/// Whether a stored value must never be shown back in chat. Fields a
+/// kind does not know are treated as secret: showing one by mistake is
+/// worse than hiding one by mistake.
+#[must_use]
+pub fn is_sensitive_field(intent_kind: &str, key: &str) -> bool {
+    kind_for_intent_kind(intent_kind)
+        .and_then(|kind| kind.fields.iter().find(|field| field.key == key))
+        .is_none_or(|field| field.sensitive)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stage {
     AwaitingKind,

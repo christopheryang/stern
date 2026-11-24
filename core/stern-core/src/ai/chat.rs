@@ -1,4 +1,6 @@
-use crate::ai::conversation::{Conversation, Step as ConversationStep};
+use crate::ai::conversation::{
+    is_sensitive_field, kind_word, Conversation, Step as ConversationStep,
+};
 use crate::ai::intent::{classify_intent, Intent};
 use crate::ai::model::AiModel;
 use std::sync::{Arc, Mutex, RwLock};
@@ -589,16 +591,26 @@ impl ChatHandler {
                 ref kind,
                 ref fields,
             } => {
+                // A stored secret is never echoed back: secret fields
+                // show as a mask, everything else as typed.
                 let field_desc = if fields.is_empty() {
                     String::new()
                 } else {
-                    let items: Vec<String> =
-                        fields.iter().map(|(k, v)| format!("  {k}: {v}")).collect();
-                    format!("\nWith fields:\n{}", items.join("\n"))
+                    let items: Vec<String> = fields
+                        .iter()
+                        .map(|(k, v)| {
+                            if is_sensitive_field(kind, k) {
+                                format!("  {k}: ••••")
+                            } else {
+                                format!("  {k}: {v}")
+                            }
+                        })
+                        .collect();
+                    format!("\n{}", items.join("\n"))
                 };
 
                 ChatResponse {
-                    message: format!("Stored your {kind} \"{name}\" in the vault.{field_desc}"),
+                    message: format!("Saved your {} \"{name}\".{field_desc}", kind_word(kind)),
                     action: Some(Action::StoreEntry {
                         name: name.clone(),
                         kind: kind.clone(),
