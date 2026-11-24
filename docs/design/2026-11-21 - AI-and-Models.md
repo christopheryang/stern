@@ -64,7 +64,7 @@ managed download:
   version, file name, download URL, **pinned SHA-256**, approximate
   size. The hash is authoritative; the size is for the UI's "~273 MB"
   labels.
-- The Settings view (opened from the gear button in the header — the
+- The Settings view (opened from the gear button in the top bar — the
   UI is a single chat view, no sidebar) holds a model picker in the
   style of Meetily's model manager: one row per catalog model with
   its description and size, a Download button, and — once installed —

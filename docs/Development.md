@@ -43,9 +43,13 @@ it is useful for layout work only.
 2. `just dev` — the setup screen creates the vault (master password).
    Quit and relaunch: the login screen now asks for it before anything
    else.
-3. Store an entry in chat (step 4); lock (the header Lock button) and
+3. Store an entry in chat (step 4); lock (the top bar's Lock button) and
    unlock; ask for the entry and confirm it decrypts. Copy a secret
    and confirm the clipboard auto-clears.
+   Check both color schemes (switch the OS appearance) and a short
+   window (resize to the 400 px minimum height): nothing should clip
+   or overflow, and the setup screen's requirements checklist should
+   tick green as you type.
 4. Chat: "show all passwords", "what's my password for <service>?",
    "save my GitHub password" (a named store files immediately; a bare
    "store" runs the guided conversation — secret fields use the

@@ -175,7 +175,7 @@ anything else:
   where a server account does.
 - **Every later launch — login screen.** The vault starts
   locked; the master password opens it (the existing failed-
-  attempt lockout applies). A Lock button in the header returns
+  attempt lockout applies). A Lock button in the top bar returns
   to this screen.
 - **Order.** The vault gate is outermost: Settings — and with
   it any model download — is unreachable until the vault is

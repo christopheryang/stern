@@ -27,6 +27,7 @@ questions.
 | [0006](0006-Post-Install-Model-Download.md) | AI model delivered by post-install download, not bundled | Accepted |
 | [0007](0007-User-Selectable-Models.md) | Users select the AI model from a pinned catalog | Accepted |
 | [0008](0008-Runtime-Downloaded-Chat-First-UI.md) | ONNX Runtime downloaded on demand; chat requires a model; chat-only UI | Accepted |
+| [0009](0009-Stylesheet-Design-System.md) | Frontend styling lives in a themed stylesheet, not inline styles | Accepted |
 
 ADRs 0001–0005 record decisions already embodied in the codebase
 (retroactively documented 2026-11-21). ADR-0006 was recorded when the

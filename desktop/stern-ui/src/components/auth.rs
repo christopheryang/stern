@@ -11,6 +11,7 @@
 //! unlocked, nothing else in the app is reachable: no chat, and
 //! not even the model picker — setup comes first.
 
+use super::ui::{BrandMark, ErrorAlert, Icon, IconKind};
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::spawn_local;
@@ -102,17 +103,6 @@ pub async fn lock_vault() -> Result<(), String> {
     Ok(())
 }
 
-const PANEL_STYLE: &str = "flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;";
-const TITLE_STYLE: &str = "font-size:18px;color:#e6e6e6;";
-const BODY_STYLE: &str = "color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;";
-const FORM_STYLE: &str =
-    "display:flex;flex-direction:column;gap:10px;width:100%;max-width:340px;margin-top:6px;";
-const INPUT_STYLE: &str = "padding:10px 14px;border:1px solid #2a2a4a;border-radius:8px;background:#1a1a2e;color:#e6e6e6;font-size:14px;outline:none;";
-const PRIMARY_BUTTON_STYLE: &str = "padding:10px 20px;border:none;border-radius:8px;background:#e94560;color:white;font-size:14px;cursor:pointer;";
-const ERROR_STYLE: &str = "color:#e94560;font-size:13px;max-width:420px;line-height:1.5;margin:0;";
-const TOGGLE_STYLE: &str =
-    "color:#a0a0b0;font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;";
-
 /// One password field whose visibility follows the screen's
 /// shared show toggle.
 #[component]
@@ -120,16 +110,71 @@ fn PasswordField(
     value: RwSignal<String>,
     show: ReadSignal<bool>,
     placeholder: &'static str,
+    label: &'static str,
+    #[prop(optional)] autofocus: bool,
 ) -> impl IntoView {
     view! {
-        <input
-            style=INPUT_STYLE
-            prop:value=value
-            on:input=move |ev| value.set(event_target_value(&ev))
-            placeholder=placeholder
-            type=move || if show.get() { "text" } else { "password" }
-        />
+        <label class="field">
+            <span class="field-label">{label}</span>
+            <input
+                class="input"
+                prop:value=value
+                on:input=move |ev| value.set(event_target_value(&ev))
+                placeholder=placeholder
+                autofocus=autofocus
+                autocomplete="off"
+                type=move || if show.get() { "text" } else { "password" }
+            />
+        </label>
     }
+}
+
+/// The show-password checkbox both screens share.
+#[component]
+fn ShowToggle(show: ReadSignal<bool>, set_show: WriteSignal<bool>) -> impl IntoView {
+    view! {
+        <label class="check">
+            <input
+                type="checkbox"
+                prop:checked=show
+                on:change=move |ev| set_show.set(event_target_checked(&ev))
+            />
+            "Show password"
+        </label>
+    }
+}
+
+/// The password policy, one entry per rule: its label and whether a
+/// candidate passes it. Drives both the live checklist and
+/// [`password_gap`], so the two cannot drift apart.
+fn password_rules(password: &str) -> [(&'static str, &'static str, bool); 5] {
+    [
+        (
+            "8+ characters",
+            "8+ characters",
+            password.chars().count() >= 8,
+        ),
+        (
+            "A lowercase letter",
+            "a lowercase letter",
+            password.chars().any(char::is_lowercase),
+        ),
+        (
+            "An uppercase letter",
+            "an uppercase letter",
+            password.chars().any(char::is_uppercase),
+        ),
+        (
+            "A number",
+            "a number",
+            password.chars().any(|c| c.is_ascii_digit()),
+        ),
+        (
+            "A symbol",
+            "a symbol",
+            password.chars().any(|c| !c.is_alphanumeric()),
+        ),
+    ]
 }
 
 /// What a candidate master password is still missing under the
@@ -138,22 +183,11 @@ fn PasswordField(
 /// comma-joined phrase — or nothing when it passes. Mirrors the
 /// chat gate's check in stern-core.
 fn password_gap(password: &str) -> Option<String> {
-    let mut missing: Vec<&str> = Vec::new();
-    if password.chars().count() < 8 {
-        missing.push("8+ characters");
-    }
-    if !password.chars().any(char::is_lowercase) {
-        missing.push("a lowercase letter");
-    }
-    if !password.chars().any(char::is_uppercase) {
-        missing.push("an uppercase letter");
-    }
-    if !password.chars().any(|c| c.is_ascii_digit()) {
-        missing.push("a number");
-    }
-    if !password.chars().any(|c| !c.is_alphanumeric()) {
-        missing.push("a symbol");
-    }
+    let missing: Vec<&str> = password_rules(password)
+        .into_iter()
+        .filter(|(_, _, met)| !met)
+        .map(|(_, phrase, _)| phrase)
+        .collect();
     if missing.is_empty() {
         None
     } else {
@@ -161,13 +195,69 @@ fn password_gap(password: &str) -> Option<String> {
     }
 }
 
-const HINT_STYLE: &str = "color:#a0a0b0;font-size:12px;margin:0;text-align:left;";
-const GHOST_BUTTON_STYLE: &str = "padding:10px 20px;border:1px solid #2a2a4a;border-radius:8px;background:transparent;color:#a0a0b0;font-size:14px;cursor:pointer;";
+/// The live requirements checklist under the new-password field.
+#[component]
+fn Requirements(password: RwSignal<String>) -> impl IntoView {
+    view! {
+        <ul class="requirements" aria-label="Password requirements">
+            {move || {
+                password_rules(&password.get())
+                    .into_iter()
+                    .map(|(label, _, met)| {
+                        view! {
+                            <li class:met=met>
+                                <span class="dot"><Icon kind=IconKind::Check /></span>
+                                {label}
+                            </li>
+                        }
+                    })
+                    .collect_view()
+            }}
+        </ul>
+    }
+}
+
+/// Step two of setup: the no-recovery warning, shown once a valid
+/// password has been entered, before anything is created.
+#[component]
+fn RecoveryWarning(
+    busy: ReadSignal<bool>,
+    error: ReadSignal<Option<String>>,
+    on_back: Callback<()>,
+    on_create: Callback<()>,
+) -> impl IntoView {
+    view! {
+        <div class="badge-icon badge-icon--warn">
+            <Icon kind=IconKind::Alert />
+        </div>
+        <h2 class="title">"There is no recovery"</h2>
+        <p class="subtitle">
+            "If you forget this password, your vault can never be \
+            opened again — there is no way to recover it. Write it \
+            down somewhere safe."
+        </p>
+        {move || error.get().map(|e| view! {
+            <div class="gap-top"><ErrorAlert message=e /></div>
+        })}
+        <div class="btn-row">
+            <button class="btn" prop:disabled=busy on:click=move |_| on_back.run(())>
+                "Back"
+            </button>
+            <button
+                class="btn btn-primary"
+                prop:disabled=busy
+                on:click=move |_| on_create.run(())
+            >
+                {move || if busy.get() { "Creating…" } else { "Create vault" }}
+            </button>
+        </div>
+    }
+}
 
 /// The first-run screen: choose the master password. No account,
 /// no username — this password plus the device's Secret Key is
 /// the whole credential. Kept brief, the way other vaults do it:
-/// labeled fields and one requirements line; the no-recovery
+/// labeled fields and a live requirements checklist; the no-recovery
 /// warning appears as its own step after the password is entered.
 #[component]
 pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
@@ -176,8 +266,6 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
     let (show, set_show) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
     let (busy, set_busy) = signal(false);
-    // Step two: the no-recovery warning, shown once a valid
-    // password has been entered, before anything is created.
     let (warn, set_warn) = signal(false);
 
     let submit = move |ev: leptos::ev::SubmitEvent| {
@@ -195,7 +283,7 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
         set_warn.set(true);
     };
 
-    let create = move |_| {
+    let create = Callback::new(move |()| {
         if busy.get() {
             return;
         }
@@ -210,66 +298,52 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
                 }
             }
         });
-    };
+    });
+    let back = Callback::new(move |()| {
+        set_warn.set(false);
+        set_error.set(None);
+    });
 
     view! {
-        <div style=PANEL_STYLE>
-            {move || -> AnyView {
-                if warn.get() {
-                    view! {
-                        <div style=TITLE_STYLE>"⚠ No recovery"</div>
-                        <p style=BODY_STYLE>
-                            "If you forget this password, your vault can never be \
-                            opened again — there is no way to recover it. Write it \
-                            down somewhere safe."
-                        </p>
-                        {move || error.get().map(|e| view! { <p style=ERROR_STYLE>{e}</p> })}
-                        <div style="display:flex;gap:10px;">
-                            <button
-                                style=GHOST_BUTTON_STYLE
-                                prop:disabled=busy
-                                on:click=move |_| {
-                                    set_warn.set(false);
-                                    set_error.set(None);
-                                }
-                            >
-                                "Back"
-                            </button>
-                            <button
-                                style=PRIMARY_BUTTON_STYLE
-                                prop:disabled=busy
-                                on:click=create
-                            >
-                                "Create vault"
-                            </button>
-                        </div>
-                    }.into_any()
-                } else {
-                    view! {
-                        <div style=TITLE_STYLE>"Set up your vault"</div>
-                        <form style=FORM_STYLE on:submit=submit>
-                            <PasswordField value=password show=show placeholder="Master password" />
-                            <p style=HINT_STYLE>
-                                "8+ characters, with a lowercase letter, an uppercase \
-                                letter, a number, and a symbol."
+        <div class="stage">
+            <div class="card">
+                {move || -> AnyView {
+                    if warn.get() {
+                        view! {
+                            <RecoveryWarning busy=busy error=error on_back=back on_create=create />
+                        }.into_any()
+                    } else {
+                        view! {
+                            <BrandMark />
+                            <h2 class="title">"Set up your vault"</h2>
+                            <p class="subtitle">
+                                "Choose a master password. It never leaves this device."
                             </p>
-                            <PasswordField value=confirm show=show placeholder="Type it again to confirm" />
-                            <label style=TOGGLE_STYLE>
-                                <input
-                                    type="checkbox"
-                                    prop:checked=show
-                                    on:change=move |ev| set_show.set(event_target_checked(&ev))
+                            <form class="form" on:submit=submit>
+                                <PasswordField
+                                    value=password
+                                    show=show
+                                    label="Master password"
+                                    placeholder="Create a strong password"
+                                    autofocus=true
                                 />
-                                "Show password"
-                            </label>
-                            {move || error.get().map(|e| view! { <p style=ERROR_STYLE>{e}</p> })}
-                            <button type="submit" style=PRIMARY_BUTTON_STYLE>
-                                "Continue"
-                            </button>
-                        </form>
-                    }.into_any()
-                }
-            }}
+                                <Requirements password=password />
+                                <PasswordField
+                                    value=confirm
+                                    show=show
+                                    label="Confirm password"
+                                    placeholder="Type it again"
+                                />
+                                <ShowToggle show=show set_show=set_show />
+                                {move || error.get().map(|e| view! { <ErrorAlert message=e /> })}
+                                <button type="submit" class="btn btn-primary btn-block">
+                                    "Continue"
+                                </button>
+                            </form>
+                        }.into_any()
+                    }
+                }}
+            </div>
         </div>
     }
 }
@@ -307,30 +381,33 @@ pub fn LoginView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
     };
 
     view! {
-        <div style=PANEL_STYLE>
-            <div style=TITLE_STYLE>"Unlock your vault"</div>
-            <p style=BODY_STYLE>
-                "Enter your master password to open the vault and start chatting."
-            </p>
-            <form style=FORM_STYLE on:submit=submit>
-                <PasswordField value=password show=show placeholder="Master password" />
-                <label style=TOGGLE_STYLE>
-                    <input
-                        type="checkbox"
-                        prop:checked=show
-                        on:change=move |ev| set_show.set(event_target_checked(&ev))
+        <div class="stage">
+            <div class="card">
+                <BrandMark />
+                <h2 class="title">"Welcome back"</h2>
+                <p class="subtitle">
+                    "Enter your master password to unlock your vault."
+                </p>
+                <form class="form" on:submit=submit>
+                    <PasswordField
+                        value=password
+                        show=show
+                        label="Master password"
+                        placeholder="Master password"
+                        autofocus=true
                     />
-                    "Show password"
-                </label>
-                {move || error.get().map(|e| view! { <p style=ERROR_STYLE>{e}</p> })}
-                <button
-                    type="submit"
-                    style=PRIMARY_BUTTON_STYLE
-                    prop:disabled=busy
-                >
-                    "Unlock"
-                </button>
-            </form>
+                    <ShowToggle show=show set_show=set_show />
+                    {move || error.get().map(|e| view! { <ErrorAlert message=e /> })}
+                    <button
+                        type="submit"
+                        class="btn btn-primary btn-block"
+                        prop:disabled=busy
+                    >
+                        <Icon kind=IconKind::Unlock class="icon-sm" />
+                        {move || if busy.get() { "Unlocking…" } else { "Unlock" }}
+                    </button>
+                </form>
+            </div>
         </div>
     }
 }

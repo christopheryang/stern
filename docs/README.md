@@ -51,6 +51,7 @@ SHA-256-verified against the catalog before it is used. See
 | [design/2026-11-21%20-%20Security.md](design/2026-11-21%20-%20Security.md) | Threat model and the vault cryptography in detail | You touch keys, encryption, or the vault format |
 | [design/2026-11-21%20-%20AI-and-Models.md](design/2026-11-21%20-%20AI-and-Models.md) | Chat pipeline, the model catalog, and the download / verify / update / select / remove lifecycle | You work on chat or the AI models |
 | [design/2026-11-22%20-%20Model-Backed-Chat.md](design/2026-11-22%20-%20Model-Backed-Chat.md) | Model-backed chat: parsing, guided conversations, retrieval Q&A, the vault gate, and the auth front door | You work on the chat pipeline or the app shell |
+| [design/2026-11-23%20-%20UI-Redesign.md](design/2026-11-23%20-%20UI-Redesign.md) | The design system, screens, and brand (icon, logo) of the redesigned frontend | You change the UI's look or the app icon |
 | [Development.md](Development.md) | Environment, build / run / test / package workflows, release process | You build, test, or ship the app |
 | [requirements/Requirements.md](requirements/Requirements.md) | What Stern must do, collected from the README, ADRs, and security invariants | You need the agreed behavior in one place |
 | [Runbook.md](Runbook.md) | Operating and troubleshooting a running install | Something is wrong on a live install |

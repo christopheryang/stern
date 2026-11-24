@@ -14,11 +14,14 @@ use leptos::prelude::*;
 #[component]
 pub fn ConfigView() -> impl IntoView {
     view! {
-        <div style="flex:1;overflow-y:auto;padding-bottom:20px;">
-            <div style="padding:20px 20px 0;">
-                <h2 style="font-size:18px;font-weight:600;">"Settings"</h2>
+        <div class="page">
+            <div class="page-inner">
+                <div class="page-head">
+                    <h2 class="title">"Settings"</h2>
+                    <p class="subtitle">"Everything here stays on this device."</p>
+                </div>
+                <ModelSetup />
             </div>
-            <ModelSetup />
         </div>
     }
 }

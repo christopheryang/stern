@@ -15,7 +15,7 @@ Stern/
 ├── desktop/                      # Desktop client (macOS/Windows)
 │   ├── stern-tauri/              # Tauri v2 shell, commands, plugins
 │   ├── stern-app/                # Leptos CSR frontend (WASM)
-│   └── stern-ui/                 # Leptos component library
+│   └── stern-ui/                 # Leptos component library, stylesheet, brand assets
 │
 ├── mobile/                       # Mobile client (Android/iOS) — planned
 │
@@ -139,6 +139,7 @@ configured yet, so local builds are unsigned.
 - [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md) — the vault cryptography in detail
 - [docs/design/2026-11-21%20-%20AI-and-Models.md](docs/design/2026-11-21%20-%20AI-and-Models.md) — chat, intent classification, and the downloadable model
 - [docs/design/2026-11-22%20-%20Model-Backed-Chat.md](docs/design/2026-11-22%20-%20Model-Backed-Chat.md) — model-backed chat: parsing, guided conversations, retrieval Q&A, the vault gate, and the auth front door
+- [docs/design/2026-11-23%20-%20UI-Redesign.md](docs/design/2026-11-23%20-%20UI-Redesign.md) — the frontend design system, screens, and brand
 - [docs/Development.md](docs/Development.md) — build, test, and release workflows in depth
 - [docs/adr/](docs/adr/README.md) — architecture decision records
 - [AGENTS.md](AGENTS.md) — instructions for AI coding agents working in this repo

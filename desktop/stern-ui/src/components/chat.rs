@@ -1,3 +1,4 @@
+use super::ui::{BrandMark, Icon, IconKind};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -278,8 +279,63 @@ fn make_sender(
     })
 }
 
-/// The scrolling transcript: the empty-state hint, or every
-/// message with the newest one's choices live.
+/// Starter prompts shown on the empty chat. Each is sent as an
+/// ordinary message, so it takes the same path as typed text.
+const SUGGESTIONS: [(IconKind, &str, &str); 3] = [
+    (IconKind::Key, "Save a password", "store a password"),
+    (
+        IconKind::Search,
+        "Find a secret",
+        "find my password for GitHub",
+    ),
+    (IconKind::List, "List everything", "list all passwords"),
+];
+
+/// The empty state: brand mark, a greeting, and starter prompts.
+fn empty_view(loading: ReadSignal<bool>, send_text: Callback<(String, Option<String>)>) -> AnyView {
+    let chips = SUGGESTIONS
+        .iter()
+        .map(|(kind, label, prompt)| {
+            let kind = *kind;
+            let prompt = *prompt;
+            view! {
+                <button
+                    class="suggestion"
+                    prop:disabled=loading
+                    on:click=move |_| send_text.run((prompt.to_string(), None))
+                >
+                    <Icon kind=kind class="icon-sm" />
+                    {*label}
+                </button>
+            }
+        })
+        .collect_view();
+    view! {
+        <div class="empty">
+            <BrandMark />
+            <h2 class="title">"What would you like to keep safe?"</h2>
+            <p class="subtitle">"Ask Stern to store, find, or manage your secrets."</p>
+            <div class="suggestions">{chips}</div>
+        </div>
+    }
+    .into_any()
+}
+
+/// The animated dots shown while a reply is being produced.
+fn typing_view() -> AnyView {
+    view! {
+        <div class="msg msg--assistant" aria-label="Stern is typing">
+            <div class="avatar"><img src="stern-mark.svg" alt="" /></div>
+            <div class="msg-body">
+                <div class="bubble bubble--assistant typing"><span></span><span></span><span></span></div>
+            </div>
+        </div>
+    }
+    .into_any()
+}
+
+/// The scrolling transcript: the empty-state, or every message
+/// with the newest one's choices live.
 fn transcript_view(
     messages: ReadSignal<Vec<ChatMsg>>,
     loading: ReadSignal<bool>,
@@ -287,19 +343,19 @@ fn transcript_view(
 ) -> AnyView {
     let msgs = messages.get();
     if msgs.is_empty() {
-        return view! {
-            <div style="display:flex;align-items:center;justify-content:center;height:100%;color:#a0a0b0;font-size:16px;">
-                "Ask Stern to store, find, or manage your secrets."
-            </div>
-        }
-        .into_any();
+        return empty_view(loading, send_text);
     }
     let last_index = msgs.len().saturating_sub(1);
-    msgs.into_iter()
+    let rows = msgs
+        .into_iter()
         .enumerate()
         .map(|(index, msg)| message_view(msg, index == last_index, loading, send_text))
-        .collect_view()
-        .into_any()
+        .collect_view();
+    view! {
+        {rows}
+        {move || loading.get().then(typing_view)}
+    }
+    .into_any()
 }
 
 /// Render one transcript message. Choices are live only on the
@@ -312,17 +368,25 @@ fn message_view(
     send_text: Callback<(String, Option<String>)>,
 ) -> AnyView {
     let is_user = msg.role == "user";
-    let bg = if is_user { "#e94560" } else { "#16213e" };
-    let color = if is_user { "white" } else { "#e6e6e6" };
-    let border = if is_user { "none" } else { "1px solid #2a2a4a" };
-    let align = if is_user { "flex-end" } else { "flex-start" };
+    let row_class = if is_user {
+        "msg msg--user"
+    } else {
+        "msg msg--assistant"
+    };
+    let bubble_class = if is_user {
+        "bubble bubble--user"
+    } else {
+        "bubble bubble--assistant"
+    };
     let label = if is_user { "You" } else { "Stern" };
-    let container_style = format!(
-        "display:flex;flex-direction:column;margin-bottom:16px;max-width:80%;align-items:{align}"
-    );
-    let bubble_style = format!(
-        "padding:10px 14px;border-radius:12px;font-size:14px;line-height:1.5;white-space:pre-wrap;background:{bg};color:{color};border:{border}"
-    );
+    let avatar = if is_user {
+        view! {
+            <div class="avatar avatar--user"><Icon kind=IconKind::User /></div>
+        }
+        .into_any()
+    } else {
+        view! { <div class="avatar"><img src="stern-mark.svg" alt="" /></div> }.into_any()
+    };
     let options_view = if !is_user && is_latest && !msg.options.is_empty() {
         let buttons = msg
             .options
@@ -337,7 +401,7 @@ fn message_view(
                 let value = option.clone();
                 view! {
                     <button
-                        style="padding:8px 14px;border:1px solid #e94560;border-radius:8px;background:transparent;color:#e6e6e6;font-size:14px;cursor:pointer;"
+                        class="option"
                         prop:disabled=loading
                         on:click=move |_| send_text.run((value.clone(), None))
                     >
@@ -346,24 +410,18 @@ fn message_view(
                 }
             })
             .collect_view();
-        view! {
-            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;">
-                {buttons}
-            </div>
-        }
-        .into_any()
+        view! { <div class="options">{buttons}</div> }.into_any()
     } else {
         ().into_any()
     };
     view! {
-        <div style=container_style>
-            <div style="font-size:12px;color:#a0a0b0;margin-bottom:4px;">
-                {label}
+        <div class=row_class>
+            {avatar}
+            <div class="msg-body">
+                <div class="msg-name">{label}</div>
+                <div class=bubble_class>{msg.content}</div>
+                {options_view}
             </div>
-            <div style=bubble_style>
-                {msg.content}
-            </div>
-            {options_view}
         </div>
     }
     .into_any()
@@ -388,6 +446,71 @@ fn bind_input_value(input_ref: NodeRef<leptos::html::Input>, display: Memo<Strin
                     el.set_selection_range(start, end).unwrap_or_default();
                 }
             }
+        }
+    });
+}
+
+/// The input row: the pill-shaped composer with its secret-mode
+/// tag and send button. Presentation only — the peek-mask logic
+/// stays in [`ChatView`], which hands it the signals and callbacks.
+#[component]
+fn Composer(
+    input_ref: NodeRef<leptos::html::Input>,
+    loading: ReadSignal<bool>,
+    is_sensitive: Signal<bool>,
+    can_send: Signal<bool>,
+    placeholder: Signal<&'static str>,
+    on_submit: Callback<SubmitEvent>,
+    on_edit: Callback<leptos::ev::Event>,
+) -> impl IntoView {
+    view! {
+        <div class="composer-wrap">
+            <form
+                class="composer"
+                class:composer--secure=is_sensitive
+                on:submit=move |ev| on_submit.run(ev)
+            >
+                <span class="secure-tag">
+                    <Icon kind=IconKind::Lock class="icon-sm" />
+                    "Secret"
+                </span>
+                <input
+                    class="composer-input"
+                    node_ref=input_ref
+                    autocomplete="off"
+                    on:input=move |ev| on_edit.run(ev)
+                    placeholder=placeholder
+                    prop:disabled=loading
+                />
+                <button
+                    type="submit"
+                    class="send"
+                    aria-label="Send"
+                    title="Send"
+                    prop:disabled=move || !can_send.get()
+                >
+                    <Icon kind=IconKind::Send />
+                </button>
+            </form>
+            <p class="composer-note">
+                "Secrets are masked as you type and stay on this device."
+            </p>
+        </div>
+    }
+}
+
+/// Keep the transcript scrolled to the newest message (and the
+/// typing dots) as the conversation grows.
+fn follow_transcript(
+    transcript_ref: NodeRef<leptos::html::Div>,
+    messages: ReadSignal<Vec<ChatMsg>>,
+    loading: ReadSignal<bool>,
+) {
+    Effect::new(move |_| {
+        let _ = messages.get();
+        let _ = loading.get();
+        if let Some(el) = transcript_ref.get() {
+            el.set_scroll_top(el.scroll_height());
         }
     });
 }
@@ -459,54 +582,54 @@ pub fn ChatView() -> impl IntoView {
         }
     };
 
+    let on_edit = move |ev: leptos::ev::Event| {
+        let value = event_target_value(&ev);
+        if is_sensitive() {
+            let caret = event_target::<web_sys::HtmlInputElement>(&ev)
+                .selection_start()
+                .ok()
+                .flatten();
+            reconcile_secret(value, caret);
+        } else {
+            set_input.set(value);
+        }
+    };
+
+    let can_send = move || {
+        !loading.get()
+            && if is_sensitive() {
+                !secret.get().is_empty()
+            } else {
+                !input.get().trim().is_empty()
+            }
+    };
+    let placeholder = move || {
+        if is_sensitive() {
+            "Type here — each character hides after 2 seconds"
+        } else {
+            "Ask Stern anything…"
+        }
+    };
+
+    let transcript_ref = NodeRef::<leptos::html::Div>::new();
+    follow_transcript(transcript_ref, messages, loading);
+
     view! {
-        <div style="display:flex;flex-direction:column;height:100%;">
-            <div style="flex:1;overflow-y:auto;padding:20px;">
-                {move || transcript_view(messages, loading, send_text)}
+        <div class="chat">
+            <div class="transcript" node_ref=transcript_ref>
+                <div class="transcript-inner">
+                    {move || transcript_view(messages, loading, send_text)}
+                </div>
             </div>
-            <form
-                style="display:flex;gap:8px;padding:16px 20px;border-top:1px solid #2a2a4a;background:#16213e;"
-                on:submit=send_message
-            >
-                <input
-                    style="flex:1;padding:10px 14px;border:1px solid #2a2a4a;border-radius:8px;background:#1a1a2e;color:#e6e6e6;font-size:14px;outline:none;"
-                    node_ref=input_ref
-                    on:input=move |ev| {
-                        let value = event_target_value(&ev);
-                        if is_sensitive() {
-                            let caret = event_target::<web_sys::HtmlInputElement>(&ev)
-                                .selection_start()
-                                .ok()
-                                .flatten();
-                            reconcile_secret(value, caret);
-                        } else {
-                            set_input.set(value);
-                        }
-                    }
-                    placeholder=move || {
-                        if is_sensitive() {
-                            "Type here — each character hides after 2 seconds"
-                        } else {
-                            "Ask Stern anything..."
-                        }
-                    }
-                    prop:disabled=loading
-                />
-                <button
-                    type="submit"
-                    style="padding:10px 20px;border:none;border-radius:8px;background:#e94560;color:white;font-size:14px;cursor:pointer;"
-                    prop:disabled=move || {
-                        loading.get()
-                            || if is_sensitive() {
-                                secret.get().is_empty()
-                            } else {
-                                input.get().trim().is_empty()
-                            }
-                    }
-                >
-                    "Send"
-                </button>
-            </form>
+            <Composer
+                input_ref=input_ref
+                loading=loading
+                is_sensitive=Signal::derive(is_sensitive)
+                can_send=Signal::derive(can_send)
+                placeholder=Signal::derive(placeholder)
+                on_submit=Callback::new(send_message)
+                on_edit=Callback::new(on_edit)
+            />
         </div>
     }
 }

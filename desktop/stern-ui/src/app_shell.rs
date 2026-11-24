@@ -1,9 +1,9 @@
 // Copyright (c) 2026 Christopher Yang
 // SPDX-License-Identifier: MIT
 
-//! App layout: a single chat view under a slim header — the app name
-//! and a gear button that opens the configuration view. There is no
-//! sidebar.
+//! App layout: a single chat view under a slim top bar — the Stern
+//! logo, a vault status pill, and Lock / Settings buttons. There is
+//! no sidebar. All styling lives in `styles/stern.css`.
 //!
 //! Two gates stand in front of the chat, in this order:
 //!
@@ -21,6 +21,7 @@
 use crate::components::auth::{AuthPhase, LoginView, SetupView};
 use crate::components::chat::ChatView;
 use crate::components::config::ConfigView;
+use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -129,20 +130,21 @@ fn spawn_refresh(
 #[component]
 fn ModelRequiredGate(set_in_config: WriteSignal<bool>) -> impl IntoView {
     view! {
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
-            <div style="font-size:16px;color:#e6e6e6;">
-                "Choose an AI model to get started"
+        <div class="stage">
+            <div class="card">
+                <div class="badge-icon"><Icon kind=IconKind::Chip /></div>
+                <h2 class="title">"Choose an AI model to get started"</h2>
+                <p class="subtitle">
+                    "Stern ships without an AI model. Pick one in Settings \
+                    and it downloads to this device only — then you can chat."
+                </p>
+                <div class="btn-row">
+                    <button class="btn btn-primary" on:click=move |_| set_in_config.set(true)>
+                        <Icon kind=IconKind::Download class="icon-sm" />
+                        "Choose a model"
+                    </button>
+                </div>
             </div>
-            <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
-                "Stern ships without an AI model. Pick one in Settings \
-                and it downloads to this device only — then you can chat."
-            </p>
-            <button
-                style=PRIMARY_BUTTON_STYLE
-                on:click=move |_| set_in_config.set(true)
-            >
-                "Choose a model"
-            </button>
         </div>
     }
 }
@@ -157,22 +159,24 @@ fn StatusErrorGate(
     cancelled: Arc<AtomicBool>,
 ) -> impl IntoView {
     view! {
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
-            <div style="font-size:16px;color:#e6e6e6;">
-                "Couldn't check whether a model is ready"
+        <div class="stage">
+            <div class="card">
+                <div class="badge-icon badge-icon--danger"><Icon kind=IconKind::Alert /></div>
+                <h2 class="title">"Couldn't check whether a model is ready"</h2>
+                <p class="subtitle">{error}</p>
+                <div class="btn-row">
+                    <button
+                        class="btn btn-primary"
+                        on:click=move |_| {
+                            set_status_error.set(None);
+                            spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+                        }
+                    >
+                        <Icon kind=IconKind::Refresh class="icon-sm" />
+                        "Retry"
+                    </button>
+                </div>
             </div>
-            <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
-                {error}
-            </p>
-            <button
-                style=PRIMARY_BUTTON_STYLE
-                on:click=move |_| {
-                    set_status_error.set(None);
-                    spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
-                }
-            >
-                "Retry"
-            </button>
         </div>
     }
 }
@@ -187,22 +191,24 @@ fn VaultStatusErrorGate(
     cancelled: Arc<AtomicBool>,
 ) -> impl IntoView {
     view! {
-        <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;text-align:center;">
-            <div style="font-size:16px;color:#e6e6e6;">
-                "Couldn't check the vault"
+        <div class="stage">
+            <div class="card">
+                <div class="badge-icon badge-icon--danger"><Icon kind=IconKind::Alert /></div>
+                <h2 class="title">"Couldn't check the vault"</h2>
+                <p class="subtitle">{error}</p>
+                <div class="btn-row">
+                    <button
+                        class="btn btn-primary"
+                        on:click=move |_| {
+                            set_auth_error.set(None);
+                            spawn_vault_refresh(set_auth, set_auth_error, cancelled.clone());
+                        }
+                    >
+                        <Icon kind=IconKind::Refresh class="icon-sm" />
+                        "Retry"
+                    </button>
+                </div>
             </div>
-            <p style="color:#a0a0b0;font-size:14px;max-width:420px;line-height:1.5;margin:0;">
-                {error}
-            </p>
-            <button
-                style=PRIMARY_BUTTON_STYLE
-                on:click=move |_| {
-                    set_auth_error.set(None);
-                    spawn_vault_refresh(set_auth, set_auth_error, cancelled.clone());
-                }
-            >
-                "Retry"
-            </button>
         </div>
     }
 }
@@ -236,12 +242,7 @@ fn unlocked_main(
         }
         .into_any()
     } else {
-        view! {
-            <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#a0a0b0;font-size:14px;">
-                "Loading…"
-            </div>
-        }
-        .into_any()
+        view! { <Loading /> }.into_any()
     }
 }
 
@@ -269,7 +270,7 @@ fn header_actions(
     if in_config {
         view! {
             <button
-                style=BACK_BUTTON_STYLE
+                class="btn btn-sm"
                 on:click=move |_| {
                     set_in_config.set(false);
                     // The user may have just downloaded or
@@ -277,18 +278,21 @@ fn header_actions(
                     spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
                 }
             >
-                "← Chat"
+                <Icon kind=IconKind::ArrowLeft class="icon-sm" />
+                "Back to chat"
             </button>
         }
         .into_any()
     } else {
         view! {
-            <span style="display:flex;gap:8px;align-items:center;">
-                {lock_error.map(|error| {
-                    view! { <span style="color:#e94560;font-size:13px;">{error}</span> }
-                })}
+            <div class="topbar-actions">
+                {lock_error.map(|error| view! { <span class="inline-error">{error}</span> })}
+                <span class="pill">
+                    <span class="pill-dot"></span>
+                    "Vault unlocked"
+                </span>
                 <button
-                    style=BACK_BUTTON_STYLE
+                    class="btn btn-sm"
                     prop:disabled=locking
                     on:click=move |_| {
                         if locking {
@@ -309,26 +313,22 @@ fn header_actions(
                         });
                     }
                 >
+                    <Icon kind=IconKind::Lock class="icon-sm" />
                     "Lock"
                 </button>
                 <button
-                    style=GEAR_BUTTON_STYLE
+                    class="btn-icon"
                     aria-label="Settings"
                     title="Settings"
                     on:click=move |_| set_in_config.set(true)
                 >
-                    "⚙"
+                    <Icon kind=IconKind::Settings />
                 </button>
-            </span>
+            </div>
         }
         .into_any()
     }
 }
-
-const HEADER_STYLE: &str = "display:flex;align-items:center;justify-content:space-between;padding:12px 20px;background:#16213e;border-bottom:1px solid #2a2a4a;flex-shrink:0;";
-const GEAR_BUTTON_STYLE: &str = "padding:6px 12px;border:1px solid #2a2a4a;border-radius:8px;background:transparent;color:#e6e6e6;font-size:16px;cursor:pointer;line-height:1;";
-const BACK_BUTTON_STYLE: &str = "padding:6px 14px;border:1px solid #2a2a4a;border-radius:8px;background:transparent;color:#a0a0b0;font-size:13px;cursor:pointer;";
-const PRIMARY_BUTTON_STYLE: &str = "padding:10px 20px;border:none;border-radius:8px;background:#e94560;color:white;font-size:14px;cursor:pointer;";
 
 #[component]
 pub fn AppShell() -> impl IntoView {
@@ -368,9 +368,9 @@ pub fn AppShell() -> impl IntoView {
     let cancelled_auth = cancelled;
 
     view! {
-        <div style="display:flex;flex-direction:column;height:100vh;">
-            <header style=HEADER_STYLE>
-                <h1 style="font-size:18px;font-weight:700;">"Stern"</h1>
+        <div class="app">
+            <header class="topbar">
+                <BrandLogo />
                 {move || header_actions(
                     auth.get(),
                     in_config.get(),
@@ -385,7 +385,7 @@ pub fn AppShell() -> impl IntoView {
                     cancelled_header.clone(),
                 )}
             </header>
-            <main style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+            <main class="main">
                 {move || -> AnyView {
                     match auth.get() {
                         Some(AuthPhase::Setup) => {
@@ -404,13 +404,7 @@ pub fn AppShell() -> impl IntoView {
                             cancelled_main.clone(),
                         ),
                         None => auth_error.get().map_or_else(
-                            || {
-                                view! {
-                                    <div style="flex:1;display:flex;align-items:center;justify-content:center;color:#a0a0b0;font-size:14px;">
-                                        "Loading…"
-                                    </div>
-                                }.into_any()
-                            },
+                            || view! { <Loading /> }.into_any(),
                             |error| {
                                 view! {
                                     <VaultStatusErrorGate
