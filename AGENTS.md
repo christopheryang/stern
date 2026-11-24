@@ -157,15 +157,6 @@ run the ignored network smoke test:
 - `codeql.yml` — CodeQL code scanning (actions + rust) on pushes and
   pull requests to main plus a weekly schedule; findings land in the
   repo's Security tab.
-- `pr-agent.yml` — PR-Agent (open source) AI code review on new pull
-  requests, plus /review, /improve, /ask, and /describe in PR
-  comments; needs the OPENAI_KEY repository secret. Slash commands
-  run only on pull requests, only when the comment starts with one of
-  the four commands, and only for the owner/members/collaborators.
-  Automatic runs skip fork PRs (they never receive the secret); a
-  maintainer slash command on a fork PR does run, from the default
-  branch, with PR-Agent reading the diff via the API — no fork code
-  is checked out or executed.
 - `.github/dependabot.yml` — Dependabot opens weekly update PRs for
   Cargo dependencies and GitHub Actions (minor/patch batched,
   `chore(deps)` commit prefix so the commit-message gate passes).
