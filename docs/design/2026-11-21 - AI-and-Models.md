@@ -169,3 +169,10 @@ clicks Download/Update, or selects a model on a device that still
 needs the runtime. No telemetry, no update checks, no remote
 configuration accompany them, and vault data is never transmitted.
 
+TLS certificates are verified against the **operating system's trust
+store** (ureq's `platform-verifier`), not a bundled root list, so
+downloads work behind corporate TLS-inspecting proxies whose root CA
+the machine already trusts. This does not weaken integrity: every
+downloaded file is checked against its pinned SHA-256 before use, so
+a tampered download is rejected whatever the transport trusted.
+

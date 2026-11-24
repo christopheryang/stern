@@ -34,6 +34,14 @@ network. Nothing is kept from a failed attempt — partial files are
 deleted automatically — so just retry from the picker when the
 network allows. No other part of the app is affected.
 
+If the error mentions `invalid peer certificate: UnknownIssuer`, a
+TLS-inspecting proxy (Zscaler, for example) is re-signing the
+connection. Stern verifies certificates against the operating
+system's trust store, so the proxy's root CA must be installed there
+(on a managed Mac it normally already is — check Keychain Access →
+System). If it is, rebuild with the current version; builds before
+0.3.1 used a bundled root list and rejected the proxy's certificate.
+
 ### "Model integrity check failed"
 
 The downloaded bytes do not match the SHA-256 pinned in the catalog.

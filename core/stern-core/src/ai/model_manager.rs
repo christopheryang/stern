@@ -863,8 +863,19 @@ impl ModelManager {
     /// `timeout_per_read` restarts on every read, so a large file on a
     /// slow link is fine as long as bytes keep arriving — 60 seconds
     /// without a single successful read aborts the download.
+    ///
+    /// Certificates are verified against the operating system's trust
+    /// store rather than ureq's bundled Mozilla roots, so a corporate
+    /// TLS-inspecting proxy whose root CA the machine already trusts
+    /// does not fail the download with `UnknownIssuer`. Integrity never
+    /// depends on TLS: every file is checked against its pinned SHA-256.
     fn download_agent() -> ureq::Agent {
         ureq::Agent::config_builder()
+            .tls_config(
+                ureq::tls::TlsConfig::builder()
+                    .root_certs(ureq::tls::RootCerts::PlatformVerifier)
+                    .build(),
+            )
             .timeout_connect(Some(Duration::from_secs(15)))
             .timeout_recv_response(Some(Duration::from_secs(30)))
             .timeout_per_read(Some(Duration::from_mins(1)))
