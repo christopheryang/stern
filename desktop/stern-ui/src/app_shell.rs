@@ -236,6 +236,8 @@ struct HeaderSetters {
     model_ready: WriteSignal<Option<bool>>,
     status_error: WriteSignal<Option<String>>,
     locking: WriteSignal<bool>,
+    /// Reads the same flag as `locking`, for the guard in `perform_lock`.
+    locking_now: ReadSignal<bool>,
     lock_error: WriteSignal<Option<String>>,
     /// Opens the "Lock Stern?" dialog.
     confirming: WriteSignal<bool>,
@@ -246,6 +248,11 @@ struct HeaderSetters {
 /// to the switch instead of swallowed.
 fn perform_lock(set: HeaderSetters) {
     set.confirming.set(false);
+    // One lock at a time: a second click before the first returns must
+    // not send a second request.
+    if set.locking_now.get_untracked() {
+        return;
+    }
     set.locking.set(true);
     set.lock_error.set(None);
     spawn_local(async move {
@@ -315,7 +322,7 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
             <Icon kind=IconKind::Settings />
         </button>
     };
-    let confirm_lock = expect_context::<ConfirmLockSignal>();
+    let confirm_lock = prefs::confirm_lock_signal();
     let locking = state.locking;
     let unlocked = state.auth == Some(AuthPhase::Unlocked);
     // A padlock shows where the vault stands: open when unlocked (click
@@ -465,12 +472,20 @@ pub fn AppShell() -> impl IntoView {
     let cancelled_header = cancelled.clone();
     let cancelled_main = cancelled;
 
+    // A lock from anywhere else closes the dialog for good, so it does
+    // not come back after the next sign-in.
+    Effect::new(move |_| {
+        if auth.get() != Some(AuthPhase::Unlocked) {
+            set_confirming.set(false);
+        }
+    });
     let setters = HeaderSetters {
         page: set_page,
         auth: set_auth,
         model_ready: set_model_ready,
         status_error: set_status_error,
         locking: set_locking,
+        locking_now: locking,
         lock_error: set_lock_error,
         confirming: set_confirming,
     };
@@ -523,7 +538,9 @@ pub fn AppShell() -> impl IntoView {
                 </div>
                 {side_page}
             </main>
-            {move || confirming.get().then(|| view! {
+            // Only while unlocked: if the vault locks another way while the
+            // dialog is open, it must not stay over the sign-in screen.
+            {move || (confirming.get() && auth.get() == Some(AuthPhase::Unlocked)).then(|| view! {
                 <ConfirmDialog
                     title="Lock Stern?"
                     text="You will need your password to open it again."

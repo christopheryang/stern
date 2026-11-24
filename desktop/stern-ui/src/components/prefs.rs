@@ -27,14 +27,26 @@ pub fn confirm_lock_load() -> bool {
     confirm_lock_from_stored(stored.as_deref())
 }
 
-/// Remember the choice for next time.
-pub fn confirm_lock_save(on: bool) {
-    if let Some(storage) = storage() {
-        // Private modes can refuse storage; the choice then lasts for this run only.
-        drop(storage.set_item(CONFIRM_LOCK_KEY, if on { "on" } else { "off" }));
-    }
+/// Remember the choice for next time. Returns whether it was saved:
+/// private modes can refuse storage, and the choice then lasts for this
+/// run only, which the caller can say.
+#[must_use]
+pub fn confirm_lock_save(on: bool) -> bool {
+    storage().is_some_and(|storage| {
+        storage
+            .set_item(CONFIRM_LOCK_KEY, if on { "on" } else { "off" })
+            .is_ok()
+    })
 }
 
 /// The app-wide "ask before locking" signal. `AppShell` provides it once,
 /// so the lock button and the Settings choice always agree.
 pub type ConfirmLockSignal = leptos::prelude::RwSignal<bool>;
+
+/// The shared signal, or a private one read from storage when none was
+/// provided, so a component rendered on its own does not panic.
+#[must_use]
+pub fn confirm_lock_signal() -> ConfirmLockSignal {
+    use leptos::prelude::{use_context, RwSignal};
+    use_context::<ConfirmLockSignal>().unwrap_or_else(|| RwSignal::new(confirm_lock_load()))
+}

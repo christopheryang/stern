@@ -170,7 +170,8 @@ tap **Lock** to lock it, or **Cancel** to stay in. Stern then hides everything u
 you enter your password again. It also locks when you close it.
 
 If you would rather not be asked, open Settings and turn off **Ask before
-locking**. The padlock then locks Stern at once.
+locking**. The padlock then locks Stern at once. This choice, like the AI
+model, can only be changed once you have signed in.
 
 ![Opening Stern with your password](User-Guide%20-%20Unlock.png)
 

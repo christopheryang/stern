@@ -50,6 +50,10 @@ pub fn friendly_error(raw: &str) -> FriendlyError {
         known("Too many tries. Please wait a few minutes, then try again.")
     } else if lower.contains("vault locked") {
         known("Stern is locked. Enter your password to continue.")
+    } else if lower.contains("a note needs a title") {
+        known("Give your note a title, then save it again.")
+    } else if lower.contains("changed somewhere else") {
+        known("This note was changed somewhere else. Open it again to see the latest.")
     } else if is_download_failure {
         FriendlyError {
             message: "The download didn't work. Check your internet connection and try again."

@@ -137,7 +137,11 @@
         if (cmd === "send_chat_message") {
           return chat(plain(args).request.content);
         }
-        if (cmd === "lock_vault") return { is_initialized: true, is_unlocked: false, entry_count: 1 };
+        if (cmd === "lock_vault") {
+          window.__lockCalls = (window.__lockCalls || 0) + 1;
+          await new Promise((r) => setTimeout(r, 400));
+          return { is_initialized: true, is_unlocked: false, entry_count: 1 };
+        }
         return {};
       },
     },

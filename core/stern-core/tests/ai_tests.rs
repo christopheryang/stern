@@ -935,6 +935,37 @@ fn choosing_note_from_the_kind_list_opens_the_editor() {
 }
 
 #[test]
+fn polite_phrasing_is_the_same_request() {
+    for (text, name) in [
+        ("please edit my note Groceries", "groceries"),
+        ("Could you please change the Will", "will"),
+        ("can you edit my shopping list", "shopping list"),
+        ("please, could you edit my trip plan", "trip plan"),
+    ] {
+        match classify_intent(text) {
+            Intent::UpdateSecret {
+                name: found,
+                fields,
+            } => {
+                assert_eq!(found.to_lowercase(), name, "text: {text}");
+                assert!(fields.is_empty(), "text: {text}");
+            }
+            other => panic!("expected UpdateSecret for {text:?}, got: {other:?}"),
+        }
+    }
+    // The lead-in comes off whole words only, and never leaves nothing.
+    assert!(matches!(
+        classify_intent("pleasant weather"),
+        Intent::Unknown { .. }
+    ));
+    assert!(matches!(classify_intent("please"), Intent::Unknown { .. }));
+    assert!(matches!(
+        classify_intent("please find my shopping list"),
+        Intent::RetrieveSecret { .. }
+    ));
+}
+
+#[test]
 fn edit_my_note_asks_to_update_it_by_name() {
     for (text, name) in [
         ("edit my shopping list", "shopping list"),

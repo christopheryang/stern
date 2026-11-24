@@ -31,7 +31,14 @@ to, apart from the conversation that starts a note.
   fields stay masked. Documents keep the guided questions, also unmasked.
 - Each save writes a new version. The version is bound into the
   ciphertext's associated data, so an older row cannot be restored in
-  place of a newer one.
+  place of a newer one. A save names the version it read, and is refused
+  if the note has been saved since, so two writers cannot silently
+  overwrite each other.
+- Saving changes only the title and text. Tags and any other fields the
+  note carries are kept as they were.
+- Only one note is open at a time. A request to open another while one
+  is open is answered with a plain message, so typed text is never
+  replaced without the user's say.
 
 ## Consequences
 

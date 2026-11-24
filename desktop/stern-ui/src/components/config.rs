@@ -11,7 +11,7 @@
 //! chat stays gated until one is active.
 
 use super::model_setup::ModelSetup;
-use super::prefs::{self, ConfirmLockSignal};
+use super::prefs;
 use super::theme::{self, Theme, ThemeSignal};
 use super::ui::{Icon, IconKind};
 use leptos::prelude::*;
@@ -77,7 +77,9 @@ fn Appearance() -> impl IntoView {
 /// as soon as it is switched.
 #[component]
 fn LockSetting() -> impl IntoView {
-    let confirm = expect_context::<ConfirmLockSignal>();
+    let confirm = prefs::confirm_lock_signal();
+    // Set when the browser refused to keep the choice.
+    let unsaved = RwSignal::new(false);
     view! {
         <div class="section">
             <div class="section-head">
@@ -96,11 +98,16 @@ fn LockSetting() -> impl IntoView {
                     prop:checked=move || confirm.get()
                     on:change=move |ev| {
                         let on = event_target_checked(&ev);
-                        prefs::confirm_lock_save(on);
+                        unsaved.set(!prefs::confirm_lock_save(on));
                         confirm.set(on);
                     }
                 />
             </label>
+            {move || unsaved.get().then(|| view! {
+                <p class="muted settings-note" role="status">
+                    "Stern could not save this choice, so it lasts only until you close Stern."
+                </p>
+            })}
         </div>
     }
 }
@@ -118,8 +125,12 @@ pub fn ConfigView(#[prop(optional)] locked: bool) -> impl IntoView {
                 </div>
                 <Appearance />
                 <div class="section-gap"></div>
-                <LockSetting />
-                <div class="section-gap"></div>
+                // Locking is a vault setting: before sign-in, anyone at the
+                // keyboard could switch the safety question off.
+                {(!locked).then(|| view! {
+                    <LockSetting />
+                    <div class="section-gap"></div>
+                })}
                 {locked.then(|| view! {
                     <p class="muted settings-note">"Unlock your vault to change the AI model."</p>
                 })}

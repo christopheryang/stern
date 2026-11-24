@@ -679,7 +679,7 @@ fn an_edited_note_cannot_be_swapped_back_to_an_older_version() {
     };
     state
         .repository
-        .update_entry_payload(&first.id, &payload)
+        .update_entry_payload(&first.id, 2, &payload)
         .unwrap();
     assert!(crate::notes::load(&state, &first.id).is_err());
 }
@@ -704,4 +704,203 @@ fn model_changes_are_refused_again_after_lock() {
         require_unlocked(&state),
         Err(VaultError::VaultLocked)
     ));
+}
+
+/// Put a note in the vault with tags and an extra field, the way an
+/// older build or another tool might have written it.
+fn insert_rich_note(state: &AppState) -> String {
+    use stern_core::domain::vault::aad::entry_aad;
+    use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind, EntryPayload, Field};
+    let kek = *state.session.lock().unwrap().kek().unwrap();
+    let payload = EntryPayload {
+        name: "Trip".to_string(),
+        kind: EntryKind::Note,
+        tags: vec!["travel".to_string(), "2026".to_string()],
+        fields: vec![
+            Field {
+                key: "title".into(),
+                value: "Trip".into(),
+                hidden: false,
+            },
+            Field {
+                key: "text".into(),
+                value: "pack socks".into(),
+                hidden: false,
+            },
+            Field {
+                key: "booking".into(),
+                value: "ABC123".into(),
+                hidden: true,
+            },
+        ],
+    };
+    let id = "note-rich".to_string();
+    let json = serde_json::to_vec(&payload).unwrap();
+    let dek = state.crypto.generate_dek();
+    let (nonce, ciphertext) = state
+        .crypto
+        .encrypt_entry(&dek, &json, &entry_aad(&id, 1))
+        .unwrap();
+    let now = chrono::Utc::now();
+    state
+        .repository
+        .insert_entry(&EncryptedEntry {
+            id: id.clone(),
+            kind: EntryKind::Note,
+            name: "Trip".to_string(),
+            tags: vec!["travel".to_string(), "2026".to_string()],
+            dek_wrapped: state.crypto.wrap_dek(&dek, &kek).unwrap().to_vec(),
+            nonce,
+            ciphertext,
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    id
+}
+
+#[test]
+fn saving_a_note_keeps_its_tags_and_other_fields() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let id = insert_rich_note(&state);
+
+    crate::notes::save(&state, Some(&id), "Trip to Rome", "pack socks and a hat").unwrap();
+
+    let entry = state
+        .repository
+        .list_all_entries()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == id)
+        .unwrap();
+    assert_eq!(entry.tags, ["travel", "2026"]);
+    let kek = *state.session.lock().unwrap().kek().unwrap();
+    let wrapped = <[u8; stern_core::domain::vault::crypto_constants::DEK_WRAPPED_LEN]>::try_from(
+        entry.dek_wrapped.as_slice(),
+    )
+    .unwrap();
+    let dek = state.crypto.unwrap_dek(&wrapped, &kek).unwrap();
+    let plain = state
+        .crypto
+        .decrypt_entry(
+            &dek,
+            &entry.nonce,
+            &entry.ciphertext,
+            &stern_core::domain::vault::aad::entry_aad(&id, entry.version),
+        )
+        .unwrap();
+    let payload: stern_core::domain::vault::entry::EntryPayload =
+        serde_json::from_slice(&plain).unwrap();
+    assert_eq!(payload.tags, ["travel", "2026"]);
+    let booking = payload.fields.iter().find(|f| f.key == "booking").unwrap();
+    assert_eq!(booking.value, "ABC123");
+    assert!(booking.hidden);
+    let note = crate::notes::load(&state, &id).unwrap();
+    assert_eq!(
+        (note.title.as_str(), note.text.as_str()),
+        ("Trip to Rome", "pack socks and a hat")
+    );
+}
+
+#[test]
+fn a_save_from_an_out_of_date_copy_is_refused() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let first = crate::notes::save(&state, None, "Plan", "v1").unwrap();
+    crate::notes::save(&state, Some(&first.id), "Plan", "v2").unwrap();
+
+    // The repository itself refuses a write that names a stale version.
+    let payload = StoredPayload {
+        dek_wrapped: &[0u8; 40],
+        nonce: &[0u8; 24],
+        ciphertext: b"x",
+        name: "Plan",
+        version: 2,
+        updated_at: "2026-11-24T00:00:00+00:00",
+    };
+    let applied = state
+        .repository
+        .update_entry_payload(&first.id, 1, &payload)
+        .unwrap();
+    assert!(!applied, "version 1 is no longer the stored version");
+    assert_eq!(crate::notes::load(&state, &first.id).unwrap().text, "v2");
+}
+
+#[test]
+fn an_entry_version_that_does_not_fit_is_an_error_not_a_clamp() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let note = crate::notes::save(&state, None, "Plan", "v1").unwrap();
+    let payload = StoredPayload {
+        dek_wrapped: &[0u8; 40],
+        nonce: &[0u8; 24],
+        ciphertext: b"x",
+        name: "Plan",
+        version: u64::MAX,
+        updated_at: "2026-11-24T00:00:00+00:00",
+    };
+    let err = state
+        .repository
+        .update_entry_payload(&note.id, 1, &payload)
+        .unwrap_err();
+    assert!(err.to_string().contains("out of range"), "{err}");
+    assert_eq!(crate::notes::load(&state, &note.id).unwrap().text, "v1");
+}
+
+#[test]
+fn listing_notes_orders_by_time_and_does_not_open_their_text() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let older = crate::notes::save(&state, None, "Older", "a").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let newer = crate::notes::save(&state, None, "Newer", "b").unwrap();
+
+    let listed = crate::notes::list(&state).unwrap();
+    let ids: Vec<&str> = listed.iter().map(|n| n.id.as_str()).collect();
+    assert_eq!(ids, [newer.id.as_str(), older.id.as_str()]);
+
+    // Corrupt one note's ciphertext: listing needs only the stored title,
+    // so it still works; opening the note is what fails.
+    let mut broken = state
+        .repository
+        .list_all_entries()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == older.id)
+        .unwrap();
+    broken.ciphertext[0] ^= 0xff;
+    let payload = StoredPayload {
+        dek_wrapped: &broken.dek_wrapped,
+        nonce: &broken.nonce,
+        ciphertext: &broken.ciphertext,
+        name: "Older",
+        version: broken.version,
+        updated_at: &broken.updated_at.to_rfc3339(),
+    };
+    state
+        .repository
+        .update_entry_payload(&older.id, broken.version, &payload)
+        .unwrap();
+    assert_eq!(crate::notes::list(&state).unwrap().len(), 2);
+    assert!(crate::notes::load(&state, &older.id).is_err());
+}
+
+#[test]
+fn finding_notes_with_a_blank_query_matches_nothing() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    crate::notes::save(&state, None, "Plan", "a").unwrap();
+    assert!(crate::notes::find(&state, "").unwrap().is_empty());
+    assert!(crate::notes::find(&state, "   ").unwrap().is_empty());
+    assert_eq!(crate::notes::find(&state, "plan").unwrap().len(), 1);
+}
+
+#[test]
+fn locking_cancels_a_download_that_started_before_it() {
+    let (state, _path) = make_test_app_state();
+    let epoch = state.model_manager.download_epoch();
+    state.model_manager.cancel_downloads();
+    assert_ne!(state.model_manager.download_epoch(), epoch);
 }

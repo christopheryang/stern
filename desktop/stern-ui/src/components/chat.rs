@@ -293,6 +293,7 @@ fn make_sender(
     set_messages: WriteSignal<Vec<ChatMsg>>,
     loading: ReadSignal<bool>,
     set_loading: WriteSignal<bool>,
+    editor: ReadSignal<Option<EditorRequest>>,
     set_editor: WriteSignal<Option<EditorRequest>>,
 ) -> Callback<(String, Option<String>)> {
     Callback::new(move |(text, display): (String, Option<String>)| {
@@ -310,10 +311,18 @@ fn make_sender(
         set_loading.set(true);
 
         spawn_local(async move {
-            let reply = invoke_chat(text)
+            let mut reply = invoke_chat(text)
                 .await
                 .unwrap_or_else(|e| Reply::text(friendly_error(&e).message));
 
+            // A note is already open: never swap it for another, which
+            // would throw away what was typed into it. Ask to finish it.
+            if reply.open_editor.is_some() && editor.get_untracked().is_some() {
+                reply = Reply::text(
+                    "A note is already open. Save it or cancel it first, then ask again."
+                        .to_string(),
+                );
+            }
             let assistant_msg = ChatMsg {
                 id: uuid::Uuid::new_v4().to_string(),
                 role: "assistant".to_string(),
@@ -635,7 +644,7 @@ pub fn ChatView() -> impl IntoView {
 
     // The note editor shown under the transcript, when a reply asked for it.
     let (editor, set_editor) = signal(Option::<EditorRequest>::None);
-    let send_text = make_sender(set_messages, loading, set_loading, set_editor);
+    let send_text = make_sender(set_messages, loading, set_loading, editor, set_editor);
     let editor_done = editor_done_callback(set_messages, set_editor);
 
     let reconcile_secret = move |new_display: String, caret_utf16: Option<u32>| {

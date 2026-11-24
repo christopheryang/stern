@@ -122,27 +122,36 @@ impl SqliteRepository {
         })
     }
 
-    /// Replace an entry's encrypted payload, name and version. Returns
-    /// false when no entry has that id.
+    /// Replace an entry's encrypted payload, name and version, but only if
+    /// the stored version is still `expected_version`. The new version is
+    /// `payload.version`, which must follow it. Returns false when no entry
+    /// has that id and version: it was deleted, or another save got there
+    /// first, so the caller's copy is out of date and nothing is written.
     pub fn update_entry_payload(
         &self,
         entry_id: &str,
+        expected_version: u64,
         payload: &StoredPayload<'_>,
     ) -> Result<bool, VaultError> {
+        let new_version = i64::try_from(payload.version)
+            .map_err(|_| VaultError::Database("entry version out of range".to_string()))?;
+        let old_version = i64::try_from(expected_version)
+            .map_err(|_| VaultError::Database("entry version out of range".to_string()))?;
         self.execute(|conn| {
             let changed = conn.execute(
                 "UPDATE entries
                  SET dek_wrapped = ?2, nonce = ?3, ciphertext = ?4, name = ?5,
                      version = ?6, updated_at = ?7
-                 WHERE id = ?1",
+                 WHERE id = ?1 AND version = ?8",
                 rusqlite::params![
                     entry_id,
                     payload.dek_wrapped,
                     payload.nonce.as_slice(),
                     payload.ciphertext,
                     payload.name,
-                    i64::try_from(payload.version).unwrap_or(i64::MAX),
+                    new_version,
                     payload.updated_at,
+                    old_version,
                 ],
             )?;
             Ok(changed > 0)

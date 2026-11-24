@@ -14,7 +14,7 @@ Tap "Save a note", or type "save a note". A box opens in the chat with a place f
 
 ## How do I change a note I saved?
 
-Type "edit" followed by the note's name, for example "edit my shopping list". The same box opens with the note's title and text already in it. Change what you like, then tap Save note. If two notes have similar names, Stern lists them and asks which one you mean. Type a little more of the name to pick one.
+Type "edit" followed by the note's name, for example "edit my shopping list". The same box opens with the note's title and text already in it. Change what you like, then tap Save note. If two notes have similar names, Stern lists them and asks which one you mean. Type a little more of the name to pick one. Only one note can be open at a time: save it or cancel it before you open another, so what you typed is never lost by accident.
 
 ## How do I save a document?
 
@@ -66,7 +66,7 @@ Check that you are online, then try again. Some work or school networks block do
 
 ## What does Lock do?
 
-Lock hides everything until you enter your password again. Stern also locks when you close it. The padlock at the top right is open when Stern is unlocked and closed when it is locked. Tap it to lock Stern. Stern asks "Lock Stern?" first, so you do not lock it by accident. If you would rather it did not ask, turn off Ask before locking under Locking in Settings. When Stern is locked, tapping the padlock takes you to the place where you type your password.
+Lock hides everything until you enter your password again. Stern also locks when you close it. The padlock at the top right is open when Stern is unlocked and closed when it is locked. Tap it to lock Stern. Stern asks "Lock Stern?" first, so you do not lock it by accident. If you would rather it did not ask, turn off Ask before locking under Locking in Settings. You can only change this after you sign in. When Stern is locked, tapping the padlock takes you to the place where you type your password.
 
 ## Why can't I unlock right now?
 

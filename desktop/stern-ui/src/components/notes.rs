@@ -11,6 +11,8 @@
 use super::friendly::friendly_error;
 use leptos::prelude::*;
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use wasm_bindgen::JsCast;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -68,10 +70,20 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
     let text = RwSignal::new(String::new());
     let status = RwSignal::new(Option::<String>::None);
     let busy = RwSignal::new(note_id.is_some());
+    // Set when the editor goes away (the vault locks, the chat resets), so a
+    // load or save that finishes late never writes to signals that are gone.
+    let gone = Arc::new(AtomicBool::new(false));
+    let gone_on_cleanup = Arc::clone(&gone);
+    on_cleanup(move || gone_on_cleanup.store(true, Ordering::Relaxed));
 
     if let Some(id) = note_id {
+        let gone = Arc::clone(&gone);
         leptos::task::spawn_local(async move {
-            match load_note(&id).await {
+            let loaded = load_note(&id).await;
+            if gone.load(Ordering::Relaxed) {
+                return;
+            }
+            match loaded {
                 Ok(note) => {
                     current_id.set(Some(note.id));
                     title.set(note.title);
@@ -92,8 +104,13 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
         let id = current_id.get_untracked();
         let title_value = title.get_untracked();
         let text_value = text.get_untracked();
+        let gone = Arc::clone(&gone);
         leptos::task::spawn_local(async move {
-            match save_note(id, title_value, text_value).await {
+            let saved = save_note(id, title_value, text_value).await;
+            if gone.load(Ordering::Relaxed) {
+                return;
+            }
+            match saved {
                 Ok(note) => on_done.run(Some(note.title)),
                 Err(error) => {
                     status.set(Some(friendly_error(&error).message));

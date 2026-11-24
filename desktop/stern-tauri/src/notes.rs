@@ -37,6 +37,19 @@ pub struct NoteSummary {
     pub updated_at: String,
 }
 
+/// Refuse unless the vault is unlocked.
+fn ensure_unlocked(state: &AppState) -> Result<(), VaultError> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+    if session.is_unlocked {
+        Ok(())
+    } else {
+        Err(VaultError::VaultLocked)
+    }
+}
+
 fn unlocked_kek(state: &AppState) -> Result<Zeroizing<[u8; KEK_LEN]>, VaultError> {
     let session = state
         .session
@@ -82,33 +95,38 @@ const fn is_note(entry: &EncryptedEntry) -> bool {
 }
 
 /// Every note in the vault, newest first, without their text.
+///
+/// A note's title is its entry name, which is stored beside the
+/// ciphertext, so listing never decrypts a note body.
 pub fn list(state: &AppState) -> Result<Vec<NoteSummary>, VaultError> {
-    let kek = unlocked_kek(state)?;
-    let mut notes = Vec::new();
-    for entry in state.repository.list_all_entries()? {
-        if !is_note(&entry) {
-            continue;
-        }
-        let payload = open_note(state, &kek, &entry)?;
-        let (title, _) = note_fields(&payload);
-        notes.push(NoteSummary {
-            id: entry.id.clone(),
-            title: if title.is_empty() {
-                entry.name.clone()
-            } else {
-                title
-            },
+    ensure_unlocked(state)?;
+    let mut notes: Vec<_> = state
+        .repository
+        .list_all_entries()?
+        .into_iter()
+        .filter(is_note)
+        .collect();
+    // Sort by the timestamp itself: RFC 3339 strings only sort correctly
+    // when every offset and fraction has the same shape.
+    notes.sort_by_key(|entry| std::cmp::Reverse(entry.updated_at));
+    Ok(notes
+        .into_iter()
+        .map(|entry| NoteSummary {
+            id: entry.id,
+            title: entry.name,
             updated_at: entry.updated_at.to_rfc3339(),
-        });
-    }
-    notes.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
-    Ok(notes)
+        })
+        .collect())
 }
 
 /// The notes whose title matches `query`: an exact match (ignoring case)
-/// wins; otherwise every title that contains it.
+/// wins; otherwise every title that contains it. A blank query matches
+/// nothing, not everything.
 pub fn find(state: &AppState, query: &str) -> Result<Vec<NoteSummary>, VaultError> {
     let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
     let all = list(state)?;
     let exact: Vec<NoteSummary> = all
         .iter()
@@ -135,6 +153,13 @@ pub fn load(state: &AppState, id: &str) -> Result<NoteDto, VaultError> {
         .ok_or_else(|| VaultError::EntryNotFound(id.to_string()))?;
     let payload = open_note(state, &kek, &entry)?;
     let (title, text) = note_fields(&payload);
+    // The same fallback `list` shows: the entry name, when the payload
+    // has no title field.
+    let title = if title.is_empty() {
+        entry.name.clone()
+    } else {
+        title
+    };
     Ok(NoteDto {
         id: entry.id.clone(),
         title,
@@ -144,8 +169,24 @@ pub fn load(state: &AppState, id: &str) -> Result<NoteDto, VaultError> {
     })
 }
 
+/// Set a field's value, adding the field when the payload lacks it.
+fn set_field(payload: &mut EntryPayload, key: &str, value: &str) {
+    if let Some(field) = payload.fields.iter_mut().find(|f| f.key == key) {
+        field.value = value.to_string();
+    } else {
+        payload.fields.push(Field {
+            key: key.to_string(),
+            value: value.to_string(),
+            hidden: false,
+        });
+    }
+}
+
 /// Create a new note, or save changes to an existing one. A blank title
 /// is refused: a note needs a name to be found by.
+///
+/// Saving an existing note changes only its title and text. Whatever else
+/// the entry carries (tags, other fields) is kept as it was.
 pub fn save(
     state: &AppState,
     id: Option<&str>,
@@ -158,28 +199,21 @@ pub fn save(
     }
     let kek = unlocked_kek(state)?;
     let now = chrono::Utc::now();
-    let payload = EntryPayload {
-        name: title.to_string(),
-        kind: EntryKind::Note,
-        tags: vec![],
-        fields: vec![
-            Field {
-                key: "title".to_string(),
-                value: title.to_string(),
-                hidden: false,
-            },
-            Field {
-                key: "text".to_string(),
-                value: text.to_string(),
-                hidden: false,
-            },
-        ],
-    };
-    let payload_json =
-        serde_json::to_vec(&payload).map_err(|e| VaultError::Serialization(e.to_string()))?;
-
     match id {
         None => {
+            let mut payload = EntryPayload {
+                name: title.to_string(),
+                kind: EntryKind::Note,
+                tags: vec![],
+                fields: vec![],
+            };
+            set_field(&mut payload, "title", title);
+            set_field(&mut payload, "text", text);
+            // The plaintext JSON is wiped when it goes out of scope.
+            let payload_json = Zeroizing::new(
+                serde_json::to_vec(&payload)
+                    .map_err(|e| VaultError::Serialization(e.to_string()))?,
+            );
             let entry_id = uuid::Uuid::new_v4().to_string();
             let version = 1u64;
             let dek = state.crypto.generate_dek();
@@ -209,9 +243,21 @@ pub fn save(
                 .into_iter()
                 .find(|e| e.id == existing && is_note(e))
                 .ok_or_else(|| VaultError::EntryNotFound(existing.to_string()))?;
+            // Start from what is stored, so tags and extra fields survive.
+            let mut payload = open_note(state, &kek, &current)?;
+            payload.name = title.to_string();
+            set_field(&mut payload, "title", title);
+            set_field(&mut payload, "text", text);
+            let payload_json = Zeroizing::new(
+                serde_json::to_vec(&payload)
+                    .map_err(|e| VaultError::Serialization(e.to_string()))?,
+            );
             // A new version: the AAD is bound to the version, so an old
             // ciphertext can never be swapped in under the new one.
-            let version = current.version.saturating_add(1);
+            let version = current
+                .version
+                .checked_add(1)
+                .ok_or_else(|| VaultError::Database("entry version out of range".to_string()))?;
             let dek = state.crypto.generate_dek();
             let (nonce, ciphertext) =
                 state
@@ -219,7 +265,7 @@ pub fn save(
                     .encrypt_entry(&dek, &payload_json, &entry_aad(existing, version))?;
             let dek_wrapped = state.crypto.wrap_dek(&dek, &kek)?.to_vec();
             let updated_at = now.to_rfc3339();
-            let payload = StoredPayload {
+            let stored = StoredPayload {
                 dek_wrapped: &dek_wrapped,
                 nonce: &nonce,
                 ciphertext: &ciphertext,
@@ -227,9 +273,16 @@ pub fn save(
                 version,
                 updated_at: &updated_at,
             };
-            let changed = state.repository.update_entry_payload(existing, &payload)?;
+            // Only if nobody saved a newer version since we read this one.
+            let changed =
+                state
+                    .repository
+                    .update_entry_payload(existing, current.version, &stored)?;
             if !changed {
-                return Err(VaultError::EntryNotFound(existing.to_string()));
+                return Err(VaultError::Io(
+                    "This note was changed somewhere else. Open it again to see the latest."
+                        .to_string(),
+                ));
             }
             load(state, existing)
         }

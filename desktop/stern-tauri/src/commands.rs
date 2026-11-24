@@ -174,6 +174,10 @@ fn unlock_vault_inner(state: &AppState, password: &str) -> Result<VaultStatus, V
 #[tauri::command]
 
 pub async fn lock_vault(state: State<'_, AppState>) -> Result<VaultStatus, VaultError> {
+    // A model download is a change to the installed models, which needs an
+    // unlocked vault: stop any that is running, so nothing installs or
+    // activates after the lock.
+    state.model_manager.cancel_downloads();
     let entry_count = state.repository.count_entries()?;
     {
         let mut session = state
@@ -1091,8 +1095,9 @@ async fn ensure_runtime_path(
     let progress = state.download_progress.clone();
     let progress_key = progress_id.map(str::to_string);
     let manager = state.model_manager.clone();
+    let epoch = manager.download_epoch();
     tauri::async_runtime::spawn_blocking(move || {
-        manager.ensure_runtime(&mut |downloaded, total_bytes| {
+        manager.ensure_runtime_at(epoch, &mut |downloaded, total_bytes| {
             if let Some(key) = &progress_key {
                 if let Ok(mut guard) = progress.lock() {
                     // Only ever update the slot while it still
@@ -1165,6 +1170,9 @@ pub async fn download_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    // Taken before the unlock check, so a lock that lands between the
+    // check and the first byte still cancels this download.
+    let epoch = state.model_manager.download_epoch();
     require_unlocked(&state)?;
     let descriptor = catalog_model(&model_id)
         .copied()
@@ -1197,7 +1205,7 @@ pub async fn download_model(
     let progress_id = model_id.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
-        manager.download(&descriptor, &mut |downloaded, total| {
+        manager.download_at(&descriptor, epoch, &mut |downloaded, total| {
             if let Ok(mut guard) = progress.lock() {
                 *guard = Some((progress_id.clone(), downloaded, total));
             }
@@ -1214,6 +1222,10 @@ pub async fn download_model(
             )));
         }
     }
+
+    // A lock that arrived as the download finished: the files are
+    // verified and stay, but nothing is loaded into chat while locked.
+    require_unlocked(&state)?;
 
     // Hot-load only when the downloaded model is the active one (first
     // install, or an update of the active model). Downloading a

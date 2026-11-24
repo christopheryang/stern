@@ -54,6 +54,41 @@ const LIST_VERBS: &[&str] = &["list", "show", "display", "all"];
 const DELETE_VERBS: &[&str] = &["delete", "remove", "destroy", "drop"];
 const UPDATE_VERBS: &[&str] = &["update", "change", "modify", "edit"];
 
+/// Polite lead-ins that carry no meaning of their own, longest first so
+/// "can you please" goes before "can you".
+const POLITE_LEADS: &[&str] = &[
+    "can you please",
+    "could you please",
+    "would you please",
+    "will you please",
+    "can you",
+    "could you",
+    "would you",
+    "will you",
+    "please",
+    "kindly",
+];
+
+/// The request without its polite lead-in: "please edit my note" is the
+/// same request as "edit my note", and every rule keys on the verb being
+/// first. Stripping repeats ("please, could you ..."). When nothing would
+/// be left, the text is kept as it was.
+fn strip_polite_lead(lower: &str) -> &str {
+    let mut rest = lower.trim_start();
+    loop {
+        let stripped = POLITE_LEADS.iter().find_map(|lead| {
+            let after = rest.strip_prefix(lead)?;
+            // Whole words only: "pleasant" does not start with "please".
+            (after.is_empty() || after.starts_with([' ', ',']))
+                .then(|| after.trim_start_matches([' ', ',']))
+        });
+        match stripped {
+            Some(after) if !after.is_empty() => rest = after,
+            _ => return rest,
+        }
+    }
+}
+
 #[must_use]
 pub fn classify_intent(text: &str) -> Intent {
     // Expand a sentence-initial question contraction, so "what's
@@ -67,7 +102,7 @@ pub fn classify_intent(text: &str) -> Intent {
     } else if raw_lower.starts_with("where's ") {
         raw_lower.replacen("where's", "where is", 1)
     } else {
-        raw_lower
+        strip_polite_lead(&raw_lower).to_string()
     };
     let words: Vec<&str> = lower.split_whitespace().collect();
     // The greeting/help checks compare whole words, so strip the
