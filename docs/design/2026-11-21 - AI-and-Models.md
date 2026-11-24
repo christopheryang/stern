@@ -35,11 +35,15 @@ Picking the first model is the first-run setup step.
 
 ## The model
 
-- **Catalog (ADR-0007):** the user picks among four pinned models —
-  SmolLM-135M int8 (~136 MB), SmolLM2-135M-Instruct q4f16 (~118 MB),
-  SmolLM2-360M-Instruct q4f16 (~273 MB), Qwen2.5-0.5B-Instruct q4f16
-  (~483 MB). Each entry carries a plain-language description of its
-  size/quality trade-off, shown in the picker.
+- **Catalog (ADR-0007, ADR-0010):** the user picks **Small**
+  (SmolLM2-135M-Instruct q4f16, ~118 MB) or **Large**
+  (Qwen2.5-0.5B-Instruct q4f16, ~483 MB); a Medium tier
+  (SmolLM2-360M-Instruct) was dropped in ADR-0014. The UI shows only the tier
+  name, its approximate size, and a plain-language description of the
+  speed/quality trade-off; the underlying model is never named. The
+  catalog's `display_name` *is* the tier. The base SmolLM-135M model
+  was retired; a device that still has it installed has it removed at
+  startup.
 - **Runtime:** ONNX Runtime via the `ort` crate, built with
   `load-dynamic` — the runtime is **not linked into the binary**
   (ADR-0008). `AiModel` dlopens the downloaded library once per
@@ -64,7 +68,7 @@ managed download:
   version, file name, download URL, **pinned SHA-256**, approximate
   size. The hash is authoritative; the size is for the UI's "~273 MB"
   labels.
-- The Settings view (opened from the gear button in the header — the
+- The Settings view (opened from the gear button in the top bar — the
   UI is a single chat view, no sidebar) holds a model picker in the
   style of Meetily's model manager: one row per catalog model with
   its description and size, a Download button, and — once installed —
@@ -168,4 +172,11 @@ currently huggingface.co; the runtime wheel from PyPI) are the
 clicks Download/Update, or selects a model on a device that still
 needs the runtime. No telemetry, no update checks, no remote
 configuration accompany them, and vault data is never transmitted.
+
+TLS certificates are verified against the **operating system's trust
+store** (ureq's `platform-verifier`), not a bundled root list, so
+downloads work behind corporate TLS-inspecting proxies whose root CA
+the machine already trusts. This does not weaken integrity: every
+downloaded file is checked against its pinned SHA-256 before use, so
+a tampered download is rejected whatever the transport trusted.
 

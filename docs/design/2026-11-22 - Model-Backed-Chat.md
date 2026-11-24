@@ -24,8 +24,9 @@ executes. Everything the user sees is a template.
 Storing a secret becomes a short interview when a request does not
 carry everything needed:
 
-1. "What is this secret for?" — a. username/password, b. short text,
-   c. document, d. credit card, e. contact info
+1. "What would you like to save?" — a. note, b. document,
+   c. username/password, d. credit card, e. contact info. A request
+   that names the kind ("save a note") skips this question.
 2. One question per field, in order (for a login: "What website is
    this username/password for?", then username, then password).
    Optional fields (a contact's email, address) can be skipped.
@@ -40,9 +41,9 @@ Kinds and their fields (the first field is the entry's name):
 
 | Kind | Fields (in ask order) |
 | --- | --- |
-| username/password (`login`) | website, username, password |
-| short text (`text`) | title, text |
+| note (`text`) | title, text |
 | document (`document`) | title, content |
+| username/password (`login`) | website, username, password |
 | credit card (`card`) | label, number, expiry, cvv |
 | contact info (`contact`) | name, phone, email (optional), address (optional) |
 
@@ -108,7 +109,11 @@ what makes the "what's my password for ...?" phrasing parse at all.
   greetings against the rule classifier; Qwen2.5-0.5B-Instruct 7
   with 3 deferrals and no misfires, at ~3 s per parse against ~1 s
   for the 135M models. Every message ends up handled correctly
-  across the model + guard + rules combination.
+  across the model + guard + rules combination. (These figures were
+  measured on the catalog as it stood then; SmolLM-135M has since been
+  retired and the tiers are Small = SmolLM2-135M-Instruct and
+  Large = Qwen2.5-0.5B-Instruct — ADR-0010, ADR-0014; a Medium tier,
+  SmolLM2-360M-Instruct, existed briefly.)
 
 ## UI (slice 4, landed)
 
@@ -163,7 +168,7 @@ anything else:
 
 - **First run — setup screen.** Choose a master password (typed
   twice; policy: 8+ characters with a lowercase letter, an
-  uppercase letter, a number, and a symbol — enforced here and
+  uppercase letter, a number, and a symbol (a space is not one) — enforced here and
   in the chat gate). The screen itself is deliberately brief —
   labeled fields and one requirements line, the pattern
   Bitwarden and other open-source vaults use — and the
@@ -175,7 +180,7 @@ anything else:
   where a server account does.
 - **Every later launch — login screen.** The vault starts
   locked; the master password opens it (the existing failed-
-  attempt lockout applies). A Lock button in the header returns
+  attempt lockout applies). A Lock button in the top bar returns
   to this screen.
 - **Order.** The vault gate is outermost: Settings — and with
   it any model download — is unreachable until the vault is

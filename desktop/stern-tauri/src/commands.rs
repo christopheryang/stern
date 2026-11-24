@@ -2,7 +2,9 @@
 
 use crate::AppState;
 use std::sync::Arc;
-use stern_core::ai::model_manager::{catalog_model, current_runtime, ModelState, MODEL_CATALOG};
+use stern_core::ai::model_manager::{
+    catalog_model, current_runtime, ModelState, DEFAULT_MODEL_ID, MODEL_CATALOG,
+};
 use stern_core::ai::AiModel;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
@@ -409,7 +411,7 @@ fn handle_store_entry(
     drop(session);
 
     let entry_kind = match kind {
-        "note" | "document" => EntryKind::Note,
+        "note" | "text" | "document" => EntryKind::Note,
         _ => EntryKind::Login,
     };
 
@@ -652,6 +654,69 @@ fn handle_reveal_entry(
     answer_entry(state, entry, &kek, field)
 }
 
+/// Write `data` into a freshly created export file at `path`.
+///
+/// If the write or flush fails, the partial file is removed rather than
+/// left behind, and the error says nothing about the OS or the path.
+fn fill_export_file<W: std::io::Write>(
+    mut file: W,
+    path: &std::path::Path,
+    data: &[u8],
+) -> Result<(), VaultError> {
+    if let Err(e) = file.write_all(data).and_then(|()| file.flush()) {
+        drop(file);
+        drop(std::fs::remove_file(path));
+        tracing::warn!("export write failed: {e}");
+        return Err(VaultError::Io(
+            "Couldn't write the export file.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Write an export next to the vault without ever replacing a file.
+///
+/// The name carries the time (`stern-export-YYYYMMDD-HHMMSS.json`);
+/// a clash adds `-2`, `-3`, and so on. The file is created owner-only
+/// on Unix, since it holds the key that opens it.
+fn write_new_export_file(
+    dir: &std::path::Path,
+    data: &[u8],
+) -> Result<std::path::PathBuf, VaultError> {
+    let stamp = chrono::Utc::now().format("%Y%m%d-%H%M%S");
+    for attempt in 1u32..=1000 {
+        let name = if attempt == 1 {
+            format!("stern-export-{stamp}.json")
+        } else {
+            format!("stern-export-{stamp}-{attempt}.json")
+        };
+        let path = dir.join(name);
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        match options.open(&path) {
+            Ok(file) => {
+                fill_export_file(file, &path, data)?;
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => {
+                tracing::warn!("export file could not be created: {e}");
+                return Err(VaultError::Io(
+                    "Couldn't create the export file.".to_string(),
+                ));
+            }
+        }
+    }
+    Err(VaultError::Io(
+        "Couldn't find a free export file name.".to_string(),
+    ))
+}
+
 #[tauri::command]
 
 pub async fn export_vault(
@@ -713,21 +778,70 @@ pub async fn export_vault(
         updated_at: chrono::Utc::now(),
     };
 
-    let export_path = state
-        .db_path
-        .parent()
-        .unwrap_or(&state.db_path)
-        .join("stern-export.json");
-
     let export_json = serde_json::to_vec_pretty(&(&salt, &*secret_key, &export_file))
         .map_err(|e| VaultError::Serialization(e.to_string()))?;
 
-    std::fs::write(&export_path, &export_json).map_err(|e| VaultError::Io(e.to_string()))?;
+    let export_dir = state.db_path.parent().unwrap_or(&state.db_path);
+    let export_path = write_new_export_file(export_dir, &export_json)?;
 
     Ok(ExportResponse {
         path: export_path.to_string_lossy().to_string(),
         entry_count: plaintext_entries.len(),
     })
+}
+
+/// The largest export file an import will read. A vault export is
+/// JSON text, so anything near this size is not one of ours.
+const MAX_IMPORT_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read an export file for import, after checking it is what it should
+/// be: a regular `.json` file (symlinks resolved first) of sane size.
+/// Error text never includes the path or an OS error, which may name
+/// the user.
+fn read_export_file(path: &std::path::Path) -> Result<Vec<u8>, VaultError> {
+    read_export_file_limited(path, MAX_IMPORT_BYTES)
+}
+
+/// [`read_export_file`] with the size limit as a parameter.
+///
+/// The file is opened once and every later check uses that handle, so
+/// it cannot be swapped between the check and the read; the read itself
+/// is capped, so a file that grows after the check still cannot exhaust
+/// memory.
+fn read_export_file_limited(path: &std::path::Path, limit: u64) -> Result<Vec<u8>, VaultError> {
+    use std::io::Read;
+
+    let io_error = |what: &str, e: &std::io::Error| {
+        tracing::warn!("import {what} failed: {e}");
+        VaultError::Io("Couldn't read the import file.".to_string())
+    };
+    let resolved = path
+        .canonicalize()
+        .map_err(|_| VaultError::Io("Import file not found.".to_string()))?;
+    if !resolved
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    {
+        return Err(VaultError::Io(
+            "Import file must be a .json file.".to_string(),
+        ));
+    }
+    let file = std::fs::File::open(&resolved).map_err(|e| io_error("open", &e))?;
+    let meta = file.metadata().map_err(|e| io_error("stat", &e))?;
+    if !meta.is_file() {
+        return Err(VaultError::Io("Import path is not a file.".to_string()));
+    }
+    if meta.len() > limit {
+        return Err(VaultError::Io("Import file is too large.".to_string()));
+    }
+    let mut data = Vec::new();
+    file.take(limit.saturating_add(1))
+        .read_to_end(&mut data)
+        .map_err(|e| io_error("read", &e))?;
+    if u64::try_from(data.len()).unwrap_or(u64::MAX) > limit {
+        return Err(VaultError::Io("Import file is too large.".to_string()));
+    }
+    Ok(data)
 }
 
 #[tauri::command]
@@ -746,24 +860,7 @@ pub async fn import_vault(
     let kek = Zeroizing::new(*session.kek()?);
     drop(session);
 
-    let path = std::path::PathBuf::from(&request.path);
-    if !path.exists() {
-        return Err(VaultError::Io(format!(
-            "Import file not found: {}",
-            request.path
-        )));
-    }
-    if !path
-        .extension()
-        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-    {
-        return Err(VaultError::Io(format!(
-            "Import file must be a .json file, got: {}",
-            request.path
-        )));
-    }
-
-    let data = std::fs::read(&path).map_err(|e| VaultError::Io(e.to_string()))?;
+    let data = read_export_file(std::path::Path::new(&request.path))?;
 
     let (salt, secret_key, export_file): (
         [u8; VAULT_SALT_LEN],
@@ -830,410 +927,7 @@ pub async fn import_vault(
 }
 
 #[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-mod tests {
-    use super::*;
-    use std::sync::{Arc, Mutex};
-    use std::time::Instant;
-    use stern_core::ai::chat::Action as CoreAction;
-    use stern_core::application::vault::session::VaultSession;
-    use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
-    use stern_core::infrastructure::keychain::OsKeychainProvider;
-    use stern_core::infrastructure::sqlite::repository::SqliteRepository;
-
-    #[test]
-    fn action_to_string_store_entry() {
-        let action = CoreAction::StoreEntry {
-            name: "test".into(),
-            kind: "login".into(),
-            fields: vec![],
-        };
-        assert_eq!(action_to_string(&action), "store");
-    }
-
-    #[test]
-    fn action_to_string_search_entry() {
-        let action = CoreAction::SearchEntry {
-            query: "foo".into(),
-            field: None,
-        };
-        assert_eq!(action_to_string(&action), "search");
-    }
-
-    #[test]
-    fn action_to_string_list_entries() {
-        let action = CoreAction::ListEntries {
-            category: Some("logins".into()),
-        };
-        assert_eq!(action_to_string(&action), "list");
-    }
-
-    #[test]
-    fn action_to_string_list_entries_no_category() {
-        let action = CoreAction::ListEntries { category: None };
-        assert_eq!(action_to_string(&action), "list");
-    }
-
-    #[test]
-    fn action_to_string_confirm_delete() {
-        let action = CoreAction::ConfirmDelete {
-            name: "my-entry".into(),
-        };
-        assert_eq!(action_to_string(&action), "delete");
-    }
-
-    #[test]
-    fn action_to_string_update_entry() {
-        let action = CoreAction::UpdateEntry {
-            name: "entry".into(),
-            fields: vec![("key".into(), "val".into())],
-        };
-        assert_eq!(action_to_string(&action), "update");
-    }
-
-    #[test]
-    fn action_to_string_export_vault() {
-        assert_eq!(action_to_string(&CoreAction::ExportVault), "export");
-    }
-
-    #[test]
-    fn action_to_string_import_vault() {
-        assert_eq!(action_to_string(&CoreAction::ImportVault), "import");
-    }
-
-    #[test]
-    fn action_to_string_create_vault() {
-        assert_eq!(action_to_string(&CoreAction::CreateVault), "create_vault");
-    }
-
-    #[test]
-    fn action_to_string_unlock_vault() {
-        assert_eq!(action_to_string(&CoreAction::UnlockVault), "unlock_vault");
-    }
-
-    #[test]
-    fn passthrough_response_with_action() {
-        let core_resp = stern_core::ai::chat::ChatResponse {
-            message: "hello".into(),
-            action: Some(CoreAction::ExportVault),
-            user_message_display: Some("display me".into()),
-            options: Vec::new(),
-            input_sensitive: false,
-        };
-        let ipc_resp = passthrough_response(&core_resp);
-        assert_eq!(ipc_resp.message, "hello");
-        assert_eq!(ipc_resp.action.as_deref(), Some("export"));
-        assert_eq!(ipc_resp.user_message_display.as_deref(), Some("display me"));
-    }
-
-    #[test]
-    fn passthrough_response_without_action() {
-        let core_resp = stern_core::ai::chat::ChatResponse {
-            message: "no action".into(),
-            action: None,
-            user_message_display: None,
-            options: Vec::new(),
-            input_sensitive: false,
-        };
-        let ipc_resp = passthrough_response(&core_resp);
-        assert_eq!(ipc_resp.message, "no action");
-        assert!(ipc_resp.action.is_none());
-        assert!(ipc_resp.user_message_display.is_none());
-    }
-
-    #[test]
-    fn passthrough_response_all_action_variants() {
-        let variants: Vec<CoreAction> = vec![
-            CoreAction::StoreEntry {
-                name: "n".into(),
-                kind: "login".into(),
-                fields: vec![],
-            },
-            CoreAction::SearchEntry {
-                query: "q".into(),
-                field: None,
-            },
-            CoreAction::RevealEntry {
-                entry_id: "id".into(),
-                field: None,
-            },
-            CoreAction::ListEntries { category: None },
-            CoreAction::ConfirmDelete { name: "n".into() },
-            CoreAction::UpdateEntry {
-                name: "n".into(),
-                fields: vec![],
-            },
-            CoreAction::ExportVault,
-            CoreAction::ImportVault,
-            CoreAction::CreateVault,
-            CoreAction::UnlockVault,
-        ];
-
-        let expected = [
-            "store",
-            "search",
-            "reveal",
-            "list",
-            "delete",
-            "update",
-            "export",
-            "import",
-            "create_vault",
-            "unlock_vault",
-        ];
-
-        for (action, expected_str) in variants.into_iter().zip(expected.iter()) {
-            let core_resp = stern_core::ai::chat::ChatResponse {
-                message: "m".into(),
-                action: Some(action),
-                user_message_display: None,
-                options: Vec::new(),
-                input_sensitive: false,
-            };
-            let ipc_resp = passthrough_response(&core_resp);
-            assert_eq!(ipc_resp.action.as_deref(), Some(*expected_str));
-        }
-    }
-
-    fn unlock_test_session(state: &AppState) {
-        use stern_core::domain::vault::crypto_constants::{KEK_LEN, VERIFY_HASH_LEN};
-        let kek = [7u8; KEK_LEN];
-        let verify = [9u8; VERIFY_HASH_LEN];
-        state.session.lock().unwrap().unlock(kek, verify);
-    }
-
-    fn store_test_entry(state: &AppState, name: &str, password: &str) {
-        let fields = vec![
-            ("username".to_string(), "chris".to_string()),
-            ("password".to_string(), password.to_string()),
-        ];
-        let stored = handle_store_entry(state, name, "login", &fields, "stored").unwrap();
-        assert_eq!(stored.action.as_deref(), Some("store"));
-    }
-
-    #[test]
-    fn search_entry_answers_the_asked_field() {
-        let (state, _path) = make_test_app_state();
-        unlock_test_session(&state);
-        store_test_entry(&state, "Google", "hunter2");
-
-        let answer = handle_search_entry(&state, "google", Some("password")).unwrap();
-        assert!(
-            answer.message.contains("hunter2"),
-            "message: {}",
-            answer.message
-        );
-
-        let missing = handle_search_entry(&state, "nope", None).unwrap();
-        assert!(missing.message.contains("No secret found"));
-    }
-
-    #[test]
-    fn search_entry_with_two_matches_offers_a_choice_that_reveals() {
-        let (state, _path) = make_test_app_state();
-        unlock_test_session(&state);
-        store_test_entry(&state, "Google", "personal-pass");
-        store_test_entry(&state, "Google Work", "work-pass");
-
-        let response = handle_search_entry(&state, "google", Some("password")).unwrap();
-        assert_eq!(response.options.len(), 2);
-
-        let picked = state.chat_handler.process_message("b");
-        let entry_id = match picked.action {
-            Some(CoreAction::RevealEntry { entry_id, .. }) => entry_id,
-            other => panic!("expected RevealEntry, got: {other:?}"),
-        };
-        let answer = handle_reveal_entry(&state, &entry_id, Some("password")).unwrap();
-        assert!(
-            answer.message.contains("work-pass"),
-            "message: {}",
-            answer.message
-        );
-    }
-
-    #[test]
-    fn search_entry_while_locked_reports_locked() {
-        let (state, _path) = make_test_app_state();
-        let response = handle_search_entry(&state, "google", None).unwrap();
-        assert_eq!(response.action.as_deref(), Some("locked"));
-    }
-
-    fn make_test_app_state() -> (AppState, tempfile::TempPath) {
-        let tmp = tempfile::NamedTempFile::new().unwrap();
-        let path = tmp.into_temp_path();
-        let db_path = path.to_path_buf();
-        let repository = Arc::new(SqliteRepository::new(&db_path).unwrap());
-        let state = AppState {
-            session: Mutex::new(VaultSession::new()),
-            crypto: Arc::new(XChaCha20CryptoProvider::new()),
-            kdf: Arc::new(Argon2idKdfProvider::new()),
-            keychain: Arc::new(OsKeychainProvider::new()),
-            chat_handler: Arc::new(stern_core::ai::ChatHandler::new(None)),
-            model_manager: Arc::new(stern_core::ai::ModelManager::new(db_path.clone())),
-            download_progress: Arc::new(Mutex::new(None)),
-            db_path,
-            repository,
-            unlock_lockout: Mutex::new(None),
-        };
-        (state, path)
-    }
-
-    #[test]
-    fn lockout_initial_state_is_none() {
-        let (state, _path) = make_test_app_state();
-        let lockout = state.unlock_lockout.lock().unwrap();
-        assert!(lockout.is_none());
-    }
-
-    #[test]
-    fn lockout_increments_on_failed_attempt() {
-        let (state, _path) = make_test_app_state();
-        {
-            let mut lockout = state.unlock_lockout.lock().unwrap();
-            let entry = lockout.get_or_insert((0, Instant::now()));
-            entry.0 += 1;
-            entry.1 = Instant::now();
-        }
-        let lockout = state.unlock_lockout.lock().unwrap();
-        let (count, _) = lockout.unwrap();
-        assert_eq!(count, 1);
-    }
-
-    #[test]
-    fn lockout_blocks_after_max_attempts() {
-        let (state, _path) = make_test_app_state();
-        {
-            let mut lockout = state.unlock_lockout.lock().unwrap();
-            *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
-        }
-
-        let lockout = state.unlock_lockout.lock().unwrap();
-        if let Some((count, last_attempt)) = *lockout {
-            assert!(count >= MAX_UNLOCK_ATTEMPTS);
-            let remaining = LOCKOUT_DURATION.checked_sub(last_attempt.elapsed());
-            assert!(remaining.is_some(), "should still be in lockout window");
-        } else {
-            panic!("lockout should be set");
-        }
-    }
-
-    #[test]
-    fn lockout_resets_on_success() {
-        let (state, _path) = make_test_app_state();
-        {
-            let mut lockout = state.unlock_lockout.lock().unwrap();
-            *lockout = Some((MAX_UNLOCK_ATTEMPTS, Instant::now()));
-        }
-        {
-            let mut lockout = state.unlock_lockout.lock().unwrap();
-            *lockout = None;
-        }
-        let lockout = state.unlock_lockout.lock().unwrap();
-        assert!(lockout.is_none());
-    }
-
-    #[test]
-    fn lockout_clears_after_duration_expires() {
-        let (state, _path) = make_test_app_state();
-        {
-            let mut lockout = state.unlock_lockout.lock().unwrap();
-            let expired_time = Instant::now() - LOCKOUT_DURATION - Duration::from_secs(1);
-            *lockout = Some((MAX_UNLOCK_ATTEMPTS, expired_time));
-        }
-
-        let lockout = state.unlock_lockout.lock().unwrap();
-        if let Some((count, last_attempt)) = *lockout {
-            if count >= MAX_UNLOCK_ATTEMPTS {
-                let remaining = LOCKOUT_DURATION.checked_sub(last_attempt.elapsed());
-                if remaining.is_some() {
-                    panic!("lockout should have expired");
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn lockout_counter_accumulates_across_attempts() {
-        let (state, _path) = make_test_app_state();
-        for i in 1..=MAX_UNLOCK_ATTEMPTS {
-            let mut lockout = state.unlock_lockout.lock().unwrap();
-            let entry = lockout.get_or_insert((0, Instant::now()));
-            entry.0 += 1;
-            entry.1 = Instant::now();
-            let (count, _) = lockout.unwrap();
-            assert_eq!(count, i);
-        }
-    }
-
-    #[test]
-    fn app_state_components_are_initialized() {
-        let (state, _path) = make_test_app_state();
-        assert!(!state.session.lock().unwrap().is_unlocked);
-        assert!(state.unlock_lockout.lock().unwrap().is_none());
-    }
-
-    /// Drive one chat message the way `send_chat_message` does:
-    /// sync the vault state, process, execute the action.
-    fn chat(state: &AppState, text: &str) -> ChatResponse {
-        let exists = state.repository.vault_exists().unwrap();
-        let unlocked = state.session.lock().unwrap().is_unlocked;
-        state.chat_handler.set_vault_state(exists, unlocked);
-        let response = state.chat_handler.process_message(text);
-        execute_chat_response(state, response).unwrap()
-    }
-
-    #[test]
-    fn chat_sets_up_the_vault_before_the_first_store() {
-        let (state, _path) = make_test_app_state();
-
-        let gate = chat(&state, "store");
-        assert!(gate.input_sensitive, "message: {}", gate.message);
-        assert!(gate.message.contains("set up your vault"));
-        assert!(!state.repository.vault_exists().unwrap());
-
-        let confirm = chat(&state, "Correct-Horse-9!");
-        assert!(confirm.input_sensitive);
-
-        // Setup completes and the interrupted store resumes at
-        // the kind question.
-        let resumed = chat(&state, "Correct-Horse-9!");
-        assert!(state.repository.vault_exists().unwrap());
-        assert!(state.session.lock().unwrap().is_unlocked);
-        assert_eq!(resumed.options.len(), 5, "message: {}", resumed.message);
-
-        chat(&state, "a");
-        chat(&state, "Google");
-        chat(&state, "chris");
-        let saved = chat(&state, "hunter2");
-        assert!(saved.message.contains("Save this"));
-        let done = chat(&state, "yes");
-        assert_eq!(done.action.as_deref(), Some("store"));
-        assert_eq!(state.repository.count_entries().unwrap(), 1);
-    }
-
-    #[test]
-    fn chat_unlocks_a_locked_vault_and_replays_the_question() {
-        let (state, _path) = make_test_app_state();
-        create_vault_inner(&state, "correct horse battery").unwrap();
-        store_test_entry(&state, "Google", "hunter2");
-        state.session.lock().unwrap().lock();
-
-        let prompt = chat(&state, "what's my password for google?");
-        assert!(prompt.input_sensitive, "message: {}", prompt.message);
-        assert!(prompt.message.contains("locked"));
-
-        let wrong = chat(&state, "not the password");
-        assert!(wrong.input_sensitive, "message: {}", wrong.message);
-        assert!(!state.session.lock().unwrap().is_unlocked);
-
-        let answer = chat(&state, "correct horse battery");
-        assert!(
-            answer.message.contains("hunter2"),
-            "the replayed question should be answered: {}",
-            answer.message
-        );
-    }
-}
+mod tests;
 
 // ---------------------------------------------------------------------------
 // AI model management: models are downloaded after install, never bundled.
@@ -1267,6 +961,9 @@ fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
                 model_id: descriptor.id.to_string(),
                 display_name: descriptor.display_name.to_string(),
                 description: descriptor.description.to_string(),
+                pros: descriptor.pros.iter().map(|p| (*p).to_string()).collect(),
+                cons: descriptor.cons.iter().map(|c| (*c).to_string()).collect(),
+                recommended: descriptor.id == DEFAULT_MODEL_ID,
                 state: state_str.to_string(),
                 installed_version,
                 latest_version: descriptor.version.to_string(),

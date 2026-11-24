@@ -34,6 +34,14 @@ network. Nothing is kept from a failed attempt — partial files are
 deleted automatically — so just retry from the picker when the
 network allows. No other part of the app is affected.
 
+If the error mentions `invalid peer certificate: UnknownIssuer`, a
+TLS-inspecting proxy (Zscaler, for example) is re-signing the
+connection. Stern verifies certificates against the operating
+system's trust store, so the proxy's root CA must be installed there
+(on a managed Mac it normally already is — check Keychain Access →
+System). If it is, rebuild with the current version; builds before
+0.3.1 used a bundled root list and rejected the proxy's certificate.
+
 ### "Model integrity check failed"
 
 The downloaded bytes do not match the SHA-256 pinned in the catalog.
@@ -65,10 +73,41 @@ without the password and the device Secret Key the vault cannot be
 opened, by anyone. The only way forward is a reset (below), which
 destroys the vault's contents.
 
+### Unlocking takes several seconds
+
+Unlocking runs a deliberately slow password hash and should take about
+a third of a second in a release build. Several seconds means an
+unoptimized build of the hashing crates: a dev build from before the
+`[profile.dev.package.argon2]` override in the root `Cargo.toml`, or a
+custom profile that dropped it. Rebuild from a current checkout. Do not
+lower the KDF parameters to make it faster.
+
 ### Unlocking is temporarily refused
 
 Repeated failed attempts trigger a lockout. Wait for it to expire
 and retry; do not delete anything.
+
+The lockout counter lives in memory only, so quitting and reopening
+Stern resets it. This is a known limit of a local app: someone who
+can copy `stern.db` can guess offline and never needs the app at all.
+What protects the vault in that case is the Argon2id key derivation
+and the secret key (ADR-0003), not the lockout.
+
+## Export files
+
+Exports are written next to the vault as
+`stern-export-YYYYMMDD-HHMMSS.json`. An export never replaces an
+existing file (a clash gets `-2`, `-3`, ...), and on macOS and Linux
+it is readable by its owner only. The file holds the key that opens
+it, protected by the export password, so keep it somewhere safe.
+
+An import accepts only a regular `.json` file of up to 64 MB; the path
+is resolved first and error messages never repeat it.
+
+**Format change:** export files hold the vault salt, the secret key,
+and the encrypted entries. Files written by older builds hold only the
+salt and the entries and cannot be imported; open that vault in the
+current build and export it again.
 
 ## Reset to first-run state
 

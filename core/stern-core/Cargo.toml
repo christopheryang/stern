@@ -45,7 +45,9 @@ ort = { version = "=2.0.0-rc.15", default-features = false, features = ["std", "
 # SHA-256 was verified first); flate2 supplies just the deflate codec.
 flate2 = "1"
 tokenizers = "0.22"
-ureq = "3"
+# platform-verifier: trust the OS certificate store, so downloads work behind
+# corporate TLS-inspecting proxies whose root CA is installed on the machine.
+ureq = { version = "3", features = ["platform-verifier"] }
 ndarray = "0.17"
 data-encoding = "2"
 

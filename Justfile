@@ -21,6 +21,7 @@ test-core:
 
 test-desktop:
     cargo test --manifest-path desktop/stern-tauri/Cargo.toml
+    cargo test --manifest-path desktop/stern-ui/Cargo.toml
 
 test: test-core test-desktop
 

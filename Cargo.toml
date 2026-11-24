@@ -9,7 +9,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.8.2"
 license = "MIT"
 
 [workspace.lints.clippy]
@@ -39,3 +39,13 @@ unused_must_use   = "deny"
 unused_imports    = "deny"
 unused_variables  = "deny"
 dead_code         = "deny"
+
+# Dev builds compile dependencies without optimization, which makes the
+# deliberately slow Argon2id key derivation (256 MB, 3 passes) take ~5 s per
+# unlock instead of ~0.3 s. Optimize just the hashing crates; this changes
+# speed only, never the KDF parameters (ADR-0003), and release is unaffected.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3

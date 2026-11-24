@@ -22,6 +22,9 @@ desktop/
   stern-app/      Leptos CSR entry point (Trunk serves this on :1420)
   stern-ui/       Leptos component library (depends on nothing internal
                   except via the Tauri JS bridge — see Gotchas)
+tools/
+  screenshots/    Regenerates the User's Guide screenshots (docs/guide/)
+                  from the built frontend; see docs/Development.md
 mobile/           Planned; does not exist yet
 ```
 
@@ -78,6 +81,11 @@ full rules are in `.agents/skills/repo-skills.md`. In short:
   `tauri::async_runtime::spawn_blocking`, with progress kept in `AppState`
   for the frontend to poll — there is no event bus.
 - **Tests** live in per-crate `tests/` directories, not in `src/`.
+  Where a test needs private items (as the Tauri command tests do),
+  keep it in a `tests/` directory under the module
+  (`src/commands/tests/mod.rs`) rather than inline: CodeQL ignores
+  `**/tests/**`, and fixture passwords in an inline `mod tests` are
+  reported as critical hard-coded credentials.
 - **App data** for manual debugging: the platform app-data dir for
   `com.stern.app` (macOS: `~/Library/Application Support/com.stern.app/`).
   The vault is `stern.db`; downloaded AI models and the ONNX Runtime
@@ -154,15 +162,6 @@ run the ignored network smoke test:
 - `codeql.yml` — CodeQL code scanning (actions + rust) on pushes and
   pull requests to main plus a weekly schedule; findings land in the
   repo's Security tab.
-- `pr-agent.yml` — PR-Agent (open source) AI code review on new pull
-  requests, plus /review, /improve, /ask, and /describe in PR
-  comments; needs the OPENAI_KEY repository secret. Slash commands
-  run only on pull requests, only when the comment starts with one of
-  the four commands, and only for the owner/members/collaborators.
-  Automatic runs skip fork PRs (they never receive the secret); a
-  maintainer slash command on a fork PR does run, from the default
-  branch, with PR-Agent reading the diff via the API — no fork code
-  is checked out or executed.
 - `.github/dependabot.yml` — Dependabot opens weekly update PRs for
   Cargo dependencies and GitHub Actions (minor/patch batched,
   `chore(deps)` commit prefix so the commit-message gate passes).

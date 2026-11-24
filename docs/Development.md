@@ -31,6 +31,14 @@ the app window against it. Frontend changes hot-reload; Rust changes
 rebuild and relaunch. First launch takes minutes (full dependency
 build); later launches are incremental.
 
+Dev builds are unoptimized, except the `argon2` and `blake2` crates,
+which the root `Cargo.toml` compiles with `opt-level = 3`
+(`[profile.dev.package.*]`). Without that, the vault's Argon2id key
+derivation (256 MB, 3 passes) takes about 5 s per unlock instead of
+about 0.3 s. It changes speed only — the KDF parameters
+([ADR-0003](adr/0003-Key-Hierarchy-2SKD.md)) are untouched, and release
+builds are unaffected.
+
 To work on the frontend alone in a browser, `cd desktop/stern-app &&
 trunk serve --port 1420` — note the UI expects the Tauri bridge
 (`window.__TAURI__`), so vault/chat actions fail outside the app shell;
@@ -40,22 +48,34 @@ it is useful for layout work only.
 
 1. Fresh state: delete the app data dir (`com.stern.app` — macOS:
    `~/Library/Application Support/com.stern.app/`).
-2. `just dev` — the setup screen creates the vault (master password).
-   Quit and relaunch: the login screen now asks for it before anything
+2. `just dev` — the setup screen creates the vault: the checklist
+   ticks as you type, Continue is refused until the disclaimer box is
+   ticked, and a "Don't lose your password" step follows. Quit and
+   relaunch: the login screen now asks for the password before anything
    else.
-3. Store an entry in chat (step 4); lock (the header Lock button) and
+3. Store an entry in chat (step 4); lock (the top bar's Lock button) and
    unlock; ask for the entry and confirm it decrypts. Copy a secret
    and confirm the clipboard auto-clears.
-4. Chat: "show all passwords", "what's my password for <service>?",
-   "save my GitHub password" (a named store files immediately; a bare
-   "store" runs the guided conversation — secret fields use the
+   Open Help (the question mark) and the Disclaimer from the setup
+   screen, the login screen, and the chat: Back must return to where
+   you were, with anything typed still there. Break the network and
+   try a download: the message should be one plain sentence, with the
+   technical text as small print beneath it. Any other error should show
+   the plain sentence alone.
+   Check both themes (Settings → Look; light is the default, and the choice survives a restart) and a short
+   window (resize to the 400 px minimum height): nothing should clip
+   or overflow, and the setup screen's requirements checklist should
+   tick green as you type.
+4. Chat: "save a note" (goes straight to the note questions), "find my
+   <note title>", "save my GitHub password" (a named store files
+   immediately; a bare "store" runs the guided conversation, notes first — secret fields use the
    peek-mask input and never appear in the transcript).
-5. Settings (gear) → model picker: Download → progress → installed.
+5. First-run screen and Settings (gear) → AI model picker (Small / Large, each with pros and cons; Small is Recommended): Download → progress → installed.
    Remove → the picker shows it gone and chat still answers via rules.
 6. Model update drill: bump the catalog `version` string in
    `core/stern-core/src/ai/model_manager.rs` locally, restart — the
    picker offers an update; downloading swaps versions and prunes the
-   old directory under `models/smollm-135m/`.
+   old directory under `models/<model-id>/`.
 
 ## Testing
 
@@ -88,6 +108,24 @@ precedent in the codebase rather than broad suppressions. Note that
 clippy's `--all-targets` is *not* part of the gate: the older test
 files predate the pedantic set. New test files should still be
 clippy-clean (run `cargo clippy -p <crate> --test <name> -- -D warnings`).
+
+## Regenerating the User's Guide screenshots
+
+The screenshots in [guide/](guide/User-Guide.md) are generated, not
+hand-drawn, so they can be redone whenever a screen changes:
+
+```bash
+tools/screenshots/capture.sh
+```
+
+It builds the frontend, serves a copy with
+`tools/screenshots/capture-stub.js` standing in for the Tauri bridge
+(no vault, model or network is involved), and takes 900x700 shots, the
+real window size, with headless Chrome (`CHROME=...` overrides the
+macOS path; Node 22+ is needed). The stub replays the real replies of
+the chat handler, so when chat wording changes, update the stub's
+replies too. Look at every image before committing; the file names are
+`User-Guide - <Image name>.png` and the guide links to them by name.
 
 ## Packaging
 

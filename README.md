@@ -4,6 +4,8 @@ A local-first, AI-powered secrets manager. Everything stays encrypted on your de
 
 Built with Rust + Tauri v2 + Leptos (WASM). Chat with Stern in natural language to store, retrieve, and manage your secrets and documents.
 
+**New to Stern? Read the [User's Guide](docs/guide/User-Guide.md)** — a step-by-step walkthrough with screenshots, from creating your password to saving and finding your first note.
+
 ## Architecture
 
 ```
@@ -15,9 +17,11 @@ Stern/
 ├── desktop/                      # Desktop client (macOS/Windows)
 │   ├── stern-tauri/              # Tauri v2 shell, commands, plugins
 │   ├── stern-app/                # Leptos CSR frontend (WASM)
-│   └── stern-ui/                 # Leptos component library
+│   └── stern-ui/                 # Leptos component library, stylesheet, brand assets
 │
 ├── mobile/                       # Mobile client (Android/iOS) — planned
+│
+├── tools/screenshots/            # Regenerates the User's Guide screenshots
 │
 └── Cargo.toml                    # Workspace root
 ```
@@ -40,7 +44,7 @@ Stern/
 
 Stern's chat is powered by a local text generation model (downloaded after install — see below). The model only *parses*: it turns a message into a structured intent, and deterministic code does everything else — the model never writes a reply you see. When a request is missing pieces, a guided conversation asks for them (kind first, then the fields it needs, then a masked confirmation):
 
-- **Store** — "save my GitHub password"
+- **Store** — "save a note", "save a document", "save my GitHub password" (notes and documents come first; naming the kind skips the kind question)
 - **Retrieve** — "what's my password for Gmail?"
 - **List** — "show all passwords"
 - **Update** — "change my Netflix password"
@@ -50,7 +54,7 @@ The model runs entirely on-device via ONNX Runtime. A rule-based classifier cove
 
 ### Model download & updates
 
-The model is **not bundled** with the app. After installation, Settings (the gear in the header) offers a choice of on-device models — SmolLM-135M (~136 MB), SmolLM2-135M-Instruct (~118 MB), SmolLM2-360M-Instruct (~273 MB), or Qwen2.5-0.5B-Instruct (~483 MB) — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active). Each model also downloads its tokenizer file, verified the same way, and the first download also fetches the ONNX Runtime library the model runs on.
+The model is **not bundled** with the app. After installation, Settings (the gear in the header) offers a choice of two on-device AI models — Small (~118 MB) or Large (~483 MB), each shown with its pros and cons — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active). Each model also downloads its tokenizer file, verified the same way, and the first download also fetches the ONNX Runtime library the model runs on.
 
 Because the model lives outside the app bundle, it can evolve independently: when a new Stern build ships with a newer catalog version, the app detects the difference and offers an in-place update. The new file is downloaded and verified first and only then swapped in, so a failed download never breaks a working install. You can keep several models installed, switch between them, or remove them at any time from the Settings picker.
 
@@ -102,19 +106,25 @@ just build
 ### Test-drive the app
 
 1. `just dev` opens the Stern window.
-2. On first run, the setup screen asks you to create a master password
-   (8+ characters, with a lowercase letter, an uppercase letter, a number,
-   and a symbol). There is no account and no username. Stern also
+2. On first run, the setup screen asks you to create a password
+   (8+ characters, with a small letter, a capital letter, a number, and a
+   symbol — a checklist ticks off as you type) and to tick a box agreeing
+   to the [disclaimer](docs/Disclaimer.md). A short "don't lose your
+   password" step follows. There is no account and no username. Stern also
    generates a device Secret Key; password + Secret Key together unlock the
    vault (see [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md)).
-3. On later launches, the login screen asks for the master password
-   before anything else is reachable. After unlocking, pick an AI model
-   in Settings (the gear, top right) — the first download also fetches
-   the ONNX Runtime — or skip it: chat already works via the built-in
-   rules.
+3. On later launches, the login screen asks for the password
+   before anything else is reachable. After unlocking, choose an AI model
+   (Small or Large) on the first-run screen or in Settings (the gear,
+   top right) — the first download also fetches the ONNX Runtime. The
+   sun/moon button in the top bar switches between light and dark on
+   any screen, including before you sign in. The help button (the
+   question mark) opens [plain-language help](docs/Help.md) at any
+   time, including before you unlock.
 4. In chat, try "show all passwords", "what's my password for Gmail?",
-   or "save my GitHub password". Storing runs as a short guided
-   conversation — kind first, then the fields it needs. Secret fields
+   or "save a note". Storing runs as a short guided
+   conversation — kind first (unless you named it), then the fields it
+   needs. Secret fields
    are typed into a peek-mask input (each character visible for
    2 seconds, then `*`) and never appear in the transcript.
 5. App data lives in the platform app-data folder for `com.stern.app`
@@ -134,11 +144,15 @@ configured yet, so local builds are unsigned.
 
 ## Documentation
 
+- [docs/guide/User-Guide.md](docs/guide/User-Guide.md) — the user's guide, with screenshots
 - [docs/](docs/README.md) — design documentation index
 - [docs/architecture/Architecture.md](docs/architecture/Architecture.md) — how the app is put together
 - [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md) — the vault cryptography in detail
 - [docs/design/2026-11-21%20-%20AI-and-Models.md](docs/design/2026-11-21%20-%20AI-and-Models.md) — chat, intent classification, and the downloadable model
 - [docs/design/2026-11-22%20-%20Model-Backed-Chat.md](docs/design/2026-11-22%20-%20Model-Backed-Chat.md) — model-backed chat: parsing, guided conversations, retrieval Q&A, the vault gate, and the auth front door
+- [docs/design/2026-11-23%20-%20UI-Redesign.md](docs/design/2026-11-23%20-%20UI-Redesign.md) — the frontend design system, screens, and brand
+- [docs/Help.md](docs/Help.md) — the in-app help page, in plain language
+- [docs/Disclaimer.md](docs/Disclaimer.md) — the in-app disclaimer and limit of liability
 - [docs/Development.md](docs/Development.md) — build, test, and release workflows in depth
 - [docs/adr/](docs/adr/README.md) — architecture decision records
 - [AGENTS.md](AGENTS.md) — instructions for AI coding agents working in this repo

@@ -8,4 +8,4 @@ open = false
 ws_protocol = "ws"
 
 [watch]
-paths = ["src", "index.html", "../stern-ui/src"]
+paths = ["src", "index.html", "../stern-ui/src", "../stern-ui/styles", "../stern-ui/assets", "../../docs/Help.md", "../../docs/Disclaimer.md"]

@@ -385,7 +385,7 @@ fn greeting_response() {
 fn help_response() {
     let resp = handler().process_message("help");
     assert!(
-        resp.message.contains("secrets"),
+        resp.message.contains("notes and documents"),
         "message: {}",
         resp.message
     );
@@ -571,9 +571,10 @@ fn guided_store_flow_collects_a_login_field_by_field() {
     let handler = ChatHandler::new(None);
     handler.set_vault_state(true, true);
     let first = handler.process_message("store");
-    assert_eq!(first.message, "What is this secret for?");
+    assert_eq!(first.message, "What would you like to save?");
     assert_eq!(first.options.len(), 5);
-    let second = handler.process_message("a");
+    assert_eq!(first.options[0], "note");
+    let second = handler.process_message("c");
     assert_eq!(
         second.message,
         "What website is this username/password for?"
@@ -657,7 +658,7 @@ fn greeting_how_are_you() {
     let handler = ChatHandler::new(None);
     let response = handler.process_message("how are you?");
     assert!(
-        response.message.contains("store a secret"),
+        response.message.contains("save a note"),
         "message: {}",
         response.message
     );
@@ -681,7 +682,7 @@ fn sensitive_field_prompts_are_flagged() {
     handler.set_vault_state(true, true);
     let kind = handler.process_message("store");
     assert!(!kind.input_sensitive);
-    let _ = handler.process_message("a");
+    let _ = handler.process_message("c");
     let _ = handler.process_message("Google");
     let password_prompt = handler.process_message("chris");
     assert!(
@@ -887,4 +888,105 @@ fn action_debug_redacts_secrets() {
         !rendered.contains("Correct-Horse-9!"),
         "debug leaked the master password: {rendered}"
     );
+}
+
+#[test]
+fn saving_a_named_kind_goes_straight_to_its_questions() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let first = handler.process_message("save a note");
+    assert_eq!(first.message, "What should I call this note?");
+    assert!(first.options.is_empty());
+    assert!(!first.input_sensitive);
+    let text_prompt = handler.process_message("Shopping list");
+    // The note's text is the secret field: its prompt is masked.
+    assert!(
+        text_prompt.input_sensitive,
+        "message: {}",
+        text_prompt.message
+    );
+}
+
+#[test]
+fn chat_suggestions_lead_with_notes_not_passwords() {
+    let handler = ChatHandler::new(None);
+    let help = handler.process_message("can you help").message;
+    assert!(help.contains("Save a note"), "help: {help}");
+    let note_at = help.find("Save a note").unwrap();
+    assert!(
+        help.find("password").is_none_or(|p| p > note_at),
+        "help: {help}"
+    );
+    let unknown = handler.process_message("zxqv blorp").message;
+    assert!(unknown.contains("save a note"), "unknown: {unknown}");
+    assert!(!unknown.contains("GitHub"), "unknown: {unknown}");
+}
+
+#[test]
+fn a_saved_secret_is_never_echoed_back_in_the_reply() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let _ = handler.process_message("save a note");
+    let _ = handler.process_message("Groceries");
+    let _ = handler.process_message("secret-note-text-123");
+    let done = handler.process_message("yes");
+    assert!(matches!(done.action, Some(Action::StoreEntry { .. })));
+    assert!(
+        !done.message.contains("secret-note-text-123"),
+        "{}",
+        done.message
+    );
+    assert!(
+        done.message.contains("Saved your note \"Groceries\""),
+        "{}",
+        done.message
+    );
+
+    let _ = handler.process_message("save a password");
+    let _ = handler.process_message("GitHub");
+    let _ = handler.process_message("chris");
+    let _ = handler.process_message("hunter2-secret");
+    let done = handler.process_message("yes");
+    assert!(!done.message.contains("hunter2-secret"), "{}", done.message);
+    assert!(done.message.contains("username: chris"), "{}", done.message);
+    assert!(done.message.contains("password: ••••"), "{}", done.message);
+}
+
+#[test]
+fn unknown_fields_and_unknown_kinds_are_masked_by_default() {
+    use stern_core::ai::conversation::{is_sensitive_field, kind_word};
+    assert!(is_sensitive_field("password", "password"));
+    assert!(!is_sensitive_field("password", "username"));
+    assert!(is_sensitive_field("password", "mystery"));
+    assert!(is_sensitive_field("biometric", "anything"));
+    assert!(is_sensitive_field("note", "text"));
+    assert_eq!(kind_word("text"), "note");
+    assert_eq!(kind_word("api key"), "password");
+    assert_eq!(kind_word("biometric"), "biometric");
+}
+
+#[test]
+fn the_setup_gate_does_not_accept_a_space_as_a_symbol() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(false, false);
+    let _ = handler.process_message("store");
+
+    let spaces_only = handler.process_message("Correct horse 9");
+    assert!(spaces_only.input_sensitive);
+    assert!(
+        spaces_only.message.contains("a symbol"),
+        "{}",
+        spaces_only.message
+    );
+
+    let ok = handler.process_message("Correct horse 9!");
+    assert!(!ok.message.contains("still needs"), "{}", ok.message);
+}
+
+#[test]
+fn the_greeting_speaks_plainly_about_notes_and_documents() {
+    let handler = ChatHandler::new(None);
+    let reply = handler.process_message("how are you?").message;
+    assert!(reply.contains("notes and documents"), "{reply}");
+    assert!(!reply.contains("secrets manager"), "{reply}");
 }

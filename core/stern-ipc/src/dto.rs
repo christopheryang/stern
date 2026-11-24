@@ -107,12 +107,21 @@ pub struct ImportResponse {
 }
 
 /// Status of the downloadable AI model, as reported to the frontend.
+// Plain wire flags that the UI reads one by one; grouping them would
+// only add a nested object to the JSON.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelStatusDto {
     pub model_id: String,
     pub display_name: String,
     /// Plain-language guidance: what the model is good at, what it costs.
     pub description: String,
+    /// What the user gains by choosing this model, in plain words.
+    pub pros: Vec<String>,
+    /// What the user gives up by choosing this model, in plain words.
+    pub cons: Vec<String>,
+    /// The one Stern suggests to someone who is not sure.
+    pub recommended: bool,
     /// One of `not_installed`, `installed`, `update_available`.
     pub state: String,
     pub installed_version: Option<String>,

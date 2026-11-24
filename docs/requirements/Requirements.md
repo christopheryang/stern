@@ -20,6 +20,10 @@ and an ADR disagree, the ADR wins.
   at a prompt flagged sensitive — the input peek-masks, the value is
   never echoed in a response or shown in the transcript, and the
   model never writes the replies (it only parses, on-device).
+- **Notes first.** Stern is mainly for notes and documents, so they
+  lead every prompt, and the app advises keeping anything that must
+  last forever as a plain text file on the user's own computer
+  ([ADR-0012](../adr/0012-Notes-First-And-Plain-Text-Advice.md)).
 - **Destructive actions need confirmation.** Deleting a secret
   requires an explicit confirmation in the UI, whichever classifier
   produced the intent.
@@ -46,10 +50,12 @@ and an ADR disagree, the ADR wins.
 - **Never bundled.** Models are downloaded after install, only when
   the user explicitly starts a download
   ([ADR-0006](../adr/0006-Post-Install-Model-Download.md)).
-- **User's choice.** The user picks from the catalog, may install
-  several models, selects which one is active, and can update or
-  remove any of them
-  ([ADR-0007](../adr/0007-User-Selectable-Models.md)).
+- **User's choice, by tier.** The user picks an AI model as Small or
+  Large — never by model name — with its pros and cons shown in plain
+  words ([ADR-0014](../adr/0014-Two-Model-Tiers-With-Pros-And-Cons.md)); may install several sizes, selects
+  which one is active, and can update or remove any of them
+  ([ADR-0007](../adr/0007-User-Selectable-Models.md),
+  [ADR-0010](../adr/0010-Model-Size-Tiers.md)).
 - **Pinned integrity.** Every download is verified against a SHA-256
   pinned in the compiled-in catalog before use. No remote config and
   no unpinned downloads.

@@ -58,11 +58,16 @@ desktop/
   stern-app/                  Leptos CSR entry point; Trunk serves it in
                               dev (port 1420) and builds dist/ for release
   stern-ui/                   Leptos components (auth setup/login,
-                              chat, settings/model picker, app shell).
-                              Depends on no other
+                              chat, settings/model picker, app shell),
+                              styles/stern.css (the themed design
+                              system, ADR-0009), and assets/ (brand
+                              SVGs). Depends on no other
                               crate in the workspace — it talks to the
                               shell through window.__TAURI__.core.invoke
                               and mirrors the DTOs it needs locally.
+tools/
+  screenshots/                Regenerates the User's Guide screenshots
+                              (docs/guide/) from the built frontend
 ```
 
 ## Runtime structure
@@ -90,7 +95,7 @@ model gate and the chat become reachable — Settings included, so
 setup precedes any model download. Frontend → `unlock_vault` command
 → vault service derives keys from password + device Secret Key (see [2026-11-21 - Security.md](../design/2026-11-21%20-%20Security.md))
 → constant-time verify against `VaultMeta` → session holds the master
-key in `SecretMem`. Locking (the header Lock button, or app exit)
+key in `SecretMem`. Locking (the top bar's Lock button, or app exit)
 drops the session and zeroizes the keys.
 
 **Store / retrieve an entry.** Commands delegate to the vault service,

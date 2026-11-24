@@ -13,6 +13,8 @@
 //! no ONNX code at all). While a download runs, the card polls
 //! `model_status` for progress.
 
+use super::friendly::{friendly_error, FriendlyError};
+use super::ui::{ErrorAlert, Icon, IconKind};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -27,6 +29,12 @@ struct ModelStatus {
     model_id: String,
     display_name: String,
     description: String,
+    #[serde(default)]
+    pros: Vec<String>,
+    #[serde(default)]
+    cons: Vec<String>,
+    #[serde(default)]
+    recommended: bool,
     /// One of `not_installed`, `installed`, `update_available`.
     state: String,
     installed_version: Option<String>,
@@ -144,7 +152,7 @@ async fn poll_download_progress(
 #[allow(clippy::future_not_send)]
 async fn load_initial_status(
     set_models: WriteSignal<Vec<ModelStatus>>,
-    set_error: WriteSignal<Option<String>>,
+    set_error: WriteSignal<Option<FriendlyError>>,
     cancelled: ReadSignal<bool>,
 ) {
     match fetch_status().await {
@@ -166,7 +174,7 @@ async fn load_initial_status(
         }
         Err(e) => {
             if !cancelled.get_untracked() {
-                set_error.set(Some(e));
+                set_error.set(Some(friendly_error(&e)));
             }
         }
     }
@@ -187,15 +195,6 @@ fn megabytes(bytes: u64) -> u64 {
     bytes.checked_div(1_000_000).unwrap_or(0)
 }
 
-const CARD_STYLE: &str = "margin:16px 20px 0;padding:14px 16px;border:1px solid #2a2a4a;border-radius:10px;background:#16213e;";
-const TITLE_STYLE: &str = "font-size:14px;font-weight:600;color:#e6e6e6;";
-const TEXT_STYLE: &str = "font-size:13px;color:#a0a0b0;margin-top:4px;line-height:1.5;";
-const ROW_STYLE: &str = "padding:10px 0;border-top:1px solid #2a2a4a;";
-const ROW_NAME_STYLE: &str = "font-size:13px;font-weight:600;color:#e6e6e6;";
-const BADGE_STYLE: &str = "font-size:11px;color:#16213e;background:#7bd88f;border-radius:6px;padding:1px 6px;margin-left:8px;";
-const BUTTON_STYLE: &str = "padding:6px 14px;border:none;border-radius:8px;background:#e94560;color:white;font-size:13px;cursor:pointer;";
-const GHOST_BUTTON_STYLE: &str = "padding:6px 14px;border:1px solid #2a2a4a;border-radius:8px;background:transparent;color:#a0a0b0;font-size:13px;cursor:pointer;";
-
 #[component]
 fn ModelRow(
     status: ModelStatus,
@@ -205,51 +204,57 @@ fn ModelRow(
     on_remove: Callback<String>,
 ) -> impl IntoView {
     let id = status.model_id.clone();
-    let name_line = match status.installed_version.as_deref() {
-        Some(version) => format!(
-            "{} · v{version} · ~{} MB",
-            status.display_name,
-            megabytes(status.size_bytes)
-        ),
-        None => format!(
-            "{} · ~{} MB",
-            status.display_name,
-            megabytes(status.size_bytes)
-        ),
-    };
-    let update_note = (status.state == "update_available").then(|| {
-        format!(
-            "Update available: v{} → v{}",
-            status.installed_version.clone().unwrap_or_default(),
-            status.latest_version
-        )
-    });
+    let meta_line = format!("~{} MB", megabytes(status.size_bytes));
+    let update_note =
+        (status.state == "update_available").then(|| "A better version is ready.".to_string());
 
     let id_download = id.clone();
     let id_select = id.clone();
     let id_remove = id;
     let downloading = status.is_downloading;
     let pct = percent(status.downloaded_bytes, status.total_bytes);
-    let bar_width = format!(
-        "width:{pct}%;height:100%;background:#e94560;border-radius:4px;transition:width 0.3s;"
-    );
-    let progress_label = format!(
-        "Downloading — {} MB of {} MB ({}%)",
-        megabytes(status.downloaded_bytes),
-        megabytes(status.total_bytes),
-        pct,
-    );
+    let bar_width = format!("width:{pct}%");
+    let progress_label = format!("Downloading… {pct}%");
+
+    let row_class = if status.is_active {
+        "model-row model-row--active"
+    } else {
+        "model-row"
+    };
 
     view! {
-        <div style=ROW_STYLE>
-            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
-                <div style="flex:1;min-width:0;">
-                    <span style=ROW_NAME_STYLE>{name_line}</span>
-                    {status.is_active.then(|| view! { <span style=BADGE_STYLE>"Active"</span> })}
-                    <div style=TEXT_STYLE>{status.description.clone()}</div>
-                    {update_note.map(|note| view! { <div style="font-size:12px;color:#7bd88f;margin-top:2px;">{note}</div> })}
+        <div class=row_class>
+            <div class="model-top">
+                <div class="model-info">
+                    <div class="model-name">
+                        {status.display_name.clone()}
+                        {status.is_active.then(|| view! {
+                            <span class="tag">
+                                <Icon kind=IconKind::Check class="icon-sm" />
+                                "Active"
+                            </span>
+                        })}
+                        {status.recommended.then(|| view! {
+                            <span class="tag tag--accent">"Recommended"</span>
+                        })}
+                        <span class="model-meta">{meta_line}</span>
+                    </div>
+                    <div class="model-desc">{status.description.clone()}</div>
+                    <div class="pros-cons">
+                        <ul class="pc-list pc-list--pros" aria-label="Good things">
+                            {status.pros.iter().map(|text| view! {
+                                <li><Icon kind=IconKind::Check class="icon-sm" />{text.clone()}</li>
+                            }).collect_view()}
+                        </ul>
+                        <ul class="pc-list pc-list--cons" aria-label="Things to know">
+                            {status.cons.iter().map(|text| view! {
+                                <li><Icon kind=IconKind::Minus class="icon-sm" />{text.clone()}</li>
+                            }).collect_view()}
+                        </ul>
+                    </div>
+                    {update_note.map(|note| view! { <div class="model-update">{note}</div> })}
                 </div>
-                <div style="display:flex;gap:8px;flex-shrink:0;">
+                <div class="model-actions">
                     {(!downloading && !any_downloading).then(|| {
                         let state = status.state.clone();
                         let is_active = status.is_active;
@@ -258,7 +263,8 @@ fn ModelRow(
                                 {(state == "not_installed").then(|| {
                                     let id = id_download.clone();
                                     view! {
-                                        <button style=BUTTON_STYLE on:click=move |_| on_download.run(id.clone())>
+                                        <button class="btn btn-sm btn-primary" on:click=move |_| on_download.run(id.clone())>
+                                            <Icon kind=IconKind::Download class="icon-sm" />
                                             "Download"
                                         </button>
                                     }
@@ -266,7 +272,8 @@ fn ModelRow(
                                 {(state == "update_available").then(|| {
                                     let id = id_download.clone();
                                     view! {
-                                        <button style=BUTTON_STYLE on:click=move |_| on_download.run(id.clone())>
+                                        <button class="btn btn-sm btn-primary" on:click=move |_| on_download.run(id.clone())>
+                                            <Icon kind=IconKind::Refresh class="icon-sm" />
                                             "Update"
                                         </button>
                                     }
@@ -274,15 +281,15 @@ fn ModelRow(
                                 {(state != "not_installed" && !is_active).then(|| {
                                     let id = id_select.clone();
                                     view! {
-                                        <button style=BUTTON_STYLE on:click=move |_| on_select.run(id.clone())>
-                                            "Use this model"
+                                        <button class="btn btn-sm btn-primary" on:click=move |_| on_select.run(id.clone())>
+                                            "Use this"
                                         </button>
                                     }
                                 })}
                                 {(state != "not_installed").then(|| {
                                     let id = id_remove.clone();
                                     view! {
-                                        <button style=GHOST_BUTTON_STYLE on:click=move |_| on_remove.run(id.clone())>
+                                        <button class="btn btn-sm" on:click=move |_| on_remove.run(id.clone())>
                                             "Remove"
                                         </button>
                                     }
@@ -294,9 +301,9 @@ fn ModelRow(
             </div>
             {downloading.then(|| {
                 view! {
-                    <div style=TEXT_STYLE>{progress_label}</div>
-                    <div style="height:8px;background:#1a1a2e;border-radius:4px;margin-top:8px;overflow:hidden;">
-                        <div style=bar_width></div>
+                    <div class="progress-label">{progress_label}</div>
+                    <div class="progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow=pct>
+                        <div class="progress-bar" style=bar_width></div>
                     </div>
                 }
             })}
@@ -304,10 +311,34 @@ fn ModelRow(
     }
 }
 
+/// The picker's heading and explanation. Models are described in
+/// plain language; the underlying models are never named (ADR-0010).
 #[component]
-pub fn ModelSetup() -> impl IntoView {
+fn SectionHead() -> impl IntoView {
+    view! {
+        <div class="section-head">
+            <div class="section-title">
+                <Icon kind=IconKind::Chip />
+                "AI model"
+            </div>
+            <p class="section-text">
+                "An AI model is a small program that understands what you type, "
+                "like \"save a note\". It runs on your computer, so nothing you write leaves it."
+            </p>
+            <p class="section-text">
+                "Not sure? Choose Small. You can change it any time in Settings."
+            </p>
+        </div>
+    }
+}
+
+/// The AI model picker. `on_change` runs after a download, selection,
+/// or removal finishes, so a host (the first-run gate) can re-check
+/// whether chat is ready.
+#[component]
+pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl IntoView {
     let (models, set_models) = signal(Vec::<ModelStatus>::new());
-    let (error, set_error) = signal(Option::<String>::None);
+    let (error, set_error) = signal(Option::<FriendlyError>::None);
     let (action_in_flight, set_action_in_flight) = signal(false);
 
     // Set by `on_cleanup` when the card unmounts (e.g. navigation), so
@@ -343,12 +374,7 @@ pub fn ModelSetup() -> impl IntoView {
                         }
                     }
                     Err(e) => {
-                        let label = if cmd == "download_model" {
-                            format!("Download failed: {e}")
-                        } else {
-                            e
-                        };
-                        set_error.set(Some(label));
+                        set_error.set(Some(friendly_error(&e)));
                         if let Ok(list) = fetch_status().await {
                             if !cancelled.get_untracked() {
                                 set_models.set(list);
@@ -358,6 +384,11 @@ pub fn ModelSetup() -> impl IntoView {
                 }
             }
             set_action_in_flight.set(false);
+            if let Some(on_change) = on_change {
+                if !cancelled.get_untracked() {
+                    on_change.run(());
+                }
+            }
         });
     };
 
@@ -376,7 +407,7 @@ pub fn ModelSetup() -> impl IntoView {
             {move || {
                 let list = models.get();
                 if list.is_empty() {
-                    return view! { <div></div> }.into_any();
+                    return view! { <div class="loading"><div class="spinner"></div></div> }.into_any();
                 }
                 // Buttons hide while a download *or any other action* is
                 // in flight, matching the guard in `run_action`.
@@ -398,24 +429,19 @@ pub fn ModelSetup() -> impl IntoView {
                     })
                     .collect::<Vec<_>>();
                 view! {
-                    <div style=CARD_STYLE>
-                        <div style=TITLE_STYLE>"AI model"</div>
-                        <div style=TEXT_STYLE>
-                            "Stern needs an AI model to chat. Pick one and download it — the \
-                            first download also fetches the ONNX Runtime (~21 MB), and \
-                            everything is stored only on this device. You can switch or \
-                            remove models at any time."
-                        </div>
+                    <section class="section">
+                        <SectionHead />
                         {rows}
-                    </div>
+                    </section>
                 }
                 .into_any()
             }}
             {move || {
                 error.get().map(|e| {
-                    view! {
-                        <div style="margin:8px 20px 0;font-size:13px;color:#e94560;">{e}</div>
-                    }
+                    view! { <div class="settings-error">{match e.detail {
+                            Some(detail) => view! { <ErrorAlert message=e.message detail=detail /> }.into_any(),
+                            None => view! { <ErrorAlert message=e.message /> }.into_any(),
+                        }}</div> }
                 })
             }}
         </div>
