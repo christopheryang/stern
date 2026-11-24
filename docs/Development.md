@@ -65,9 +65,9 @@ it is useful for layout work only.
    window (resize to the 400 px minimum height): nothing should clip
    or overflow, and the setup screen's requirements checklist should
    tick green as you type.
-4. Chat: "show all passwords", "what's my password for <service>?",
-   "save my GitHub password" (a named store files immediately; a bare
-   "store" runs the guided conversation — secret fields use the
+4. Chat: "save a note" (goes straight to the note questions), "find my
+   <note title>", "save my GitHub password" (a named store files
+   immediately; a bare "store" runs the guided conversation, notes first — secret fields use the
    peek-mask input and never appear in the transcript).
 5. Settings (gear) → model size picker (Small / Medium / Large): Download → progress → installed.
    Remove → the picker shows it gone and chat still answers via rules.

@@ -329,6 +329,7 @@ button:disabled { cursor: not-allowed; }
 .empty .hero-mark { width: 84px; height: 84px; margin-bottom: 14px; }
 .empty .title { font-size: 26px; }
 .empty .subtitle { max-width: 440px; }
+.empty .hint { max-width: 440px; margin-top: 22px; font-size: 13px; line-height: 1.5; color: var(--text-faint); }
 
 .suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 26px; max-width: 560px; }
 .suggestion {

@@ -24,8 +24,9 @@ executes. Everything the user sees is a template.
 Storing a secret becomes a short interview when a request does not
 carry everything needed:
 
-1. "What is this secret for?" — a. username/password, b. short text,
-   c. document, d. credit card, e. contact info
+1. "What would you like to save?" — a. note, b. document,
+   c. username/password, d. credit card, e. contact info. A request
+   that names the kind ("save a note") skips this question.
 2. One question per field, in order (for a login: "What website is
    this username/password for?", then username, then password).
    Optional fields (a contact's email, address) can be skipped.
@@ -40,9 +41,9 @@ Kinds and their fields (the first field is the entry's name):
 
 | Kind | Fields (in ask order) |
 | --- | --- |
-| username/password (`login`) | website, username, password |
-| short text (`text`) | title, text |
+| note (`text`) | title, text |
 | document (`document`) | title, content |
+| username/password (`login`) | website, username, password |
 | credit card (`card`) | label, number, expiry, cvv |
 | contact info (`contact`) | name, phone, email (optional), address (optional) |
 

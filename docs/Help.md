@@ -4,17 +4,25 @@
 
 Stern keeps your passwords and other secrets safe on your computer. You use it like a chat: say what you want, and Stern does it. Nothing is kept online.
 
+## What should I keep in Stern?
+
+Stern is made for your notes and documents: things you want kept private and out of the cloud. You can also save passwords, cards, and contacts, but that is not what Stern is mainly for.
+
+## How do I save a note or document?
+
+Tap "Save a note" or "Save a document", or type "save a note". Stern asks a few short questions, one at a time. Whatever you write is hidden as you type: each letter shows for a moment, then turns into a star.
+
 ## How do I save a password?
 
-Tap "Save a password", or type something like "save my GitHub password". Stern asks a few short questions, one at a time. When it asks for the password itself, type it in the box. Each letter shows for a moment, then hides.
+Tap "Save a password", or type something like "save my GitHub password". Stern asks a few short questions, one at a time. When it asks for the password itself, type it in the box.
 
-## How do I see a password I saved?
+## How do I find something I saved?
 
-Type something like "show my GitHub password". To see everything you saved, type "show my passwords".
+Type something like "find my shopping list" or "show my GitHub password".
 
-## Can I change or delete something?
+## What is the safest way to keep something forever?
 
-Yes. Type "change my Netflix password" or "remove my WiFi password". Stern asks you to confirm before it deletes anything, and a deleted item cannot be brought back.
+Keep it in a plain text file. A text file ends in .txt, and every computer can open it with no special app, now or years from now. Nobody can shut it down, change its price, or take it away. Store the file on your own computer, and keep a copy on a USB stick. Stern is a good place for things you want locked. A plain text file is best for things you must never lose.
 
 ## What is my Stern password?
 

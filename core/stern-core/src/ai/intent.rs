@@ -158,6 +158,9 @@ fn is_greeting(words: &[&str], lower: &str) -> bool {
 }
 
 fn is_help(words: &[&str]) -> bool {
+    if matches!(words, ["help"]) {
+        return true;
+    }
     let has_question = words.iter().any(|w| *w == "help" || *w == "how");
     let has_you = words
         .iter()

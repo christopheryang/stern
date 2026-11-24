@@ -35,14 +35,14 @@ pub struct FieldSpec {
 
 /// A kind of secret the guided conversation can store. The first
 /// field doubles as the entry's name (the website for a login, the
-/// title for a text, and so on).
+/// title for a note, and so on).
 pub struct KindSpec {
     /// Stable identifier, stored as the entry kind.
     pub id: &'static str,
     /// Label shown in the kind question.
     pub label: &'static str,
     /// The field that receives a parsed store's bare value (the
-    /// password for a login, the text for a short text, ...).
+    /// password for a login, the text for a note, ...).
     pub value_key: &'static str,
     /// Fields in the order they are asked.
     pub fields: &'static [FieldSpec],
@@ -72,13 +72,13 @@ const LOGIN_FIELDS: &[FieldSpec] = &[
 const TEXT_FIELDS: &[FieldSpec] = &[
     FieldSpec {
         key: "title",
-        prompt: "What should I call this text?",
+        prompt: "What should I call this note?",
         required: true,
         sensitive: false,
     },
     FieldSpec {
         key: "text",
-        prompt: "What is the text?",
+        prompt: "What is your note?",
         required: true,
         sensitive: true,
     },
@@ -154,16 +154,12 @@ const CONTACT_FIELDS: &[FieldSpec] = &[
 ];
 
 /// The kinds the kind question offers, in the order it offers them.
+/// Notes and documents come first: that is what Stern is mostly used
+/// for. Letters in the kind question follow this order (a = note).
 pub const KINDS: &[KindSpec] = &[
     KindSpec {
-        id: "login",
-        label: "username/password",
-        value_key: "password",
-        fields: LOGIN_FIELDS,
-    },
-    KindSpec {
         id: "text",
-        label: "short text",
+        label: "note",
         value_key: "text",
         fields: TEXT_FIELDS,
     },
@@ -172,6 +168,12 @@ pub const KINDS: &[KindSpec] = &[
         label: "document",
         value_key: "content",
         fields: DOCUMENT_FIELDS,
+    },
+    KindSpec {
+        id: "login",
+        label: "username/password",
+        value_key: "password",
+        fields: LOGIN_FIELDS,
     },
     KindSpec {
         id: "card",
@@ -254,8 +256,29 @@ impl Conversation {
             fields: Vec::new(),
             ask_optional: true,
         };
-        let step = Self::kind_prompt("What is this secret for?");
+        let step = Self::kind_prompt("What would you like to save?");
         (conversation, step)
+    }
+
+    /// Start a fresh conversation for a store request that named a
+    /// kind but nothing else ("save a note"): the kind question is
+    /// skipped, because the user already answered it. A bare "store"
+    /// (the generic `secret` kind) or a kind the guided flow does not
+    /// know still gets the full kind question.
+    #[must_use]
+    pub fn start_for_kind(intent_kind: &str) -> (Self, Step) {
+        let named = (intent_kind != "secret")
+            .then(|| Self::prefilled(intent_kind, "", &[]))
+            .flatten();
+        match named {
+            Some((mut conversation, _)) => {
+                // A fresh interview, so optional fields are asked too.
+                conversation.ask_optional = true;
+                let step = conversation.next_prompt();
+                (conversation, step)
+            }
+            None => Self::start(),
+        }
     }
 
     /// Start a conversation prefilled from a parsed store request,
@@ -487,19 +510,19 @@ mod tests {
     }
 
     #[test]
-    fn kind_question_lists_the_five_kinds_in_order() {
+    fn kind_question_lists_the_five_kinds_notes_first() {
         let (_, step) = Conversation::start();
         match step {
             Step::Prompt {
                 message, options, ..
             } => {
-                assert_eq!(message, "What is this secret for?");
+                assert_eq!(message, "What would you like to save?");
                 assert_eq!(
                     options,
                     vec![
-                        "username/password",
-                        "short text",
+                        "note",
                         "document",
+                        "username/password",
                         "credit card",
                         "contact info"
                     ]
@@ -513,6 +536,13 @@ mod tests {
     fn kind_choice_accepts_a_letter_or_a_label() {
         let mut by_letter = start_at_fields();
         match by_letter.handle("a") {
+            Step::Prompt { message, .. } => {
+                assert_eq!(message, "What should I call this note?");
+            }
+            _ => panic!("expected the note title prompt"),
+        }
+        let mut login_by_letter = start_at_fields();
+        match login_by_letter.handle("c") {
             Step::Prompt { message, .. } => {
                 assert_eq!(message, "What website is this username/password for?");
             }
@@ -544,7 +574,7 @@ mod tests {
     #[test]
     fn full_login_flow_finishes_with_a_store_intent() {
         let mut conversation = start_at_fields();
-        conversation.handle("a");
+        conversation.handle("c");
         conversation.handle("Google");
         conversation.handle("chris");
         match conversation.handle("hunter2") {
@@ -578,7 +608,7 @@ mod tests {
     #[test]
     fn declining_the_confirmation_cancels() {
         let mut conversation = start_at_fields();
-        conversation.handle("b");
+        conversation.handle("a");
         conversation.handle("Shopping list");
         conversation.handle("eggs and milk");
         assert!(matches!(conversation.handle("no"), Step::Cancelled));
@@ -589,7 +619,7 @@ mod tests {
         let mut conversation = start_at_fields();
         assert!(matches!(conversation.handle("cancel"), Step::Cancelled));
         let mut conversation = start_at_fields();
-        conversation.handle("a");
+        conversation.handle("c");
         conversation.handle("Google");
         assert!(matches!(conversation.handle("stop"), Step::Cancelled));
     }
@@ -676,7 +706,7 @@ mod tests {
         // At the password prompt, " cancel " (spaces and all) is
         // the secret: no trimming, and no cancel-word abort.
         let mut conversation = start_at_fields();
-        conversation.handle("a");
+        conversation.handle("c");
         conversation.handle("example.com");
         conversation.handle("chris");
         match conversation.handle(" cancel ") {
@@ -690,6 +720,61 @@ mod tests {
                 assert!(fields.contains(&("password".to_string(), " cancel ".to_string())));
             }
             _ => panic!("expected a finished store intent"),
+        }
+    }
+
+    #[test]
+    fn a_named_kind_skips_the_kind_question() {
+        let (mut conversation, step) = Conversation::start_for_kind("note");
+        match step {
+            Step::Prompt {
+                message, options, ..
+            } => {
+                assert_eq!(message, "What should I call this note?");
+                assert!(options.is_empty());
+            }
+            other => panic!("expected the note title prompt, got: {other:?}"),
+        }
+        conversation.handle("Shopping list");
+        match conversation.handle("eggs and milk") {
+            Step::Prompt { message, .. } => assert!(message.starts_with("Save this note?")),
+            other => panic!("expected the confirmation, got: {other:?}"),
+        }
+        match conversation.handle("yes") {
+            Step::Finished(Intent::StoreSecret { name, kind, .. }) => {
+                assert_eq!(name, "Shopping list");
+                assert_eq!(kind, "text");
+            }
+            other => panic!("expected a finished store intent, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_named_kind_still_asks_its_optional_fields() {
+        let (mut conversation, _) = Conversation::start_for_kind("contact");
+        conversation.handle("Mom");
+        conversation.handle("555-0100");
+        match conversation.handle("skip") {
+            Step::Prompt { message, .. } => {
+                assert_eq!(message, "What is the address? (or type skip)")
+            }
+            other => panic!("expected the address prompt, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_generic_or_unknown_kind_still_asks_the_kind_question() {
+        for kind in ["secret", "biometric"] {
+            let (_, step) = Conversation::start_for_kind(kind);
+            match step {
+                Step::Prompt {
+                    message, options, ..
+                } => {
+                    assert_eq!(message, "What would you like to save?", "kind {kind}");
+                    assert_eq!(options.len(), 5);
+                }
+                other => panic!("expected the kind question, got: {other:?}"),
+            }
         }
     }
 }

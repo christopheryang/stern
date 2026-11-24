@@ -20,6 +20,10 @@ and an ADR disagree, the ADR wins.
   at a prompt flagged sensitive — the input peek-masks, the value is
   never echoed in a response or shown in the transcript, and the
   model never writes the replies (it only parses, on-device).
+- **Notes first.** Stern is mainly for notes and documents, so they
+  lead every prompt, and the app advises keeping anything that must
+  last forever as a plain text file on the user's own computer
+  ([ADR-0012](../adr/0012-Notes-First-And-Plain-Text-Advice.md)).
 - **Destructive actions need confirmation.** Deleting a secret
   requires an explicit confirmation in the UI, whichever classifier
   produced the intent.

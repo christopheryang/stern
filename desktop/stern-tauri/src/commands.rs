@@ -409,7 +409,7 @@ fn handle_store_entry(
     drop(session);
 
     let entry_kind = match kind {
-        "note" | "document" => EntryKind::Note,
+        "note" | "text" | "document" => EntryKind::Note,
         _ => EntryKind::Login,
     };
 
@@ -1201,7 +1201,7 @@ mod tests {
         assert!(state.session.lock().unwrap().is_unlocked);
         assert_eq!(resumed.options.len(), 5, "message: {}", resumed.message);
 
-        chat(&state, "a");
+        chat(&state, "c");
         chat(&state, "Google");
         chat(&state, "chris");
         let saved = chat(&state, "hunter2");
@@ -1209,6 +1209,29 @@ mod tests {
         let done = chat(&state, "yes");
         assert_eq!(done.action.as_deref(), Some("store"));
         assert_eq!(state.repository.count_entries().unwrap(), 1);
+    }
+
+    #[test]
+    fn chat_saves_a_note_without_the_kind_question() {
+        let (state, _path) = make_test_app_state();
+        create_vault_inner(&state, "correct horse battery").unwrap();
+        unlock_test_session(&state);
+
+        let first = chat(&state, "save a note");
+        assert_eq!(first.message, "What should I call this note?");
+        chat(&state, "Shopping list");
+        let confirm = chat(&state, "eggs and milk");
+        assert!(confirm.message.contains("Save this note?"));
+        let done = chat(&state, "yes");
+        assert_eq!(done.action.as_deref(), Some("store"));
+        assert_eq!(state.repository.count_entries().unwrap(), 1);
+
+        let found = handle_search_entry(&state, "shopping", Some("text")).unwrap();
+        assert!(
+            found.message.contains("eggs and milk"),
+            "message: {}",
+            found.message
+        );
     }
 
     #[test]

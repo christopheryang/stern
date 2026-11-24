@@ -282,9 +282,10 @@ fn make_sender(
 
 /// Starter prompts shown on the empty chat. Each is sent as an
 /// ordinary message, so it takes the same path as typed text.
-const SUGGESTIONS: [(IconKind, &str, &str); 2] = [
+const SUGGESTIONS: [(IconKind, &str, &str); 3] = [
+    (IconKind::Note, "Save a note", "store a note"),
+    (IconKind::Note, "Save a document", "store a document"),
     (IconKind::Key, "Save a password", "store a password"),
-    (IconKind::List, "Show my passwords", "list all passwords"),
 ];
 
 /// The empty state: brand mark, a greeting, and starter prompts.
@@ -310,8 +311,12 @@ fn empty_view(loading: ReadSignal<bool>, send_text: Callback<(String, Option<Str
         <div class="empty">
             <BrandMark />
             <h2 class="title">"How can I help?"</h2>
-            <p class="subtitle">"Save a password, or find one you saved."</p>
+            <p class="subtitle">"Save a note or document, or find one you saved."</p>
             <div class="suggestions">{chips}</div>
+            <p class="hint">
+                "Tip: for notes you want to keep forever, a plain text file (.txt) is best. "
+                "Any computer can open it, with no special app."
+            </p>
         </div>
     }
     .into_any()

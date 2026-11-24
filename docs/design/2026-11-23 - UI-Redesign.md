@@ -55,8 +55,9 @@ remaining inline style is the download progress bar's computed width.
 - **Gates** — "Choose a size to get started" and one shared "Something
   went wrong" card (used for both the vault and the helper status
   checks) are centered cards with an icon badge and one action.
-- **Chat** — an empty state (mark, "How can I help?", two starter chips
-  that send ordinary messages: *Save a password*, *Show my passwords*);
+- **Chat** — an empty state (mark, "How can I help?", three starter chips
+  that send ordinary messages: *Save a note*, *Save a document*, *Save a password*, and a tip that plain text files are the best long-term store
+  ([ADR-0012](../adr/0012-Notes-First-And-Plain-Text-Advice.md));
   then avatars, name labels, gradient user bubbles, glass assistant
   bubbles, pill-shaped option buttons on the newest assistant message
   only, a typing indicator while a reply is pending, and auto-scroll to

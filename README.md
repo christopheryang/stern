@@ -40,7 +40,7 @@ Stern/
 
 Stern's chat is powered by a local text generation model (downloaded after install — see below). The model only *parses*: it turns a message into a structured intent, and deterministic code does everything else — the model never writes a reply you see. When a request is missing pieces, a guided conversation asks for them (kind first, then the fields it needs, then a masked confirmation):
 
-- **Store** — "save my GitHub password"
+- **Store** — "save a note", "save a document", "save my GitHub password" (notes and documents come first; naming the kind skips the kind question)
 - **Retrieve** — "what's my password for Gmail?"
 - **List** — "show all passwords"
 - **Update** — "change my Netflix password"
@@ -116,8 +116,9 @@ just build
    question mark) opens [plain-language help](docs/Help.md) at any
    time, including before you unlock.
 4. In chat, try "show all passwords", "what's my password for Gmail?",
-   or "save my GitHub password". Storing runs as a short guided
-   conversation — kind first, then the fields it needs. Secret fields
+   or "save a note". Storing runs as a short guided
+   conversation — kind first (unless you named it), then the fields it
+   needs. Secret fields
    are typed into a peek-mask input (each character visible for
    2 seconds, then `*`) and never appear in the transcript.
 5. App data lives in the platform app-data folder for `com.stern.app`

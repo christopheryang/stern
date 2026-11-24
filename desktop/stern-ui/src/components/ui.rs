@@ -27,6 +27,7 @@ pub enum IconKind {
     Download,
     Refresh,
     Help,
+    Note,
 }
 
 impl IconKind {
@@ -34,6 +35,9 @@ impl IconKind {
         match self {
             Self::Lock => {
                 r#"<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>"#
+            }
+            Self::Note => {
+                r#"<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>"#
             }
             Self::Unlock => {
                 r#"<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 7.6-1.7"/>"#

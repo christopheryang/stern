@@ -429,13 +429,14 @@ impl ChatHandler {
 
         // The guided conversation starts where a parsed store has
         // nothing to file under: a content-free store request gets
-        // the full interview (kind first), and a nameless parse —
-        // a value with nothing to call it — gets asked for the
-        // missing name and fields. A store the parser named
-        // executes immediately, exactly as it always has.
+        // the full interview — kind first, unless the request already
+        // named one ("save a note") — and a nameless parse — a value
+        // with nothing to call it — gets asked for the missing name
+        // and fields. A store the parser named executes immediately,
+        // exactly as it always has.
         let guided = match &intent {
-            Intent::StoreSecret { name, fields, .. } if name.is_empty() && fields.is_empty() => {
-                Some(Conversation::start())
+            Intent::StoreSecret { name, kind, fields } if name.is_empty() && fields.is_empty() => {
+                Some(Conversation::start_for_kind(kind))
             }
             Intent::StoreSecret { name, kind, fields } if name.is_empty() => {
                 Conversation::prefilled(kind, name, fields)
@@ -697,16 +698,15 @@ impl ChatHandler {
                 input_sensitive: false,
             },
             Intent::Help => ChatResponse {
-                message: "I can help you manage your secrets. Here's what I can do:\n\n\
-                    \u{1f510} Store a secret -- \"save my GitHub password\"\n\
-                    \u{1f50d} Find a secret -- \"get my Gmail credentials\"\n\
-                    \u{1f4cb} List all -- \"show all passwords\"\n\
-                    \u{270f}\u{fe0f} Update -- \"change my Netflix password\"\n\
-                    \u{1f5d1}\u{fe0f} Delete -- \"remove my WiFi password\"\n\
-                    \u{1f4e6} Export -- \"export my vault\"\n\
-                    \u{1f4e5} Import -- \"import vault\"\n\n\
-                    Just tell me what you need in natural language."
-                    .to_string(),
+                message:
+                    "I can help you keep your notes and documents safe. Here's what I can do:\n\n\
+                    \u{1f510} Save a note -- \"save a note\"\n\
+                    \u{1f50d} Find something -- \"find my shopping list\"\n\
+                    \u{1f4c4} Save a document -- \"save a document\"\n\
+                    \u{1f511} Save a password -- \"save my GitHub password\"\n\
+                    Tip: for notes you want to keep forever, a plain text file (.txt) is \
+                    best. Any computer can open it, with no special app."
+                        .to_string(),
                 action: None,
                 user_message_display: None,
                 options: Vec::new(),
@@ -715,9 +715,8 @@ impl ChatHandler {
             Intent::Greeting => ChatResponse {
                 message: "I'm doing well, thanks! I'm Stern, your local secrets manager — \
                     everything stays encrypted on this device.\n\n\
-                    I can store a secret for you, find one again, list them all, or update \
-                    and delete them. Try \"save my GitHub password\", or ask \"what's my \
-                    password for Google?\""
+                    I can save a note or a document for you, and find it again. Try \"save a \
+                    note\", or ask \"find my shopping list\"."
                     .to_string(),
                 action: None,
                 user_message_display: None,
@@ -728,9 +727,9 @@ impl ChatHandler {
                 message: format!(
                     "I'm not sure what you mean by \"{text}\".\n\n\
                     Try something like:\n\
-                    - \"save my GitHub password\"\n\
-                    - \"find my API keys\"\n\
-                    - \"list all secrets\"\n\
+                    - \"save a note\"\n\
+                    - \"find my shopping list\"\n\
+                    - \"save a document\"\n\
                     - \"help\""
                 ),
                 action: None,
