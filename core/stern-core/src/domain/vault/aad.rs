@@ -17,3 +17,13 @@ pub fn blob_aad(entry_id: &str) -> Vec<u8> {
     aad.extend_from_slice(BLOB_AAD_SUFFIX);
     aad
 }
+
+/// The AAD that binds a folder's encrypted name to the folder, so a name
+/// can't be swapped onto another folder.
+#[must_use]
+pub fn folder_aad(folder_id: &str) -> Vec<u8> {
+    use crate::domain::vault::crypto_constants::FOLDER_AAD_SUFFIX;
+    let mut aad = folder_id.as_bytes().to_vec();
+    aad.extend_from_slice(FOLDER_AAD_SUFFIX);
+    aad
+}

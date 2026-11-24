@@ -300,10 +300,18 @@ fn execute_chat_response(
             ref fields,
         }) if fields.is_empty() => handle_edit_note(state, name, &response),
         Some(
+            ref action @ (stern_core::ai::chat::Action::ListEntries { .. }
+            | stern_core::ai::chat::Action::ConfirmDelete { .. }
+            | stern_core::ai::chat::Action::DeleteEntry { .. }
+            | stern_core::ai::chat::Action::CreateFolder { .. }
+            | stern_core::ai::chat::Action::MoveEntry { .. }
+            | stern_core::ai::chat::Action::ShowFolders { .. }
+            | stern_core::ai::chat::Action::RenameItem { .. }
+            | stern_core::ai::chat::Action::DeleteFolder { .. }),
+        ) => Ok(handle_organize(state, action)),
+        Some(
             stern_core::ai::chat::Action::OpenNoteEditor
             | stern_core::ai::chat::Action::OpenFilePicker
-            | stern_core::ai::chat::Action::ListEntries { .. }
-            | stern_core::ai::chat::Action::ConfirmDelete { .. }
             | stern_core::ai::chat::Action::UpdateEntry { .. }
             | stern_core::ai::chat::Action::ExportVault
             | stern_core::ai::chat::Action::ImportVault
@@ -317,6 +325,44 @@ fn execute_chat_response(
             options: response.options,
             input_sensitive: response.input_sensitive,
         }),
+    }
+}
+
+/// Carry out a folder, list, rename or delete request. The reply is plain
+/// text: names and kinds, never a value.
+fn handle_organize(state: &AppState, action: &stern_core::ai::chat::Action) -> ChatResponse {
+    use crate::organize;
+    use stern_core::ai::chat::Action;
+    let outcome = match action {
+        Action::ListEntries { category } => organize::list_entries(state, category.as_deref()),
+        Action::ConfirmDelete { name } => organize::confirm_delete(state, name),
+        Action::DeleteEntry { entry_id, name } => organize::delete_entry(state, entry_id, name),
+        Action::CreateFolder { name, parent } => {
+            organize::create_folder(state, name, parent.as_deref())
+        }
+        Action::MoveEntry { name, folder } => organize::move_item(state, name, folder.as_deref()),
+        Action::ShowFolders { folder } => organize::show_folders(state, folder.as_deref()),
+        Action::RenameItem {
+            name,
+            new_name,
+            folder,
+        } => organize::rename_item(state, name, new_name, *folder),
+        Action::DeleteFolder { name } => organize::delete_folder(state, name),
+        _ => return plain_chat_response("I can't do that yet.".to_string()),
+    };
+    match outcome {
+        Ok(reply) => ChatResponse {
+            message: reply.message,
+            action: None,
+            user_message_display: None,
+            options: reply.options,
+            input_sensitive: false,
+        },
+        Err(VaultError::VaultLocked) => locked_chat_response(),
+        Err(e) => {
+            tracing::warn!("organising request failed: {e}");
+            plain_chat_response("Something went wrong, and nothing was changed.".to_string())
+        }
     }
 }
 
@@ -425,6 +471,12 @@ fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
         stern_core::ai::chat::Action::RevealEntry { .. } => "reveal".to_string(),
         stern_core::ai::chat::Action::ListEntries { .. } => "list".to_string(),
         stern_core::ai::chat::Action::ConfirmDelete { .. } => "delete".to_string(),
+        stern_core::ai::chat::Action::DeleteEntry { .. } => "delete_entry".to_string(),
+        stern_core::ai::chat::Action::CreateFolder { .. } => "create_folder".to_string(),
+        stern_core::ai::chat::Action::MoveEntry { .. } => "move_entry".to_string(),
+        stern_core::ai::chat::Action::ShowFolders { .. } => "show_folders".to_string(),
+        stern_core::ai::chat::Action::RenameItem { .. } => "rename".to_string(),
+        stern_core::ai::chat::Action::DeleteFolder { .. } => "delete_folder".to_string(),
         stern_core::ai::chat::Action::UpdateEntry { .. } => "update".to_string(),
         stern_core::ai::chat::Action::ExportVault => "export".to_string(),
         stern_core::ai::chat::Action::ImportVault => "import".to_string(),

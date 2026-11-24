@@ -2,6 +2,7 @@ use crate::domain::vault::crypto_constants::NONCE_LEN;
 use crate::domain::vault::crypto_constants::{SECRET_KEY_LEN, VAULT_SALT_LEN, VERIFY_HASH_LEN};
 use crate::domain::vault::entry::EncryptedEntry;
 use crate::domain::vault::errors::VaultError;
+use crate::domain::vault::folder::EncryptedFolder;
 use crate::domain::vault::kdf_params::KdfParams;
 use crate::domain::vault::vault_meta::VaultMeta;
 use rusqlite::Connection;
@@ -106,9 +107,40 @@ impl SqliteRepository {
                 mime_type TEXT NOT NULL,
                 is_text INTEGER NOT NULL
             );
+
+            CREATE TABLE IF NOT EXISTS folders (
+                id TEXT PRIMARY KEY,
+                parent_id TEXT REFERENCES folders(id) ON DELETE SET NULL,
+                dek_wrapped BLOB NOT NULL,
+                nonce BLOB NOT NULL,
+                ciphertext BLOB NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
             ",
         )
         .map_err(|e| VaultError::Database(e.to_string()))?;
+
+        // Migration: vaults made before folders have no `folder_id` on
+        // their entries. Every existing entry stays outside any folder.
+        let has_folder_col = conn
+            .prepare("PRAGMA table_info(entries)")
+            .and_then(|mut stmt| {
+                let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+                for name in names {
+                    if name? == "folder_id" {
+                        return Ok(true);
+                    }
+                }
+                Ok(false)
+            })
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        if !has_folder_col {
+            conn.execute_batch(
+                "ALTER TABLE entries ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL",
+            )
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        }
 
         // Migration: rename legacy 'encrypted_index' column to 'secret_key' if it exists.
         let has_old_col: bool = conn
@@ -229,6 +261,200 @@ impl SqliteRepository {
                 ],
             )?;
             Ok(changed > 0)
+        })
+    }
+
+    /// Store a new folder.
+    pub fn insert_folder(&self, folder: &EncryptedFolder) -> Result<(), VaultError> {
+        self.execute(|conn| {
+            conn.execute(
+                "INSERT INTO folders (id, parent_id, dek_wrapped, nonce, ciphertext, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                rusqlite::params![
+                    folder.id,
+                    folder.parent_id,
+                    folder.dek_wrapped,
+                    folder.nonce.as_slice(),
+                    folder.ciphertext,
+                    folder.created_at.to_rfc3339(),
+                    folder.updated_at.to_rfc3339(),
+                ],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// Every folder, oldest first.
+    pub fn list_folders(&self) -> Result<Vec<EncryptedFolder>, VaultError> {
+        self.execute(|conn| {
+            let mut stmt = conn.prepare(
+                "SELECT id, parent_id, dek_wrapped, nonce, ciphertext, created_at, updated_at
+                 FROM folders ORDER BY created_at, id",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                let nonce: Vec<u8> = row.get(3)?;
+                let nonce: [u8; NONCE_LEN] = nonce
+                    .as_slice()
+                    .try_into()
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                let created_at: String = row.get(5)?;
+                let updated_at: String = row.get(6)?;
+                let parse = |text: &str| {
+                    chrono::DateTime::parse_from_rfc3339(text)
+                        .map_or_else(|_| chrono::Utc::now(), |dt| dt.with_timezone(&chrono::Utc))
+                };
+                Ok(EncryptedFolder {
+                    id: row.get(0)?,
+                    parent_id: row.get(1)?,
+                    dek_wrapped: row.get(2)?,
+                    nonce,
+                    ciphertext: row.get(4)?,
+                    created_at: parse(&created_at),
+                    updated_at: parse(&updated_at),
+                })
+            })?;
+            rows.collect()
+        })
+    }
+
+    /// Replace a folder's encrypted name. False when no such folder.
+    pub fn update_folder_name(
+        &self,
+        folder_id: &str,
+        dek_wrapped: &[u8],
+        nonce: &[u8; NONCE_LEN],
+        ciphertext: &[u8],
+        updated_at: &str,
+    ) -> Result<bool, VaultError> {
+        self.execute(|conn| {
+            let changed = conn.execute(
+                "UPDATE folders SET dek_wrapped = ?2, nonce = ?3, ciphertext = ?4, updated_at = ?5
+                 WHERE id = ?1",
+                rusqlite::params![
+                    folder_id,
+                    dek_wrapped,
+                    nonce.as_slice(),
+                    ciphertext,
+                    updated_at
+                ],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// Move a folder under another (or to the top level with `None`).
+    /// Refused, with `Ok(false)`, when either folder is missing or the move
+    /// would put a folder inside itself, so the tree can never loop.
+    pub fn move_folder(
+        &self,
+        folder_id: &str,
+        new_parent: Option<&str>,
+    ) -> Result<bool, VaultError> {
+        self.execute(|conn| {
+            if let Some(parent) = new_parent {
+                // UNION (not UNION ALL) stops the walk on any existing loop.
+                let inside: i64 = conn.query_row(
+                    "WITH RECURSIVE sub(id) AS (
+                         SELECT ?1
+                         UNION
+                         SELECT f.id FROM folders f JOIN sub ON f.parent_id = sub.id
+                     )
+                     SELECT COUNT(*) FROM sub WHERE id = ?2",
+                    rusqlite::params![folder_id, parent],
+                    |row| row.get(0),
+                )?;
+                if inside > 0 {
+                    return Ok(false);
+                }
+            }
+            let changed = conn.execute(
+                "UPDATE folders SET parent_id = ?2 WHERE id = ?1",
+                rusqlite::params![folder_id, new_parent],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// Delete a folder. What was inside it is kept: its sub-folders and
+    /// entries move up to the folder's own parent. One transaction, so a
+    /// failure leaves everything where it was.
+    pub fn delete_folder(&self, folder_id: &str) -> Result<bool, VaultError> {
+        let mut guard = self
+            .conn
+            .lock()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        let tx = guard
+            .transaction()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        let parent: Option<Option<String>> = tx
+            .query_row(
+                "SELECT parent_id FROM folders WHERE id = ?1",
+                rusqlite::params![folder_id],
+                |row| row.get(0),
+            )
+            .map(Some)
+            .or_else(|e| match e {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(other),
+            })
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        let Some(parent) = parent else {
+            return Ok(false);
+        };
+        tx.execute(
+            "UPDATE folders SET parent_id = ?2 WHERE parent_id = ?1",
+            rusqlite::params![folder_id, parent],
+        )
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+        tx.execute(
+            "UPDATE entries SET folder_id = ?2 WHERE folder_id = ?1",
+            rusqlite::params![folder_id, parent],
+        )
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+        tx.execute(
+            "DELETE FROM folders WHERE id = ?1",
+            rusqlite::params![folder_id],
+        )
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+        tx.commit()
+            .map_err(|e| VaultError::Database(e.to_string()))?;
+        drop(guard);
+        Ok(true)
+    }
+
+    /// File an entry in a folder, or take it out of its folder with `None`.
+    /// False when the entry (or the folder) does not exist.
+    pub fn set_entry_folder(
+        &self,
+        entry_id: &str,
+        folder_id: Option<&str>,
+    ) -> Result<bool, VaultError> {
+        self.execute(|conn| {
+            if let Some(folder) = folder_id {
+                let known: i64 = conn.query_row(
+                    "SELECT COUNT(*) FROM folders WHERE id = ?1",
+                    rusqlite::params![folder],
+                    |row| row.get(0),
+                )?;
+                if known == 0 {
+                    return Ok(false);
+                }
+            }
+            let changed = conn.execute(
+                "UPDATE entries SET folder_id = ?2 WHERE id = ?1",
+                rusqlite::params![entry_id, folder_id],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// The folder of every entry that is in one, as (entry id, folder id).
+    pub fn entry_folders(&self) -> Result<Vec<(String, String)>, VaultError> {
+        self.execute(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id, folder_id FROM entries WHERE folder_id IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect()
         })
     }
 

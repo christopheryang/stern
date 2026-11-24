@@ -23,6 +23,32 @@ pub enum Intent {
         name: String,
         fields: Vec<(String, String)>,
     },
+    /// Make a folder, at the top level or inside `parent`. An empty
+    /// `name` means the request did not say what to call it.
+    CreateFolder {
+        name: String,
+        parent: Option<String>,
+    },
+    /// File an entry in a folder; `folder` of `None` takes it out of its
+    /// folder.
+    MoveEntry {
+        name: String,
+        folder: Option<String>,
+    },
+    /// Show the folder tree, or what is inside one folder.
+    ShowFolders {
+        folder: Option<String>,
+    },
+    /// Give an entry (or, with `folder`, a folder) a new name. An empty
+    /// `new_name` means the request did not say what to call it.
+    Rename {
+        name: String,
+        new_name: String,
+        folder: bool,
+    },
+    DeleteFolder {
+        name: String,
+    },
     ExportVault,
     ImportVault,
     CreateVault,
@@ -113,6 +139,12 @@ pub fn classify_intent(text: &str) -> Intent {
         .map(|word| word.trim_end_matches(['?', '!', '.', ',']))
         .collect();
 
+    // Folder requests are exact words and cannot be mistaken for small
+    // talk or a help question, so they are read first.
+    if let Some(intent) = classify_folder_intent(text) {
+        return intent;
+    }
+
     if is_greeting(&clean_words, &lower) {
         return Intent::Greeting;
     }
@@ -138,6 +170,10 @@ pub fn classify_intent(text: &str) -> Intent {
     }
 
     if let Some(intent) = detect_store(&words, &lower) {
+        return intent;
+    }
+
+    if let Some(intent) = detect_plural_list(&clean_words) {
         return intent;
     }
 
@@ -336,11 +372,79 @@ fn detect_list(words: &[&str], full_text: &str) -> Option<Intent> {
     Some(Intent::ListSecrets { category })
 }
 
+/// Words that only say what kind of thing a delete request points at.
+const DELETE_FILLER: &[&str] = &[
+    "my",
+    "the",
+    "a",
+    "an",
+    "old",
+    "saved",
+    "stored",
+    "entry",
+    "entries",
+    "item",
+    "secret",
+    "password",
+    "login",
+    "note",
+    "document",
+    "credential",
+    "token",
+    "named",
+    "called",
+];
+
+/// The name a delete request points at: "delete my old netflix entry"
+/// gives "netflix".
+fn extract_delete_name(words: &[&str]) -> String {
+    let named: Vec<&str> = words
+        .iter()
+        .copied()
+        .filter(|w| !DELETE_VERBS.contains(w) && !DELETE_FILLER.contains(w))
+        .map(|w| w.trim_matches(['.', '!', '?', ',', '"', '\'']))
+        .filter(|w| !w.is_empty())
+        .collect();
+    if named.is_empty() {
+        extract_retrieve_name(&words.join(" "))
+    } else {
+        named.join(" ")
+    }
+}
+
+/// "show my notes", "list all my passwords": a plural kind after a show
+/// verb asks for the whole list, not for one entry named "notes".
+fn detect_plural_list(words: &[&str]) -> Option<Intent> {
+    const PLURALS: &[(&str, &str)] = &[
+        ("notes", "note"),
+        ("documents", "document"),
+        ("passwords", "password"),
+        ("logins", "login"),
+        ("secrets", "secret"),
+        ("credentials", "credential"),
+        ("tokens", "token"),
+        ("files", "document"),
+    ];
+    if !matches!(
+        words.first(),
+        Some(&("show" | "list" | "display" | "see" | "view"))
+    ) {
+        return None;
+    }
+    let last = words.last()?;
+    PLURALS
+        .iter()
+        .find(|(plural, _)| plural == last)
+        .map(|(_, kind)| Intent::ListSecrets {
+            category: Some((*kind).to_string()),
+        })
+}
+
 fn detect_delete(words: &[&str]) -> Option<Intent> {
     if !is_delete_context(words) {
         return None;
     }
-    let name = extract_retrieve_name(&words.to_vec().join(" "));
+    let name = extract_delete_name(words);
     if name.is_empty() {
         return None;
     }
@@ -698,4 +802,287 @@ fn extract_key_value_pairs(text: &str) -> Vec<(String, String)> {
     }
 
     pairs
+}
+
+// ---------------------------------------------------------------------
+// Folders. These rules read the words as typed, not lowercased, because a
+// folder name keeps its capitals: "create folder Taxes" makes "Taxes".
+// ---------------------------------------------------------------------
+
+/// Lead-in words with no meaning of their own, removed word by word.
+fn strip_lead_words<'a, 'b>(words: &'b [&'a str]) -> &'b [&'a str] {
+    const LEADS: &[&[&str]] = &[
+        &["can", "you", "please"],
+        &["could", "you", "please"],
+        &["would", "you", "please"],
+        &["will", "you", "please"],
+        &["can", "you"],
+        &["could", "you"],
+        &["would", "you"],
+        &["will", "you"],
+        &["please"],
+        &["kindly"],
+    ];
+    let mut rest = words;
+    'again: loop {
+        for lead in LEADS {
+            let hit = rest.len() > lead.len()
+                && rest
+                    .iter()
+                    .zip(lead.iter())
+                    .all(|(w, l)| w.trim_end_matches(',').eq_ignore_ascii_case(l));
+            if hit {
+                rest = rest.get(lead.len()..).unwrap_or(rest);
+                continue 'again;
+            }
+        }
+        return rest;
+    }
+}
+
+const PARENT_PREPS: &[&str] = &["in", "inside", "under", "within"];
+const TARGET_PREPS: &[&str] = &["to", "into", "in", "under", "inside"];
+const REF_FILLER: &[&str] = &["my", "the", "a", "an", "new", "called", "named", "folder"];
+
+fn clean_word(word: &str) -> &str {
+    word.trim_matches(['.', '!', '?', ',', '"', '\'', ':', ';'])
+}
+
+/// The words as one reference, minus the filler in front and the
+/// punctuation around it.
+fn reference(words: &[&str]) -> String {
+    let kept: Vec<&str> = words
+        .iter()
+        .map(|w| clean_word(w))
+        .filter(|w| !w.is_empty())
+        .collect();
+    // Filler goes only while something else remains: a folder called "A"
+    // is still a folder called "A".
+    let start = kept
+        .iter()
+        .position(|w| !REF_FILLER.contains(&w.to_lowercase().as_str()))
+        .unwrap_or_else(|| kept.len().saturating_sub(1));
+    let mut kept = kept.get(start..).unwrap_or_default().to_vec();
+    if kept
+        .last()
+        .is_some_and(|w| w.eq_ignore_ascii_case("folder") || w.eq_ignore_ascii_case("folders"))
+    {
+        kept.pop();
+    }
+    kept.join(" ")
+}
+
+/// An entry reference: the same, without the words that only say what kind
+/// of thing it is ("netflix login" is the entry called Netflix).
+fn entry_reference(words: &[&str]) -> String {
+    let plain = reference(words);
+    let trimmed: Vec<&str> = plain
+        .split_whitespace()
+        .filter(|w| {
+            !DELETE_FILLER.contains(&w.to_lowercase().as_str()) || w.eq_ignore_ascii_case("old")
+        })
+        .collect();
+    if trimmed.is_empty() {
+        plain
+    } else {
+        trimmed.join(" ")
+    }
+}
+
+fn lowered(words: &[&str]) -> Vec<String> {
+    words.iter().map(|w| clean_word(w).to_lowercase()).collect()
+}
+
+fn position_of(lw: &[String], any: &[&str], from: usize) -> Option<usize> {
+    lw.iter()
+        .enumerate()
+        .skip(from)
+        .find(|(_, w)| any.contains(&w.as_str()))
+        .map(|(i, _)| i)
+}
+
+fn last_position_of(lw: &[String], any: &[&str]) -> Option<usize> {
+    lw.iter()
+        .enumerate()
+        .rev()
+        .find(|(_, w)| any.contains(&w.as_str()))
+        .map(|(i, _)| i)
+}
+
+/// Folder requests: make, rename, delete, move into, and show. `None`
+/// when the text is not about folders.
+#[must_use]
+pub fn classify_folder_intent(text: &str) -> Option<Intent> {
+    let all: Vec<&str> = text.split_whitespace().collect();
+    let words = strip_lead_words(&all);
+    let lw = lowered(words);
+    let first = lw.first()?.as_str();
+    let mentions_folder = lw.iter().any(|w| w == "folder" || w == "folders");
+
+    if first == "rename" {
+        return Some(parse_rename(words, &lw));
+    }
+    if matches!(first, "delete" | "remove") && mentions_folder {
+        return Some(Intent::DeleteFolder {
+            name: reference(words.get(1..).unwrap_or_default()),
+        });
+    }
+    // "add folder Receipts in Taxes" makes a folder; "add receipts to the
+    // Taxes folder" files an entry. Where "folder" comes tells them apart.
+    let names_new_folder = matches!(first, "create" | "make" | "new")
+        || (first == "add"
+            && lw
+                .iter()
+                .position(|w| w == "folder")
+                .is_some_and(|i| i <= 2));
+    if names_new_folder {
+        if let Some(intent) = parse_create_folder(words, &lw) {
+            return Some(intent);
+        }
+    }
+    if matches!(first, "move" | "put" | "file" | "add") {
+        if let Some(intent) = parse_move(words, &lw) {
+            return Some(intent);
+        }
+    }
+    parse_show_folders(words, &lw)
+}
+
+fn parse_rename(words: &[&str], lw: &[String]) -> Intent {
+    let to = last_position_of(lw, &["to", "as"]).filter(|i| *i > 0);
+    let folder = lw.iter().skip(1).take(3).any(|w| w == "folder");
+    let (left, right): (&[&str], &[&str]) = to.map_or_else(
+        || (words.get(1..).unwrap_or_default(), &[][..]),
+        |i| {
+            (
+                words.get(1..i).unwrap_or_default(),
+                words.get(i.saturating_add(1)..).unwrap_or_default(),
+            )
+        },
+    );
+    let name = if folder {
+        reference(left)
+    } else {
+        entry_reference(left)
+    };
+    let new_name = right
+        .iter()
+        .map(|w| clean_word(w))
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    Intent::Rename {
+        name,
+        new_name,
+        folder,
+    }
+}
+
+fn parse_move(words: &[&str], lw: &[String]) -> Option<Intent> {
+    // "take it out of its folder": no folder at all.
+    let out_of = lw
+        .iter()
+        .position(|w| w == "out")
+        .filter(|i| lw.get(i.saturating_add(1)).is_some_and(|next| next == "of"));
+    if let Some(i) = out_of {
+        return Some(Intent::MoveEntry {
+            name: entry_reference(words.get(1..i).unwrap_or_default()),
+            folder: None,
+        });
+    }
+    let prep = last_position_of(lw, TARGET_PREPS).filter(|i| *i > 1)?;
+    let target = reference(words.get(prep.saturating_add(1)..).unwrap_or_default());
+    // "add a note to my vault" or "put it in the vault" is not a folder.
+    if target.is_empty()
+        || target.eq_ignore_ascii_case("vault")
+        || target.eq_ignore_ascii_case("my vault")
+    {
+        return None;
+    }
+    let verb = lw.first()?.as_str();
+    let named_folder = lw.iter().any(|w| w == "folder");
+    // "add" and "put" are everyday words: only a folder is a reason to
+    // read them as a move.
+    if matches!(verb, "add" | "put") && !named_folder {
+        return None;
+    }
+    let name = entry_reference(words.get(1..prep).unwrap_or_default());
+    if name.is_empty() {
+        return None;
+    }
+    let lower_target = target.to_lowercase();
+    let folder = if matches!(
+        lower_target.as_str(),
+        "top level" | "the top level" | "top" | "no folder" | "root"
+    ) {
+        None
+    } else {
+        Some(target)
+    };
+    Some(Intent::MoveEntry { name, folder })
+}
+
+fn parse_create_folder(words: &[&str], lw: &[String]) -> Option<Intent> {
+    let first = lw.first()?.as_str();
+    let folder_at = position_of(lw, &["folder"], 1)?;
+    if !matches!(first, "create" | "make" | "new" | "add") {
+        return None;
+    }
+    let after = words.get(folder_at.saturating_add(1)..).unwrap_or_default();
+    let after_lw = lw.get(folder_at.saturating_add(1)..).unwrap_or_default();
+    let prep = position_of(after_lw, PARENT_PREPS, 0);
+    let (name_words, parent_words): (&[&str], &[&str]) = prep.map_or((after, &[][..]), |i| {
+        (
+            after.get(..i).unwrap_or_default(),
+            after.get(i.saturating_add(1)..).unwrap_or_default(),
+        )
+    });
+    let parent = reference(parent_words);
+    Some(Intent::CreateFolder {
+        name: reference(name_words),
+        parent: (!parent.is_empty()).then_some(parent),
+    })
+}
+
+fn parse_show_folders(words: &[&str], lw: &[String]) -> Option<Intent> {
+    let first = lw.first()?.as_str();
+    let asks = matches!(
+        first,
+        "show" | "list" | "display" | "view" | "open" | "see" | "what" | "what's" | "which" | "how"
+    );
+    if !asks {
+        return None;
+    }
+    let overview = lw.iter().any(|w| {
+        matches!(
+            w.as_str(),
+            "folders" | "tree" | "hierarchy" | "structure" | "organized" | "organised" | "layout"
+        )
+    });
+    if overview {
+        return Some(Intent::ShowFolders { folder: None });
+    }
+    // A single folder needs the word "folder": "what's in the Taxes
+    // folder", "open the Taxes folder", "show folder Taxes". Without it
+    // "what's in my shopping list" is a question about a note.
+    let at = lw.iter().position(|w| w == "folder")?;
+    let inside = lw
+        .iter()
+        .position(|w| matches!(w.as_str(), "in" | "inside"))
+        .filter(|i| *i < at);
+    // "show folder Taxes" names it after; "open the Taxes folder" before.
+    let after = reference(words.get(at.saturating_add(1)..).unwrap_or_default());
+    let target = if after.is_empty() {
+        let from = inside.map_or(1, |i| i.saturating_add(1));
+        reference(words.get(from..at).unwrap_or_default())
+    } else {
+        after
+    };
+    let lower = target.to_lowercase();
+    if target.is_empty() || matches!(lower.as_str(), "vault" | "my vault" | "the vault") {
+        return Some(Intent::ShowFolders { folder: None });
+    }
+    Some(Intent::ShowFolders {
+        folder: Some(target),
+    })
 }

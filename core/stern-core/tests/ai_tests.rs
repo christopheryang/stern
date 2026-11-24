@@ -432,10 +432,10 @@ fn list_response() {
 fn list_no_category_response() {
     let resp = handler().process_message("show all secrets");
     match resp.action.expect("should have action") {
-        Action::SearchEntry { query, .. } => {
-            assert!(!query.is_empty());
+        Action::ListEntries { category } => {
+            assert_eq!(category.as_deref(), Some("secret"));
         }
-        other => panic!("expected SearchEntry, got: {other:?}"),
+        other => panic!("expected ListEntries, got: {other:?}"),
     }
 }
 
@@ -1127,4 +1127,211 @@ fn a_store_that_carries_its_content_is_still_saved_at_once() {
         },
     );
     assert!(matches!(reply.action, Some(Action::StoreEntry { .. })));
+}
+
+// ---- folders, rename and delete wording ----
+
+fn folder_intent(text: &str) -> Intent {
+    classify_intent(text)
+}
+
+#[test]
+fn create_folder_phrasings() {
+    let make = |name: &str, parent: Option<&str>| Intent::CreateFolder {
+        name: name.into(),
+        parent: parent.map(Into::into),
+    };
+    assert_eq!(folder_intent("create folder Taxes"), make("Taxes", None));
+    assert_eq!(
+        folder_intent("please make a new folder named Work"),
+        make("Work", None)
+    );
+    assert_eq!(
+        folder_intent("create a folder called Tax Returns in Taxes"),
+        make("Tax Returns", Some("Taxes"))
+    );
+    assert_eq!(
+        folder_intent("add folder Receipts inside Taxes > 2024"),
+        make("Receipts", Some("Taxes > 2024"))
+    );
+    // No name given: the handler asks for one.
+    assert_eq!(folder_intent("create a folder"), make("", None));
+}
+
+#[test]
+fn move_phrasings() {
+    let mv = |name: &str, folder: Option<&str>| Intent::MoveEntry {
+        name: name.into(),
+        folder: folder.map(Into::into),
+    };
+    assert_eq!(
+        folder_intent("move Netflix to Streaming"),
+        mv("Netflix", Some("Streaming"))
+    );
+    assert_eq!(
+        folder_intent("could you move my Netflix login into the Streaming folder"),
+        mv("Netflix", Some("Streaming"))
+    );
+    assert_eq!(
+        folder_intent("file my passport under Travel > Documents"),
+        mv("passport", Some("Travel > Documents"))
+    );
+    assert_eq!(
+        folder_intent("move lease out of its folder"),
+        mv("lease", None)
+    );
+    assert_eq!(
+        folder_intent("move Netflix to the top level"),
+        mv("Netflix", None)
+    );
+}
+
+#[test]
+fn everyday_words_that_look_like_folder_requests_are_not() {
+    // Adding something to the vault is a store, not a move.
+    assert!(matches!(
+        classify_intent("add a note to my vault"),
+        Intent::StoreSecret { .. }
+    ));
+    // "what's in my shopping list" is about a note, not a folder.
+    assert!(!matches!(
+        classify_intent("what's in my shopping list"),
+        Intent::ShowFolders { .. }
+    ));
+    assert!(!matches!(
+        classify_intent("save my Netflix password"),
+        Intent::MoveEntry { .. } | Intent::CreateFolder { .. }
+    ));
+}
+
+#[test]
+fn show_folder_phrasings() {
+    let show = |folder: Option<&str>| Intent::ShowFolders {
+        folder: folder.map(Into::into),
+    };
+    assert_eq!(folder_intent("show my folders"), show(None));
+    assert_eq!(folder_intent("what folders do I have"), show(None));
+    assert_eq!(
+        folder_intent("show me how my vault is organised"),
+        show(None)
+    );
+    assert_eq!(
+        folder_intent("what's in the Taxes folder"),
+        show(Some("Taxes"))
+    );
+    assert_eq!(folder_intent("open the Taxes folder"), show(Some("Taxes")));
+    assert_eq!(folder_intent("show folder Taxes"), show(Some("Taxes")));
+}
+
+#[test]
+fn rename_and_delete_folder_phrasings() {
+    assert_eq!(
+        folder_intent("rename Netflix to Netflix Family"),
+        Intent::Rename {
+            name: "Netflix".into(),
+            new_name: "Netflix Family".into(),
+            folder: false
+        }
+    );
+    assert_eq!(
+        folder_intent("rename the Taxes folder to Tax Docs"),
+        Intent::Rename {
+            name: "Taxes".into(),
+            new_name: "Tax Docs".into(),
+            folder: true
+        }
+    );
+    assert_eq!(
+        folder_intent("rename my shopping list"),
+        Intent::Rename {
+            name: "shopping list".into(),
+            new_name: String::new(),
+            folder: false
+        }
+    );
+    assert_eq!(
+        folder_intent("delete the Old folder"),
+        Intent::DeleteFolder { name: "Old".into() }
+    );
+}
+
+#[test]
+fn delete_names_are_cleaned() {
+    assert_eq!(
+        classify_intent("delete my old netflix entry"),
+        Intent::DeleteSecret {
+            name: "netflix".into()
+        }
+    );
+    assert_eq!(
+        classify_intent("remove the GitHub token"),
+        Intent::DeleteSecret {
+            name: "github".into()
+        }
+    );
+}
+
+#[test]
+fn plural_kinds_list_instead_of_searching() {
+    let list = |c: &str| Intent::ListSecrets {
+        category: Some(c.into()),
+    };
+    assert_eq!(classify_intent("show all my notes"), list("note"));
+    assert_eq!(classify_intent("show my passwords"), list("password"));
+    assert_eq!(classify_intent("list my documents"), list("document"));
+}
+
+#[test]
+fn folder_actions_never_print_values() {
+    let action = Action::MoveEntry {
+        name: "Netflix".into(),
+        folder: Some("Streaming".into()),
+    };
+    assert!(format!("{action:?}").contains("MoveEntry"));
+    let delete = Action::DeleteEntry {
+        entry_id: "id-1".into(),
+        name: "Netflix".into(),
+    };
+    assert!(format!("{delete:?}").contains("DeleteEntry"));
+}
+
+#[test]
+fn a_yes_after_a_delete_request_deletes_that_entry() {
+    let h = handler();
+    h.set_vault_state(true, true);
+    h.set_pending_delete("id-9", "Netflix");
+    match h.process_message("yes").action.expect("action") {
+        Action::DeleteEntry { entry_id, name } => {
+            assert_eq!(entry_id, "id-9");
+            assert_eq!(name, "Netflix");
+        }
+        other => panic!("expected DeleteEntry, got: {other:?}"),
+    }
+}
+
+#[test]
+fn a_no_keeps_the_entry_and_anything_else_deletes_nothing() {
+    let h = handler();
+    h.set_vault_state(true, true);
+    h.set_pending_delete("id-9", "Netflix");
+    let kept = h.process_message("No, keep it");
+    assert!(kept.action.is_none());
+    assert!(kept.message.contains("kept"), "message: {}", kept.message);
+
+    // Moving on to something else forgets the confirmation: a later
+    // "yes" must not delete anything.
+    h.set_pending_delete("id-9", "Netflix");
+    let moved_on = h.process_message("hello");
+    assert!(!matches!(moved_on.action, Some(Action::DeleteEntry { .. })));
+    let late_yes = h.process_message("yes");
+    assert!(!matches!(late_yes.action, Some(Action::DeleteEntry { .. })));
+}
+
+#[test]
+fn folder_requests_wait_for_the_vault() {
+    // A new handler treats the vault as missing and locked until synced.
+    let h = ChatHandler::new(None);
+    let reply = h.process_message("create folder Taxes");
+    assert!(reply.input_sensitive, "message: {}", reply.message);
+    assert!(reply.action.is_none());
 }

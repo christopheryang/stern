@@ -14,3 +14,4 @@ pub const RECOVERY_KEY_LEN: usize = 32;
 pub const VERIFY_HASH_LEN: usize = 32;
 
 pub const BLOB_AAD_SUFFIX: &[u8] = b"blob";
+pub const FOLDER_AAD_SUFFIX: &[u8] = b"folder";

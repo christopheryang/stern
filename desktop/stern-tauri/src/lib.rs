@@ -11,6 +11,7 @@
 mod commands;
 mod files;
 mod notes;
+mod organize;
 
 use std::sync::Arc;
 use stern_core::ai::model_manager::ModelManager;

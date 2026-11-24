@@ -997,3 +997,208 @@ fn a_stored_file_cannot_be_moved_to_another_entry() {
     let err = crate::files::read_stored(&state, &second).unwrap_err();
     assert!(err.to_string().contains("decryption"), "{err}");
 }
+
+// ---- folders, listing, rename and delete from chat ----
+
+fn unlocked_state_with_entries() -> (AppState, tempfile::TempPath) {
+    let (state, path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    store_test_entry(&state, "Netflix", "hunter2-secret");
+    store_test_entry(&state, "GitHub", "ghp-token-value");
+    (state, path)
+}
+
+#[test]
+fn folders_can_be_made_nested_and_shown_without_values() {
+    let (state, _path) = unlocked_state_with_entries();
+    assert!(chat(&state, "create folder Streaming")
+        .message
+        .contains("Created the folder"));
+    let nested = chat(&state, "create folder Kids in Streaming");
+    assert!(
+        nested.message.contains("inside \"Streaming\""),
+        "message: {}",
+        nested.message
+    );
+    let moved = chat(&state, "move Netflix to Streaming > Kids");
+    assert!(
+        moved.message.contains("Streaming > Kids"),
+        "message: {}",
+        moved.message
+    );
+
+    let tree = chat(&state, "show my folders");
+    assert!(tree.message.contains("📁 Streaming"), "{}", tree.message);
+    assert!(tree.message.contains("📁 Kids"), "{}", tree.message);
+    assert!(tree.message.contains("Netflix (login)"), "{}", tree.message);
+    assert!(tree.message.contains("GitHub (login)"), "{}", tree.message);
+    // Structure only: never a stored value.
+    assert!(!tree.message.contains("hunter2-secret"));
+    assert!(!tree.message.contains("ghp-token-value"));
+}
+
+#[test]
+fn folder_names_are_encrypted_in_the_database() {
+    let (state, _path) = unlocked_state_with_entries();
+    chat(&state, "create folder Divorce Papers");
+    let stored = state.repository.list_folders().unwrap();
+    assert_eq!(stored.len(), 1);
+    let raw = String::from_utf8_lossy(&stored[0].ciphertext).to_string();
+    assert!(!raw.contains("Divorce"));
+    // And a name moved onto another folder fails to decrypt.
+    chat(&state, "create folder Other");
+    let both = state.repository.list_folders().unwrap();
+    let kek = *state.session.lock().unwrap().kek().unwrap();
+    let mut swapped = both[0].clone();
+    swapped.ciphertext = both[1].ciphertext.clone();
+    swapped.nonce = both[1].nonce;
+    swapped.dek_wrapped = both[1].dek_wrapped.clone();
+    assert!(crate::organize::folder_name_for_test(&state, &kek, &swapped).is_err());
+}
+
+#[test]
+fn a_duplicate_or_misplaced_folder_is_explained() {
+    let (state, _path) = unlocked_state_with_entries();
+    chat(&state, "create folder Taxes");
+    assert!(chat(&state, "create folder taxes")
+        .message
+        .contains("already a folder"));
+    assert!(chat(&state, "create folder Sub in Nowhere")
+        .message
+        .contains("don't see a folder"));
+    assert!(chat(&state, "create a folder")
+        .message
+        .contains("What should the folder be called"));
+    assert!(chat(&state, "move Netflix to Nowhere")
+        .message
+        .contains("don't see a folder"));
+    assert!(chat(&state, "move Missing to Taxes")
+        .message
+        .contains("couldn't find"));
+}
+
+#[test]
+fn an_entry_can_come_back_out_of_a_folder() {
+    let (state, _path) = unlocked_state_with_entries();
+    chat(&state, "create folder Streaming");
+    chat(&state, "move Netflix to Streaming");
+    let out = chat(&state, "move Netflix out of its folder");
+    assert!(out.message.contains("out of its folder"), "{}", out.message);
+    assert!(state.repository.entry_folders().unwrap().is_empty());
+}
+
+#[test]
+fn deleting_a_folder_keeps_its_entries() {
+    let (state, _path) = unlocked_state_with_entries();
+    chat(&state, "create folder Streaming");
+    chat(&state, "move Netflix to Streaming");
+    let gone = chat(&state, "delete the Streaming folder");
+    assert!(
+        gone.message.contains("Deleted the folder"),
+        "{}",
+        gone.message
+    );
+    assert_eq!(state.repository.count_entries().unwrap(), 2);
+    assert!(state.repository.list_folders().unwrap().is_empty());
+}
+
+#[test]
+fn listing_shows_names_never_values() {
+    let (state, _path) = unlocked_state_with_entries();
+    let all = chat(&state, "list all my secrets");
+    assert!(all.message.contains("Netflix"), "{}", all.message);
+    assert!(all.message.contains("GitHub"), "{}", all.message);
+    assert!(!all.message.contains("hunter2-secret"));
+    let none = chat(&state, "show all my documents");
+    assert!(none.message.contains("no document"), "{}", none.message);
+}
+
+#[test]
+fn deleting_an_entry_asks_first_and_only_a_yes_deletes() {
+    let (state, _path) = unlocked_state_with_entries();
+    let ask = chat(&state, "delete my old netflix entry");
+    assert!(
+        ask.message.contains("Delete \"Netflix\""),
+        "{}",
+        ask.message
+    );
+    assert_eq!(ask.options.len(), 2);
+    assert_eq!(state.repository.count_entries().unwrap(), 2);
+
+    let kept = chat(&state, "No, keep it");
+    assert!(kept.message.contains("kept"));
+    assert_eq!(state.repository.count_entries().unwrap(), 2);
+
+    chat(&state, "delete Netflix");
+    let done = chat(&state, "Yes, delete it");
+    assert!(
+        done.message.contains("Deleted \"Netflix\""),
+        "{}",
+        done.message
+    );
+    assert_eq!(state.repository.count_entries().unwrap(), 1);
+}
+
+#[test]
+fn deleting_something_that_is_not_there_says_so() {
+    let (state, _path) = unlocked_state_with_entries();
+    let reply = chat(&state, "delete my Hulu login");
+    assert!(reply.message.contains("couldn't find"), "{}", reply.message);
+    assert!(reply.options.is_empty());
+}
+
+#[test]
+fn renaming_an_entry_keeps_its_secrets_readable() {
+    let (state, _path) = unlocked_state_with_entries();
+    let renamed = chat(&state, "rename Netflix to Netflix Family");
+    assert!(
+        renamed.message.contains("Renamed \"Netflix\""),
+        "{}",
+        renamed.message
+    );
+    let found = chat(&state, "what's my password for Netflix Family");
+    assert!(
+        found.message.contains("hunter2-secret"),
+        "{}",
+        found.message
+    );
+    assert!(chat(&state, "rename Netflix Family")
+        .message
+        .contains("What should"));
+}
+
+#[test]
+fn renaming_a_folder_works_and_clashes_are_refused() {
+    let (state, _path) = unlocked_state_with_entries();
+    chat(&state, "create folder Taxes");
+    chat(&state, "create folder Home");
+    assert!(chat(&state, "rename folder Taxes to Home")
+        .message
+        .contains("already a folder"));
+    let ok = chat(&state, "rename the Taxes folder to Tax Docs");
+    assert!(ok.message.contains("Renamed the folder"), "{}", ok.message);
+    assert!(chat(&state, "show my folders").message.contains("Tax Docs"));
+}
+
+#[test]
+fn a_folder_cannot_be_moved_into_its_own_child() {
+    let (state, _path) = unlocked_state_with_entries();
+    chat(&state, "create folder A");
+    chat(&state, "create folder B in A");
+    let refused = chat(&state, "move A to B");
+    assert!(
+        refused.message.contains("inside itself"),
+        "{}",
+        refused.message
+    );
+}
+
+#[test]
+fn the_organising_commands_refuse_a_locked_vault() {
+    let (state, _path) = make_test_app_state();
+    let reply = crate::organize::show_folders(&state, None);
+    assert!(matches!(reply, Err(VaultError::VaultLocked)));
+    let reply = handle_organize(&state, &CoreAction::ShowFolders { folder: None });
+    assert_eq!(reply.action.as_deref(), Some("locked"));
+}

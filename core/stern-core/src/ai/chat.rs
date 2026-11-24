@@ -2,7 +2,7 @@ use crate::ai::conversation::{
     has_own_screen, is_placeholder_name, is_sensitive_field, kind_word, Conversation,
     Step as ConversationStep,
 };
-use crate::ai::intent::{classify_intent, Intent};
+use crate::ai::intent::{classify_folder_intent, classify_intent, Intent};
 use crate::ai::model::AiModel;
 use std::sync::{Arc, Mutex, RwLock};
 use zeroize::Zeroizing;
@@ -15,6 +15,16 @@ pub struct EntryCandidate {
     /// The label shown for it in the choice.
     pub label: String,
 }
+
+/// A delete waiting for the user to confirm it.
+struct PendingDelete {
+    entry_id: String,
+    name: String,
+}
+
+/// The two answers offered with a delete confirmation.
+pub const DELETE_YES: &str = "Yes, delete it";
+pub const DELETE_NO: &str = "No, keep it";
 
 /// A lettered entry choice waiting for the user's pick.
 struct PendingChoice {
@@ -31,6 +41,8 @@ pub struct ChatHandler {
     /// A lettered entry choice waiting for the user's pick, set
     /// when a search matched several entries.
     pending_choice: Mutex<Option<PendingChoice>>,
+    /// An entry waiting for the user's yes or no before it is deleted.
+    pending_delete: Mutex<Option<PendingDelete>>,
     /// Vault readiness as last synced by the app layer. Defaults
     /// to NOT ready — fail closed: until the app syncs the real
     /// state, the handler treats the vault as missing and locked
@@ -114,6 +126,7 @@ impl ChatHandler {
             model: RwLock::new(model),
             conversation: Mutex::new(None),
             pending_choice: Mutex::new(None),
+            pending_delete: Mutex::new(None),
             vault_state: Mutex::new(VaultState {
                 exists: false,
                 unlocked: false,
@@ -160,6 +173,20 @@ impl ChatHandler {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         *guard = Some(PendingChoice { candidates, field });
+    }
+
+    /// Ask the user to confirm deleting this entry. The next message is
+    /// the answer: a yes deletes it, a no keeps it, and anything else
+    /// means the user moved on, so nothing is deleted.
+    pub fn set_pending_delete(&self, entry_id: &str, name: &str) {
+        let mut guard = self
+            .pending_delete
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        *guard = Some(PendingDelete {
+            entry_id: entry_id.to_string(),
+            name: name.to_string(),
+        });
     }
 
     /// Sync the vault's readiness from the app layer. The app
@@ -385,6 +412,10 @@ impl ChatHandler {
             // processed normally below with the choice forgotten.
         }
 
+        if let Some(response) = self.answer_pending_delete(user_input) {
+            return response;
+        }
+
         // A guided conversation in progress owns the message.
         let active = {
             let mut guard = self
@@ -424,6 +455,33 @@ impl ChatHandler {
 
         let intent = self.acquire_intent(user_input);
         self.dispatch_fresh(user_input, intent)
+    }
+
+    /// The reply to a yes or no that a delete confirmation is waiting for,
+    /// or `None` when no delete is waiting or the user moved on (in which
+    /// case nothing is deleted and the message is handled normally).
+    fn answer_pending_delete(&self, user_input: &str) -> Option<ChatResponse> {
+        let delete = {
+            let mut guard = self
+                .pending_delete
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            guard.take()
+        }?;
+        if parse_yes_no(user_input)? {
+            Some(Self::vault_action(
+                String::new(),
+                Action::DeleteEntry {
+                    entry_id: delete.entry_id,
+                    name: delete.name,
+                },
+            ))
+        } else {
+            Some(plain_response(&format!(
+                "Okay, \"{}\" is kept.",
+                delete.name
+            )))
+        }
     }
 
     /// Process a message whose intent a parser (the AI model) has already
@@ -489,6 +547,11 @@ impl ChatHandler {
                     | Intent::ListSecrets { .. }
                     | Intent::DeleteSecret { .. }
                     | Intent::UpdateSecret { .. }
+                    | Intent::CreateFolder { .. }
+                    | Intent::MoveEntry { .. }
+                    | Intent::ShowFolders { .. }
+                    | Intent::Rename { .. }
+                    | Intent::DeleteFolder { .. }
                     | Intent::ExportVault
                     | Intent::ImportVault
             );
@@ -526,6 +589,19 @@ impl ChatHandler {
         }
 
         self.finish(intent)
+    }
+
+    /// A reply that carries an action for the app layer to carry out. The
+    /// app layer writes the message, since it is the one that knows what
+    /// happened.
+    const fn vault_action(message: String, action: Action) -> ChatResponse {
+        ChatResponse {
+            message,
+            action: Some(action),
+            user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
+        }
     }
 
     /// The reply that shows the file picker for a document.
@@ -587,6 +663,11 @@ impl ChatHandler {
     /// fallback for no model, a model error, or output that does
     /// not parse.
     fn acquire_intent(&self, user_input: &str) -> Intent {
+        // Folder requests are exact words ("move X to Y"), which the
+        // rules read reliably and a small model does not know at all.
+        if let Some(folder_intent) = classify_folder_intent(user_input) {
+            return folder_intent;
+        }
         match self.model_intent(user_input) {
             // A greeting or help answer is cheap to double-check:
             // small models sometimes say "greeting" for a vault
@@ -735,6 +816,30 @@ impl ChatHandler {
                     input_sensitive: false,
                 }
             }
+            Intent::CreateFolder { name, parent } => {
+                Self::vault_action(String::new(), Action::CreateFolder { name, parent })
+            }
+            Intent::MoveEntry { name, folder } => {
+                Self::vault_action(String::new(), Action::MoveEntry { name, folder })
+            }
+            Intent::ShowFolders { folder } => {
+                Self::vault_action(String::new(), Action::ShowFolders { folder })
+            }
+            Intent::Rename {
+                name,
+                new_name,
+                folder,
+            } => Self::vault_action(
+                String::new(),
+                Action::RenameItem {
+                    name,
+                    new_name,
+                    folder,
+                },
+            ),
+            Intent::DeleteFolder { name } => {
+                Self::vault_action(String::new(), Action::DeleteFolder { name })
+            }
             Intent::ExportVault => ChatResponse {
                 message: "Opening secure export dialog...".to_string(),
                 action: Some(Action::ExportVault),
@@ -805,6 +910,28 @@ impl ChatHandler {
             },
         }
     }
+}
+
+/// A yes or no answer, or `None` when the text is neither.
+fn parse_yes_no(input: &str) -> Option<bool> {
+    let lower = input.trim().trim_end_matches(['.', '!']).to_lowercase();
+    if lower == DELETE_YES.to_lowercase()
+        || matches!(
+            lower.as_str(),
+            "yes" | "y" | "yep" | "yeah" | "sure" | "ok" | "okay" | "confirm" | "delete" | "do it"
+        )
+    {
+        return Some(true);
+    }
+    if lower == DELETE_NO.to_lowercase()
+        || matches!(
+            lower.as_str(),
+            "no" | "n" | "nope" | "cancel" | "stop" | "keep" | "keep it" | "never mind"
+        )
+    {
+        return Some(false);
+    }
+    None
 }
 
 /// Parse a reply to a lettered entry choice: a letter within
@@ -908,6 +1035,35 @@ pub enum Action {
         name: String,
         fields: Vec<(String, String)>,
     },
+    /// Make a folder (inside `parent`, or at the top level).
+    CreateFolder {
+        name: String,
+        parent: Option<String>,
+    },
+    /// File an entry in a folder, or take it out of its folder.
+    MoveEntry {
+        name: String,
+        folder: Option<String>,
+    },
+    /// Show the folder tree, or what is inside one folder.
+    ShowFolders {
+        folder: Option<String>,
+    },
+    /// Rename an entry, or a folder.
+    RenameItem {
+        name: String,
+        new_name: String,
+        folder: bool,
+    },
+    /// Delete a folder. What is inside it is kept.
+    DeleteFolder {
+        name: String,
+    },
+    /// Delete this entry, after the user said yes.
+    DeleteEntry {
+        entry_id: String,
+        name: String,
+    },
     ExportVault,
     ImportVault,
     CreateVault,
@@ -964,6 +1120,38 @@ impl std::fmt::Debug for Action {
                 .debug_struct("UpdateEntry")
                 .field("name", name)
                 .field("field_keys", &keys(fields))
+                .finish(),
+            Self::CreateFolder { name, parent } => f
+                .debug_struct("CreateFolder")
+                .field("name", name)
+                .field("parent", parent)
+                .finish(),
+            Self::MoveEntry { name, folder } => f
+                .debug_struct("MoveEntry")
+                .field("name", name)
+                .field("folder", folder)
+                .finish(),
+            Self::ShowFolders { folder } => f
+                .debug_struct("ShowFolders")
+                .field("folder", folder)
+                .finish(),
+            Self::RenameItem {
+                name,
+                new_name,
+                folder,
+            } => f
+                .debug_struct("RenameItem")
+                .field("name", name)
+                .field("new_name", new_name)
+                .field("folder", folder)
+                .finish(),
+            Self::DeleteFolder { name } => {
+                f.debug_struct("DeleteFolder").field("name", name).finish()
+            }
+            Self::DeleteEntry { entry_id, name } => f
+                .debug_struct("DeleteEntry")
+                .field("entry_id", entry_id)
+                .field("name", name)
                 .finish(),
             Self::OpenNoteEditor => f.write_str("OpenNoteEditor"),
             Self::OpenFilePicker => f.write_str("OpenFilePicker"),
