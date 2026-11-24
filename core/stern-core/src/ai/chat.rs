@@ -1,5 +1,6 @@
 use crate::ai::conversation::{
-    is_sensitive_field, kind_word, Conversation, Step as ConversationStep,
+    has_own_screen, is_placeholder_name, is_sensitive_field, kind_word, Conversation,
+    Step as ConversationStep,
 };
 use crate::ai::intent::{classify_intent, Intent};
 use crate::ai::model::AiModel;
@@ -409,6 +410,7 @@ impl ChatHandler {
                     }
                 }
                 ConversationStep::NoteEditor => Self::note_editor_response(),
+                ConversationStep::FilePicker => Self::file_picker_response(),
                 ConversationStep::Finished(intent) => self.finish(intent),
                 ConversationStep::Cancelled => ChatResponse {
                     message: "Cancelled — nothing was saved.".to_string(),
@@ -421,6 +423,15 @@ impl ChatHandler {
         }
 
         let intent = self.acquire_intent(user_input);
+        self.dispatch_fresh(user_input, intent)
+    }
+
+    /// Process a message whose intent a parser (the AI model) has already
+    /// produced. Everything after parsing is the same as for
+    /// [`ChatHandler::process_message`], so the model's output is held to
+    /// the same rules as the classifier's.
+    #[must_use]
+    pub fn process_parsed(&self, user_input: &str, intent: Intent) -> ChatResponse {
         self.dispatch_fresh(user_input, intent)
     }
 
@@ -442,8 +453,20 @@ impl ChatHandler {
         // and fields. A store the parser named executes immediately,
         // exactly as it always has.
         let guided = match &intent {
-            Intent::StoreSecret { name, kind, fields } if name.is_empty() && fields.is_empty() => {
-                Some(Conversation::start_for_kind(kind))
+            // A store with nothing to keep is a request to start one, not
+            // something to save. This holds whatever name the parser gave
+            // it: a model answers "store a document" with the name
+            // "document", and filing that would save an empty entry. A
+            // note or document is filled in on its own screen, so a name
+            // does not skip it; any other kind keeps a name that someone
+            // really chose and asks for the rest.
+            Intent::StoreSecret { name, kind, fields } if fields.is_empty() => {
+                if is_placeholder_name(name, kind) || has_own_screen(kind) {
+                    Some(Conversation::start_for_kind(kind))
+                } else {
+                    Conversation::prefilled(kind, name, fields)
+                        .or_else(|| Some(Conversation::start_for_kind(kind)))
+                }
             }
             Intent::StoreSecret { name, kind, fields } if name.is_empty() => {
                 Conversation::prefilled(kind, name, fields)
@@ -490,6 +513,7 @@ impl ChatHandler {
                     }
                 }
                 ConversationStep::NoteEditor => Self::note_editor_response(),
+                ConversationStep::FilePicker => Self::file_picker_response(),
                 ConversationStep::Finished(intent) => self.finish(intent),
                 ConversationStep::Cancelled => ChatResponse {
                     message: "Cancelled — nothing was saved.".to_string(),
@@ -502,6 +526,19 @@ impl ChatHandler {
         }
 
         self.finish(intent)
+    }
+
+    /// The reply that shows the file picker for a document.
+    fn file_picker_response() -> ChatResponse {
+        ChatResponse {
+            message: "Choose a file from this computer to keep in your vault. \
+                The limit is 10 MB."
+                .to_string(),
+            action: Some(Action::OpenFilePicker),
+            user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
+        }
     }
 
     /// The reply that opens the note editor on a new note.
@@ -843,6 +880,9 @@ fn sensitive_prompt(message: &str) -> ChatResponse {
 pub enum Action {
     /// Open the note editor on a new, empty note.
     OpenNoteEditor,
+    /// Show the file picker, to keep a file from this computer as a
+    /// document.
+    OpenFilePicker,
     StoreEntry {
         name: String,
         kind: String,
@@ -926,6 +966,7 @@ impl std::fmt::Debug for Action {
                 .field("field_keys", &keys(fields))
                 .finish(),
             Self::OpenNoteEditor => f.write_str("OpenNoteEditor"),
+            Self::OpenFilePicker => f.write_str("OpenFilePicker"),
             Self::ExportVault => f.write_str("ExportVault"),
             Self::ImportVault => f.write_str("ImportVault"),
             Self::CreateVault => f.write_str("CreateVault"),

@@ -156,6 +156,43 @@ const CONTACT_FIELDS: &[FieldSpec] = &[
 /// The id of the note kind, whose text is written in the note editor.
 const NOTE_KIND_ID: &str = "text";
 
+/// The id of the document kind, whose content is a file the user picks.
+const DOCUMENT_KIND_ID: &str = "document";
+
+/// Whether this kind is filled in on its own screen (the note editor, the
+/// file picker) instead of by questions in chat.
+#[must_use]
+pub fn has_own_screen(intent_kind: &str) -> bool {
+    kind_for_intent_kind(intent_kind)
+        .is_some_and(|kind| kind.id == NOTE_KIND_ID || kind.id == DOCUMENT_KIND_ID)
+}
+
+/// Whether `name` is only a word for the kind being saved, not a name.
+///
+/// A model parsing "store a document" tends to answer with the name
+/// "document"; saving under that would file an empty entry nobody named.
+#[must_use]
+pub fn is_placeholder_name(name: &str, intent_kind: &str) -> bool {
+    const PLACEHOLDERS: &[&str] = &[
+        "note",
+        "document",
+        "file",
+        "password",
+        "login",
+        "secret",
+        "credential",
+        "entry",
+        "text",
+        "card",
+        "contact",
+        "it",
+        "this",
+        "something",
+    ];
+    let name = name.trim().to_lowercase();
+    name.is_empty() || name == intent_kind.to_lowercase() || PLACEHOLDERS.contains(&name.as_str())
+}
+
 /// The kinds the kind question offers, in the order it offers them.
 /// Notes and documents come first: that is what Stern is mostly used
 /// for. Letters in the kind question follow this order (a = note).
@@ -255,6 +292,9 @@ pub enum Step {
     /// The user chose a note: writing one happens in the note editor,
     /// not one prompt at a time, so the conversation hands over.
     NoteEditor,
+    /// The user chose a document: a document is a file from this
+    /// computer, picked with the file picker, not text typed into chat.
+    FilePicker,
     /// The conversation collected a complete store request.
     Finished(Intent),
     /// The user cancelled, or declined at the confirmation.
@@ -304,13 +344,10 @@ impl Conversation {
             Some((mut conversation, _)) => {
                 // A fresh interview, so optional fields are asked too.
                 conversation.ask_optional = true;
-                let step = if conversation
-                    .kind
-                    .is_some_and(|kind| kind.id == NOTE_KIND_ID)
-                {
-                    Step::NoteEditor
-                } else {
-                    conversation.next_prompt()
+                let step = match conversation.kind.map(|kind| kind.id) {
+                    Some(NOTE_KIND_ID) => Step::NoteEditor,
+                    Some(DOCUMENT_KIND_ID) => Step::FilePicker,
+                    _ => conversation.next_prompt(),
                 };
                 (conversation, step)
             }
@@ -396,6 +433,9 @@ impl Conversation {
         self.stage = Stage::Collecting;
         if kind.id == NOTE_KIND_ID {
             return Step::NoteEditor;
+        }
+        if kind.id == DOCUMENT_KIND_ID {
+            return Step::FilePicker;
         }
         self.next_prompt()
     }
@@ -765,29 +805,24 @@ mod tests {
     }
 
     #[test]
-    fn a_named_document_skips_the_kind_question() {
-        let (mut conversation, step) = Conversation::start_for_kind("document");
-        match step {
-            Step::Prompt {
-                message, options, ..
-            } => {
-                assert_eq!(message, "What is the document called?");
-                assert!(options.is_empty());
-            }
-            other => panic!("expected the document title prompt, got: {other:?}"),
+    fn a_named_document_asks_for_a_file_not_text() {
+        let (_, step) = Conversation::start_for_kind("document");
+        assert!(matches!(step, Step::FilePicker), "got: {step:?}");
+        let mut by_letter = start_at_fields();
+        assert!(matches!(by_letter.handle("b"), Step::FilePicker));
+    }
+
+    #[test]
+    fn a_kind_word_is_not_a_name() {
+        for word in ["document", "Note", " file ", "", "it", "password"] {
+            assert!(is_placeholder_name(word, "document"), "{word:?}");
         }
-        conversation.handle("Lease");
-        match conversation.handle("The tenant agrees") {
-            Step::Prompt { message, .. } => assert!(message.starts_with("Save this document?")),
-            other => panic!("expected the confirmation, got: {other:?}"),
+        assert!(is_placeholder_name("login", "password"));
+        for name in ["Lease", "GitHub", "Mom's recipe", "Trip plan"] {
+            assert!(!is_placeholder_name(name, "document"), "{name:?}");
         }
-        match conversation.handle("yes") {
-            Step::Finished(Intent::StoreSecret { name, kind, .. }) => {
-                assert_eq!(name, "Lease");
-                assert_eq!(kind, "document");
-            }
-            other => panic!("expected a finished store intent, got: {other:?}"),
-        }
+        assert!(has_own_screen("document") && has_own_screen("note"));
+        assert!(!has_own_screen("password") && !has_own_screen("card"));
     }
 
     #[test]

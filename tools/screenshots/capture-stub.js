@@ -78,6 +78,10 @@
   // A tiny script of the real chat replies.
   const chat = (text) => {
     const t = text.trim().toLowerCase();
+    if (t === "save a document" || t === "store a document") {
+      return reply("Choose a file from this computer to keep in your vault. The limit is 10 MB.",
+        { action: "open_file_picker" });
+    }
     if (t === "save a note" || t === "store a note") {
       return reply("Write your note below, then tap Save.", { action: "open_note_editor" });
     }
@@ -120,6 +124,12 @@
         if (cmd === "remove_model") {
           removed.add(plain(args).modelId);
           return models();
+        }
+        if (cmd === "add_file_from_picker") {
+          window.__pickCalls = (window.__pickCalls || 0) + 1;
+          if (q.get("pick") === "cancel") return null;
+          if (q.get("pick") === "big") throw "That file is too big. The limit is 10 MB.";
+          return { id: "file-1", name: "lease.pdf", size_bytes: 3460300, is_text: false };
         }
         if (cmd === "load_note") return notes.find((n) => n.id === plain(args).id) || Promise.reject("note not found");
         if (cmd === "save_note") {

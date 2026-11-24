@@ -192,3 +192,27 @@ fn help_covers_removing_a_model_and_stays_plain() {
         );
     }
 }
+
+#[test]
+fn file_sizes_read_in_plain_units_with_one_decimal() {
+    use stern_ui::components::notes::size_label;
+    assert_eq!(size_label(0), "0 bytes");
+    assert_eq!(size_label(1023), "1023 bytes");
+    assert_eq!(size_label(1024), "1.0 KB");
+    assert_eq!(size_label(1536), "1.5 KB");
+    assert_eq!(size_label(3_355_443), "3.1 MB"); // truncated, never rounded up past the limit
+    assert_eq!(size_label(3_460_300), "3.2 MB");
+    // The limit reads as the ten megabytes the card promises.
+    assert_eq!(size_label(10 * 1024 * 1024), "10.0 MB");
+}
+
+#[test]
+fn file_errors_keep_their_own_plain_sentence() {
+    let big = friendly_error("io error: That file is too big. The limit is 10 MB.");
+    assert_eq!(big.message, "That file is too big. The limit is 10 MB.");
+    assert!(big.detail.is_none());
+    // A path never reaches the page, even inside a file error.
+    let opened = friendly_error("io error: Couldn't open that file. /Users/sam/secret.txt");
+    assert_eq!(opened.message, "Couldn't open that file.");
+    assert!(!opened.message.contains("sam"));
+}

@@ -121,6 +121,13 @@ pub fn classify_intent(text: &str) -> Intent {
         return Intent::Help;
     }
 
+    // The vault itself is not something to store: "create vault" and
+    // "unlock the vault" are about the vault, whatever store words they
+    // contain.
+    if let Some(intent) = detect_vault_manage(&words) {
+        return intent;
+    }
+
     // A leading edit verb is an edit, whatever the rest says: "edit my
     // shopping list" is not a list request, and "edit my note" is not a
     // store request, though both contain words those rules look for.
@@ -155,10 +162,6 @@ pub fn classify_intent(text: &str) -> Intent {
     }
 
     if let Some(intent) = detect_import(&words) {
-        return intent;
-    }
-
-    if let Some(intent) = detect_vault_manage(&words) {
         return intent;
     }
 
@@ -381,17 +384,31 @@ fn detect_import(words: &[&str]) -> Option<Intent> {
 fn detect_vault_manage(words: &[&str]) -> Option<Intent> {
     let has_vault = words.contains(&"vault");
 
+    if !has_vault {
+        return None;
+    }
+
+    // Something stored *in* the vault ("save a note in my vault") is a
+    // store, not a request about the vault.
+    let stores_into_it = words.iter().any(|w| matches!(*w, "in" | "into" | "to"))
+        && words
+            .iter()
+            .any(|w| matches!(*w, "save" | "store" | "add" | "remember" | "keep"));
+    if stores_into_it {
+        return None;
+    }
+
     let create_words = ["create", "new", "set up", "setup", "initialize", "init"];
     let has_create = words.iter().any(|w| create_words.contains(w));
 
     let unlock_words = ["unlock", "open", "decrypt", "access"];
     let has_unlock = words.iter().any(|w| unlock_words.contains(w));
 
-    if has_create && has_vault {
+    if has_create {
         return Some(Intent::CreateVault);
     }
 
-    if has_unlock && has_vault {
+    if has_unlock {
         return Some(Intent::UnlockVault);
     }
 

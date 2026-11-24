@@ -272,28 +272,21 @@ fn import_restore() {
 
 #[test]
 fn create_vault() {
-    let intent = classify_intent("create vault");
-    match intent {
-        Intent::StoreSecret { name, kind, fields } => {
-            assert_eq!(name, "vault");
-            assert_eq!(kind, "secret");
-            assert!(fields.is_empty());
-        }
-        other => panic!("expected StoreSecret, got: {other:?}"),
+    // A vault is made, not stored: "create vault" is never filed as a
+    // secret called "vault".
+    for text in ["create vault", "create a vault", "make a new vault"] {
+        assert_intent(text, Intent::CreateVault);
     }
 }
 
 #[test]
 fn new_vault() {
-    let intent = classify_intent("new vault");
-    match intent {
-        Intent::StoreSecret { name, kind, fields } => {
-            assert_eq!(name, "vault");
-            assert_eq!(kind, "secret");
-            assert!(fields.is_empty());
-        }
-        other => panic!("expected StoreSecret, got: {other:?}"),
-    }
+    assert_intent("new vault", Intent::CreateVault);
+    // Saving something into the vault is still a store.
+    assert!(matches!(
+        classify_intent("save a note in my vault"),
+        Intent::StoreSecret { .. }
+    ));
 }
 
 #[test]
@@ -504,15 +497,15 @@ fn import_response() {
 
 #[test]
 fn create_vault_response() {
+    // With a vault already set up, a create request is answered plainly
+    // and nothing is saved.
     let resp = handler().process_message("create vault");
     assert!(resp.message.contains("vault"), "message: {}", resp.message);
-    match resp.action.expect("should have action") {
-        Action::StoreEntry { name, kind, .. } => {
-            assert_eq!(name, "vault");
-            assert_eq!(kind, "secret");
-        }
-        other => panic!("expected StoreEntry, got: {other:?}"),
-    }
+    assert!(
+        !matches!(resp.action, Some(Action::StoreEntry { .. })),
+        "action: {:?}",
+        resp.action
+    );
     assert!(resp.user_message_display.is_none());
 }
 
@@ -894,17 +887,15 @@ fn action_debug_redacts_secrets() {
 fn saving_a_named_kind_goes_straight_to_its_questions() {
     let handler = ChatHandler::new(None);
     handler.set_vault_state(true, true);
-    let first = handler.process_message("save a document");
-    assert_eq!(first.message, "What is the document called?");
+    let first = handler.process_message("save a password");
+    assert_eq!(first.message, "What website is this username/password for?");
     assert!(first.options.is_empty());
     assert!(!first.input_sensitive);
-    let text_prompt = handler.process_message("Lease");
-    // A document's text is typed in the open, so its prompt is not masked.
-    assert!(
-        !text_prompt.input_sensitive,
-        "message: {}",
-        text_prompt.message
-    );
+    let username = handler.process_message("GitHub");
+    assert!(!username.input_sensitive, "message: {}", username.message);
+    // The password prompt is the one that is masked.
+    let password = handler.process_message("chris");
+    assert!(password.input_sensitive, "message: {}", password.message);
 }
 
 #[test]
@@ -1002,26 +993,12 @@ fn chat_suggestions_lead_with_notes_not_passwords() {
 }
 
 #[test]
-fn a_saved_password_is_never_echoed_back_but_a_note_is_shown() {
+fn a_saved_password_is_never_echoed_back() {
     let handler = ChatHandler::new(None);
     handler.set_vault_state(true, true);
-    let _ = handler.process_message("save a document");
-    let _ = handler.process_message("Groceries");
-    let _ = handler.process_message("secret-note-text-123");
-    let done = handler.process_message("yes");
-    assert!(matches!(done.action, Some(Action::StoreEntry { .. })));
-    // A document's text is shown in full, as typed.
-    assert!(
-        done.message.contains("secret-note-text-123"),
-        "{}",
-        done.message
-    );
-    assert!(
-        done.message.contains("Saved your document \"Groceries\""),
-        "{}",
-        done.message
-    );
-
+    // The note editor is not a chat conversation, so nothing it holds
+    // is ever shown here. What chat collects for a login: the website
+    // and username are shown as typed, and the password never is.
     let _ = handler.process_message("save a password");
     let _ = handler.process_message("GitHub");
     let _ = handler.process_message("chris");
@@ -1070,4 +1047,84 @@ fn the_greeting_speaks_plainly_about_notes_and_documents() {
     let reply = handler.process_message("how are you?").message;
     assert!(reply.contains("notes and documents"), "{reply}");
     assert!(!reply.contains("secrets manager"), "{reply}");
+}
+
+#[test]
+fn saving_a_document_shows_the_file_picker_and_saves_nothing() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    for text in ["store a document", "save a document", "add a document"] {
+        let reply = handler.process_message(text);
+        assert!(
+            matches!(reply.action, Some(Action::OpenFilePicker)),
+            "{text:?} gave {:?}: {}",
+            reply.action,
+            reply.message
+        );
+        assert!(reply.message.contains("10 MB"), "{}", reply.message);
+        assert!(!reply.message.contains("Saved"), "{}", reply.message);
+    }
+}
+
+#[test]
+fn a_model_parse_of_a_nameless_store_is_not_filed_under_its_kind() {
+    // What a small model answers for "store a document": the kind as the
+    // name, and no content. It used to be filed as an empty "document".
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let reply = handler.process_parsed(
+        "store a document",
+        Intent::StoreSecret {
+            name: "document".to_string(),
+            kind: "document".to_string(),
+            fields: vec![],
+        },
+    );
+    assert!(
+        matches!(reply.action, Some(Action::OpenFilePicker)),
+        "{:?}: {}",
+        reply.action,
+        reply.message
+    );
+
+    let note = handler.process_parsed(
+        "store a note",
+        Intent::StoreSecret {
+            name: "note".to_string(),
+            kind: "text".to_string(),
+            fields: vec![],
+        },
+    );
+    assert!(matches!(note.action, Some(Action::OpenNoteEditor)));
+
+    // A real name with no content does not file an empty password either.
+    let login = handler.process_parsed(
+        "save my GitHub password",
+        Intent::StoreSecret {
+            name: "GitHub".to_string(),
+            kind: "login".to_string(),
+            fields: vec![],
+        },
+    );
+    assert!(login.action.is_none(), "{:?}", login.action);
+    assert!(
+        login.message.to_lowercase().contains("username"),
+        "{}",
+        login.message
+    );
+}
+
+#[test]
+fn a_store_that_carries_its_content_is_still_saved_at_once() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let reply = handler.process_parsed(
+        "save my GitHub password is hunter2",
+        Intent::StoreSecret {
+            name: "GitHub".to_string(),
+            kind: "login".to_string(),
+            fields: vec![("password".to_string(), "hunter2".to_string())],
+        },
+    );
+    assert!(matches!(reply.action, Some(Action::StoreEntry { .. })));
 }

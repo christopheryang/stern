@@ -149,3 +149,90 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
         </section>
     }
 }
+
+/// What the picker tells the card about a stored file. No contents.
+#[derive(Clone, Debug, Deserialize)]
+struct StoredFile {
+    name: String,
+    size_bytes: u64,
+}
+
+#[allow(clippy::future_not_send)]
+async fn add_file_from_picker() -> Result<Option<StoredFile>, String> {
+    let value = invoke("add_file_from_picker", serde_json::json!({})).await?;
+    serde_json::from_value(value).map_err(|e| e.to_string())
+}
+
+/// A size in plain words: "24 bytes", "3.2 MB". Whole numbers below a
+/// kilobyte, and one decimal above, so the limit and a file's size read
+/// the same way.
+#[must_use]
+pub fn size_label(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * 1024;
+    if bytes < KB {
+        return format!("{bytes} bytes");
+    }
+    // Tenths of a unit, in whole numbers: no float arithmetic.
+    let (unit, divisor) = if bytes < MB { ("KB", KB) } else { ("MB", MB) };
+    let tenths = bytes.saturating_mul(10).checked_div(divisor).unwrap_or(0);
+    let whole = tenths.checked_div(10).unwrap_or(0);
+    let fraction = tenths.checked_rem(10).unwrap_or(0);
+    format!("{whole}.{fraction} {unit}")
+}
+
+/// The card shown when a document is being added: a button for the
+/// computer's file picker, and the size limit. The file is read and
+/// encrypted in the app, not here, so its bytes never reach this page.
+/// `on_done` gets what to tell the user: the saved file, or `None` when
+/// the user cancels.
+#[component]
+pub fn FilePickerCard(on_done: Callback<Option<String>>) -> impl IntoView {
+    let status = RwSignal::new(Option::<String>::None);
+    let busy = RwSignal::new(false);
+    let gone = Arc::new(AtomicBool::new(false));
+    let gone_on_cleanup = Arc::clone(&gone);
+    on_cleanup(move || gone_on_cleanup.store(true, Ordering::Relaxed));
+
+    let choose = move |_| {
+        if busy.get_untracked() {
+            return;
+        }
+        busy.set(true);
+        status.set(None);
+        let gone = Arc::clone(&gone);
+        leptos::task::spawn_local(async move {
+            let picked = add_file_from_picker().await;
+            if gone.load(Ordering::Relaxed) {
+                return;
+            }
+            busy.set(false);
+            match picked {
+                Ok(Some(file)) => on_done.run(Some(format!(
+                    "{} ({})",
+                    file.name,
+                    size_label(file.size_bytes)
+                ))),
+                // Closing the picker is not an error: stay on the card.
+                Ok(None) => {}
+                Err(error) => status.set(Some(friendly_error(&error).message)),
+            }
+        });
+    };
+
+    view! {
+        <section class="note-editor file-card" aria-label="Add a document">
+            <p class="file-card-text">
+                "Pick a file on this computer. It is locked with your password, \
+                 and the original stays where it is. The limit is 10 MB."
+            </p>
+            <div class="notes-actions">
+                <button class="btn btn-primary" prop:disabled=move || busy.get() on:click=choose>
+                    {move || if busy.get() { "Waiting for you to pick a file…" } else { "Choose a file" }}
+                </button>
+                <button class="btn" on:click=move |_| on_done.run(None)>"Cancel"</button>
+                <span class="muted" role="status">{move || status.get().unwrap_or_default()}</span>
+            </div>
+        </section>
+    }
+}

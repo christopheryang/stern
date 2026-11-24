@@ -28,6 +28,33 @@ fn tidy(raw: &str) -> String {
     inner.replace("\\\"", "\"")
 }
 
+/// The plain sentences the file commands already word for the user. They
+/// are matched by what they say, and returned from this list rather than
+/// echoed, so an error that merely mentions a file never leaks a path.
+fn file_message(tidy_lower: &str) -> Option<&'static str> {
+    const FILE_MESSAGES: &[(&str, &str)] = &[
+        (
+            "that file is too big",
+            "That file is too big. The limit is 10 MB.",
+        ),
+        ("couldn't open that file", "Couldn't open that file."),
+        ("couldn't read that file", "Couldn't read that file."),
+        ("that is not a file", "That is not a file."),
+        (
+            "pick a file on this computer",
+            "Pick a file on this computer.",
+        ),
+        (
+            "couldn't save the file there",
+            "Couldn't save the file there. Pick another place.",
+        ),
+    ];
+    FILE_MESSAGES
+        .iter()
+        .find(|(needle, _)| tidy_lower.contains(needle))
+        .map(|(_, sentence)| *sentence)
+}
+
 /// Turn a raw backend/bridge error into a [`FriendlyError`].
 #[must_use]
 pub fn friendly_error(raw: &str) -> FriendlyError {
@@ -50,6 +77,8 @@ pub fn friendly_error(raw: &str) -> FriendlyError {
         known("Too many tries. Please wait a few minutes, then try again.")
     } else if lower.contains("vault locked") {
         known("Stern is locked. Enter your password to continue.")
+    } else if let Some(sentence) = file_message(&tidy_lower) {
+        known(sentence)
     } else if lower.contains("a note needs a title") {
         known("Give your note a title, then save it again.")
     } else if lower.contains("changed somewhere else") {

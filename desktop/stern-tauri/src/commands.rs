@@ -301,6 +301,7 @@ fn execute_chat_response(
         }) if fields.is_empty() => handle_edit_note(state, name, &response),
         Some(
             stern_core::ai::chat::Action::OpenNoteEditor
+            | stern_core::ai::chat::Action::OpenFilePicker
             | stern_core::ai::chat::Action::ListEntries { .. }
             | stern_core::ai::chat::Action::ConfirmDelete { .. }
             | stern_core::ai::chat::Action::UpdateEntry { .. }
@@ -322,6 +323,9 @@ fn execute_chat_response(
 /// The chat action that opens the note editor on a note. The note's id
 /// follows the colon; with no id the editor opens on a new note.
 pub const OPEN_NOTE_ACTION: &str = "open_note_editor";
+
+/// The chat action that shows the file picker card for a document.
+pub const OPEN_FILE_PICKER_ACTION: &str = "open_file_picker";
 
 /// "Edit my shopping list": open that note in the editor. Anything that
 /// is not a single note falls back to the plain reply.
@@ -415,6 +419,7 @@ fn passthrough_response(response: &stern_core::ai::chat::ChatResponse) -> ChatRe
 fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
     match action {
         stern_core::ai::chat::Action::OpenNoteEditor => OPEN_NOTE_ACTION.to_string(),
+        stern_core::ai::chat::Action::OpenFilePicker => OPEN_FILE_PICKER_ACTION.to_string(),
         stern_core::ai::chat::Action::StoreEntry { .. } => "store".to_string(),
         stern_core::ai::chat::Action::SearchEntry { .. } => "search".to_string(),
         stern_core::ai::chat::Action::RevealEntry { .. } => "reveal".to_string(),

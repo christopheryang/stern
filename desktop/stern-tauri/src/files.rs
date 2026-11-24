@@ -78,9 +78,19 @@ const MAX_FILE_LIMIT_MB: u64 = 10;
 
 const _: () = assert!(MAX_FILE_LIMIT_MB * 1024 * 1024 == MAX_FILE_BYTES);
 
+/// What the user is told about a file that was just stored. No contents.
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct StoredFile {
+    pub id: String,
+    pub name: String,
+    pub size_bytes: u64,
+    pub is_text: bool,
+}
+
 /// Store the file at `path` in the vault under its own name. Requires an
-/// unlocked vault; returns the new entry's id.
-pub fn add_file(state: &AppState, path: &Path) -> Result<String, VaultError> {
+/// unlocked vault; returns the new entry's id with the name and size to
+/// show the user.
+pub fn add_file(state: &AppState, path: &Path) -> Result<StoredFile, VaultError> {
     let kek = {
         let session = state
             .session
@@ -148,7 +158,12 @@ pub fn add_file(state: &AppState, path: &Path) -> Result<String, VaultError> {
         updated_at: now,
     };
     state.repository.insert_file(&entry, &blob)?;
-    Ok(entry_id)
+    Ok(StoredFile {
+        id: entry_id,
+        name: entry.name,
+        size_bytes: blob.byte_len,
+        is_text: blob.is_text,
+    })
 }
 
 /// Where a retrieved file is written: a path the user chose. Never
@@ -202,12 +217,12 @@ pub fn read_stored(state: &AppState, entry_id: &str) -> Result<Zeroizing<Vec<u8>
 }
 
 /// Ask the user for a file with the native picker and store it. Returns
-/// the new entry's id, or `None` when the user cancels.
+/// what was stored, or `None` when the user cancels.
 #[tauri::command]
 pub async fn add_file_from_picker(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
-) -> Result<Option<String>, VaultError> {
+) -> Result<Option<StoredFile>, VaultError> {
     use tauri_plugin_dialog::DialogExt;
     let Some(picked) = app.dialog().file().blocking_pick_file() else {
         return Ok(None);

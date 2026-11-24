@@ -1,5 +1,5 @@
 use super::friendly::friendly_error;
-use super::notes::NoteEditor;
+use super::notes::{FilePickerCard, NoteEditor};
 use super::ui::{BrandMark, Icon, IconKind};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
@@ -22,13 +22,15 @@ struct ChatMsg {
     input_sensitive: bool,
 }
 
-/// Which note the editor opens on.
+/// Which card the chat shows under the transcript.
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum EditorRequest {
     /// A new, empty note.
     New,
     /// An existing note, by id.
     Existing(String),
+    /// The file picker, to keep a file as a document.
+    File,
 }
 
 /// What a chat reply carries besides its text.
@@ -36,7 +38,7 @@ struct Reply {
     message: String,
     options: Vec<String>,
     input_sensitive: bool,
-    /// Set when the reply asks for the note editor.
+    /// Set when the reply asks for the note editor or the file picker.
     open_editor: Option<EditorRequest>,
 }
 
@@ -56,6 +58,9 @@ fn editor_request(action: Option<&str>) -> Option<EditorRequest> {
     let action = action?;
     if action == "open_note_editor" {
         return Some(EditorRequest::New);
+    }
+    if action == "open_file_picker" {
+        return Some(EditorRequest::File);
     }
     action
         .strip_prefix("open_note_editor:")
@@ -319,7 +324,7 @@ fn make_sender(
             // would throw away what was typed into it. Ask to finish it.
             if reply.open_editor.is_some() && editor.get_untracked().is_some() {
                 reply = Reply::text(
-                    "A note is already open. Save it or cancel it first, then ask again."
+                    "Something is already open. Finish it or cancel it first, then ask again."
                         .to_string(),
                 );
             }
@@ -339,26 +344,35 @@ fn make_sender(
     })
 }
 
-/// The note editor for a request.
+/// The card for a request.
 fn editor_view(request: EditorRequest, on_done: Callback<Option<String>>) -> AnyView {
-    let note_id = match request {
-        EditorRequest::New => None,
-        EditorRequest::Existing(id) => Some(id),
-    };
-    view! { <NoteEditor note_id=note_id on_done=on_done /> }.into_any()
+    match request {
+        EditorRequest::New => view! { <NoteEditor note_id=None on_done=on_done /> }.into_any(),
+        EditorRequest::Existing(id) => {
+            view! { <NoteEditor note_id=Some(id) on_done=on_done /> }.into_any()
+        }
+        EditorRequest::File => view! { <FilePickerCard on_done=on_done /> }.into_any(),
+    }
 }
 
-/// What happens when the note editor closes: it goes away and the
-/// transcript says whether the note was saved or the user cancelled.
+/// What happens when a card closes: it goes away and the transcript says
+/// what was saved, or that the user cancelled. `what` is "note" or
+/// "document".
 fn editor_done_callback(
     set_messages: WriteSignal<Vec<ChatMsg>>,
+    editor: ReadSignal<Option<EditorRequest>>,
     set_editor: WriteSignal<Option<EditorRequest>>,
 ) -> Callback<Option<String>> {
     Callback::new(move |saved: Option<String>| {
+        let what = if editor.get_untracked() == Some(EditorRequest::File) {
+            "document"
+        } else {
+            "note"
+        };
         set_editor.set(None);
         let content = saved.map_or_else(
             || "Cancelled — nothing was saved.".to_string(),
-            |title| format!("Saved your note \"{title}\"."),
+            |name| format!("Saved your {what} \"{name}\"."),
         );
         set_messages.update(|msgs| {
             msgs.push(ChatMsg {
@@ -645,7 +659,7 @@ pub fn ChatView() -> impl IntoView {
     // The note editor shown under the transcript, when a reply asked for it.
     let (editor, set_editor) = signal(Option::<EditorRequest>::None);
     let send_text = make_sender(set_messages, loading, set_loading, editor, set_editor);
-    let editor_done = editor_done_callback(set_messages, set_editor);
+    let editor_done = editor_done_callback(set_messages, editor, set_editor);
 
     let reconcile_secret = move |new_display: String, caret_utf16: Option<u32>| {
         let (next_secret, next_reveals) = fold_secret_edit(

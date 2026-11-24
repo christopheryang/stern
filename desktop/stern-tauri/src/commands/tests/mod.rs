@@ -512,26 +512,38 @@ fn model_status_carries_pros_cons_and_one_recommendation() {
 }
 
 #[test]
-fn chat_saves_a_document_without_the_kind_question() {
+fn chat_shows_the_file_picker_for_a_document_and_saves_nothing_itself() {
     let (state, _path) = make_test_app_state();
     create_vault_inner(&state, "correct horse battery").unwrap();
     unlock_test_session(&state);
 
-    let first = chat(&state, "save a document");
-    assert_eq!(first.message, "What is the document called?");
-    chat(&state, "Shopping list");
-    let confirm = chat(&state, "eggs and milk");
-    assert!(confirm.message.contains("Save this document?"));
-    let done = chat(&state, "yes");
-    assert_eq!(done.action.as_deref(), Some("store"));
-    assert_eq!(state.repository.count_entries().unwrap(), 1);
+    for text in ["store a document", "save a document"] {
+        let reply = chat(&state, text);
+        assert_eq!(
+            reply.action.as_deref(),
+            Some("open_file_picker"),
+            "{text:?}: {}",
+            reply.message
+        );
+        assert!(!reply.message.contains("Saved"), "{}", reply.message);
+    }
+    assert_eq!(state.repository.count_entries().unwrap(), 0);
+}
 
-    let found = handle_search_entry(&state, "shopping", Some("content")).unwrap();
-    assert!(
-        found.message.contains("eggs and milk"),
-        "message: {}",
-        found.message
-    );
+#[test]
+fn a_picked_file_is_reported_by_name_and_size_without_its_contents() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("lease.txt");
+    std::fs::write(&src, "the tenant agrees to pay").unwrap();
+
+    let stored = crate::files::add_file(&state, &src).unwrap();
+    assert_eq!(stored.name, "lease.txt");
+    assert_eq!(stored.size_bytes, 24);
+    assert!(stored.is_text);
+    let shown = serde_json::to_string(&stored).unwrap();
+    assert!(!shown.contains("tenant"), "contents leaked: {shown}");
 }
 
 #[test]
@@ -914,7 +926,7 @@ fn a_file_is_stored_and_comes_back_byte_for_byte() {
     let bytes: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
     std::fs::write(&src, &bytes).unwrap();
 
-    let id = crate::files::add_file(&state, &src).unwrap();
+    let id = crate::files::add_file(&state, &src).unwrap().id;
     let back = crate::files::read_stored(&state, &id).unwrap();
     assert_eq!(back.as_slice(), bytes.as_slice());
 
@@ -931,7 +943,7 @@ fn a_text_file_is_stored_as_text() {
     let src = dir.path().join("shopping.txt");
     std::fs::write(&src, "eggs, milk and bread").unwrap();
 
-    let id = crate::files::add_file(&state, &src).unwrap();
+    let id = crate::files::add_file(&state, &src).unwrap().id;
     let blob = state.repository.get_blob(&id).unwrap().unwrap();
     assert!(blob.is_text);
     assert_eq!(blob.mime_type, "text/plain");
@@ -964,8 +976,8 @@ fn a_stored_file_cannot_be_moved_to_another_entry() {
     let dir = tempfile::tempdir().unwrap();
     let src = dir.path().join("a.txt");
     std::fs::write(&src, "secret contents").unwrap();
-    let first = crate::files::add_file(&state, &src).unwrap();
-    let second = crate::files::add_file(&state, &src).unwrap();
+    let first = crate::files::add_file(&state, &src).unwrap().id;
+    let second = crate::files::add_file(&state, &src).unwrap().id;
 
     // Put the first file's blob (ciphertext, DEK, nonce) under the second
     // entry's id. Its AAD was bound to the first id, so it must not open.
