@@ -12,7 +12,7 @@
 //   ?model=none|downloading|ready AI model state (default: ready)
 //   ?play=<steps>                 messages to send once the chat loads,
 //                                 separated by "|" (see below)
-//   ?page=settings|help           open that page after load
+//   ?page=settings|notes|help     open that page after load
 //   ?theme=light|dark             set the theme (default: light)
 //   ?fill=<password>              type it into both setup fields
 //
@@ -111,6 +111,7 @@
       "- \"save a note\"\n- \"find my shopping list\"\n- \"save a document\"\n- \"help\"");
   };
 
+  const notes = [{ id: "note-0", title: "Shopping list", text: "eggs, milk and bread", version: 1, updated_at: new Date().toISOString() }];
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
@@ -118,6 +119,20 @@
           return { is_initialized: phase !== "setup", is_unlocked: phase === "unlocked", entry_count: 1 };
         }
         if (cmd === "model_status") return models();
+        if (cmd === "list_notes") return notes.map(({ id, title, updated_at }) => ({ id, title, updated_at }));
+        if (cmd === "load_note") return notes.find((n) => n.id === args.id) || Promise.reject("note not found");
+        if (cmd === "save_note") {
+          const { id, title, text } = args.request;
+          const now = new Date().toISOString();
+          if (id) {
+            const n = notes.find((x) => x.id === id);
+            Object.assign(n, { title, text, version: n.version + 1, updated_at: now });
+            return n;
+          }
+          const n = { id: `note-${notes.length + 1}`, title, text, version: 1, updated_at: now };
+          notes.push(n);
+          return n;
+        }
         if (cmd === "send_chat_message") {
           // The UI serializes its arguments with serde-wasm-bindgen,
           // which can hand over Maps instead of plain objects.
@@ -171,7 +186,7 @@
       }
     }
     if (pageName) {
-      const label = pageName === "settings" ? "Settings" : "Help";
+      const label = { settings: "Settings", notes: "Notes" }[pageName] || "Help";
       (await until(() => document.querySelector(`button[aria-label="${label}"]`)))?.click();
     }
     for (const step of play) {

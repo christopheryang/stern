@@ -10,7 +10,7 @@ Stern is made for your notes and documents: things you want kept private and out
 
 ## How do I save a note or document?
 
-Tap "Save a note" or "Save a document", or type "save a note". Stern asks a few short questions, one at a time. Whatever you write is hidden as you type: each letter shows for a moment, then turns into a star.
+Tap "Save a note" or "Save a document", or type "save a note". Stern asks for a name, then for the text, and shows it in full so you can check it. To write a longer note or change one later, open Notes in the top bar. There you can see your notes, and create or edit them in a text box.
 
 ## How do I save a password?
 

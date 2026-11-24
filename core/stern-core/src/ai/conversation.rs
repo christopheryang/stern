@@ -80,7 +80,7 @@ const TEXT_FIELDS: &[FieldSpec] = &[
         key: "text",
         prompt: "What is your note?",
         required: true,
-        sensitive: true,
+        sensitive: false,
     },
 ];
 
@@ -95,7 +95,7 @@ const DOCUMENT_FIELDS: &[FieldSpec] = &[
         key: "content",
         prompt: "Paste the document's text.",
         required: true,
-        sensitive: true,
+        sensitive: false,
     },
 ];
 

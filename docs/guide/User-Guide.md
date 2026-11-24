@@ -89,19 +89,18 @@ Stern asks a few short questions, one at a time. First, a name:
 ![Stern asks what to call the note](User-Guide%20-%20Save%20A%20Note.png)
 
 Type a name such as `Shopping list` and press Enter. Then Stern asks for
-the note itself. This part is **private**: the box is marked **Private**,
-and each letter you type shows for a moment, then turns into a star, in
-case someone is looking over your shoulder.
+the note itself, and shows what you type in full, so you can check it.
 
-![Typing the private part of a note](User-Guide%20-%20Typing%20A%20Note.png)
+For a longer note, or to change one later, open **Notes** in the top bar.
+The list on the left shows your note titles. Pick one to edit it, or tap
+**New note**. Type in the title and text boxes, then tap **Save note** (or
+**Save changes** for a note you are editing). Chat finds notes; the Notes
+page writes and changes them.
 
-Press Enter, and Stern shows what it is about to save. Your note's text
-is hidden as dots. Tap **yes** to save it, or **no** to throw it away.
+Notes are not hidden. Passwords, card numbers and similar details are the
+only things Stern masks.
 
-![Stern asks you to confirm](User-Guide%20-%20Confirm.png)
-
-Stern never writes your private text back into the chat. You can say
-`cancel` at any question to stop, and nothing is saved until you say yes.
+![Finding a saved note](User-Guide%20-%20Find%20A%20Note.png)
 
 ## 4. Find something you saved
 

@@ -9,6 +9,7 @@
 #![recursion_limit = "256"]
 
 mod commands;
+mod notes;
 
 use std::sync::Arc;
 use stern_core::ai::model_manager::ModelManager;
@@ -120,6 +121,9 @@ pub fn run() {
             commands::unlock_vault,
             commands::lock_vault,
             commands::list_entries,
+            notes::list_notes,
+            notes::load_note,
+            notes::save_note,
             commands::get_entry,
             commands::create_entry,
             commands::update_entry,

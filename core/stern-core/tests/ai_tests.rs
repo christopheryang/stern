@@ -899,9 +899,9 @@ fn saving_a_named_kind_goes_straight_to_its_questions() {
     assert!(first.options.is_empty());
     assert!(!first.input_sensitive);
     let text_prompt = handler.process_message("Shopping list");
-    // The note's text is the secret field: its prompt is masked.
+    // A note's text is typed in the open, so its prompt is not masked.
     assert!(
-        text_prompt.input_sensitive,
+        !text_prompt.input_sensitive,
         "message: {}",
         text_prompt.message
     );
@@ -923,7 +923,7 @@ fn chat_suggestions_lead_with_notes_not_passwords() {
 }
 
 #[test]
-fn a_saved_secret_is_never_echoed_back_in_the_reply() {
+fn a_saved_password_is_never_echoed_back_but_a_note_is_shown() {
     let handler = ChatHandler::new(None);
     handler.set_vault_state(true, true);
     let _ = handler.process_message("save a note");
@@ -931,8 +931,9 @@ fn a_saved_secret_is_never_echoed_back_in_the_reply() {
     let _ = handler.process_message("secret-note-text-123");
     let done = handler.process_message("yes");
     assert!(matches!(done.action, Some(Action::StoreEntry { .. })));
+    // A note's text is shown in full, as typed.
     assert!(
-        !done.message.contains("secret-note-text-123"),
+        done.message.contains("secret-note-text-123"),
         "{}",
         done.message
     );
@@ -959,7 +960,8 @@ fn unknown_fields_and_unknown_kinds_are_masked_by_default() {
     assert!(!is_sensitive_field("password", "username"));
     assert!(is_sensitive_field("password", "mystery"));
     assert!(is_sensitive_field("biometric", "anything"));
-    assert!(is_sensitive_field("note", "text"));
+    assert!(!is_sensitive_field("note", "text"));
+    assert!(!is_sensitive_field("document", "content"));
     assert_eq!(kind_word("text"), "note");
     assert_eq!(kind_word("api key"), "password");
     assert_eq!(kind_word("biometric"), "biometric");

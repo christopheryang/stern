@@ -60,4 +60,5 @@ shot "Confirm"          "phase=unlocked&play=store%20a%20note%7CShopping%20list%
 shot "Find A Note"      "phase=unlocked&play=store%20a%20note%7CShopping%20list%7Ceggs%2C%20milk%20and%20bread%7C%40yes%7Cfind%20my%20shopping%20list"
 shot "Settings"         "phase=unlocked&page=settings"
 shot "Help"             "phase=unlocked&page=help"
+shot "Notes"            "phase=unlocked&page=notes"
 shot "Dark Theme"       "phase=unlocked&theme=dark"

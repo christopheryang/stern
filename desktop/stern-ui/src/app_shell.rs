@@ -31,6 +31,7 @@ use crate::components::config::ConfigView;
 use crate::components::friendly::friendly_error;
 use crate::components::help::{DisclaimerView, HelpView};
 use crate::components::model_setup::ModelSetup;
+use crate::components::notes::NotesView;
 use crate::components::theme;
 use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
 use leptos::prelude::*;
@@ -142,6 +143,7 @@ pub enum Page {
     /// The vault screens, the chat, or the model gate.
     Main,
     Settings,
+    Notes,
     Help,
     Disclaimer,
 }
@@ -296,9 +298,19 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
             <Icon kind=IconKind::Help />
         </button>
     };
+    let notes_button = view! {
+        <button
+            class="btn btn-sm"
+            aria-label="Notes"
+            on:click=move |_| set.page.set(Page::Notes)
+        >
+            <Icon kind=IconKind::Note class="icon-sm" />
+            "Notes"
+        </button>
+    };
     if state.auth != Some(AuthPhase::Unlocked) {
         // Settings (and its downloads) wait for an unlocked vault.
-        return help_button.into_any();
+        return view! { {help_button} }.into_any();
     }
     let locking = state.locking;
     view! {
@@ -336,6 +348,7 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
                 <Icon kind=IconKind::Lock class="icon-sm" />
                 "Lock"
             </button>
+            {notes_button}
             {help_button}
             <button
                 class="btn-icon"
@@ -450,6 +463,9 @@ pub fn AppShell() -> impl IntoView {
         Page::Help => {
             let to_disclaimer = Callback::new(move |()| set_page.set(Page::Disclaimer));
             view! { <HelpView on_disclaimer=to_disclaimer /> }.into_any()
+        }
+        Page::Notes if auth.get() == Some(AuthPhase::Unlocked) => {
+            view! { <NotesView /> }.into_any()
         }
         Page::Disclaimer => view! { <DisclaimerView /> }.into_any(),
         _ => ().into_any(),

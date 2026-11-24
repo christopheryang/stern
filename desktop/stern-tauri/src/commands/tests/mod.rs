@@ -11,7 +11,7 @@ use stern_core::ai::chat::Action as CoreAction;
 use stern_core::application::vault::session::VaultSession;
 use stern_core::infrastructure::crypto::{Argon2idKdfProvider, XChaCha20CryptoProvider};
 use stern_core::infrastructure::keychain::OsKeychainProvider;
-use stern_core::infrastructure::sqlite::repository::SqliteRepository;
+use stern_core::infrastructure::sqlite::repository::{SqliteRepository, StoredPayload};
 
 #[test]
 fn action_to_string_store_entry() {
@@ -555,4 +555,87 @@ fn chat_unlocks_a_locked_vault_and_replays_the_question() {
         "the replayed question should be answered: {}",
         answer.message
     );
+}
+
+#[test]
+fn a_note_saved_in_the_editor_round_trips_with_its_text_in_full() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let created = crate::notes::save(&state, None, "Groceries", "eggs\nmilk").unwrap();
+    assert_eq!(created.title, "Groceries");
+    assert_eq!(created.text, "eggs\nmilk");
+
+    let loaded = crate::notes::load(&state, &created.id).unwrap();
+    assert_eq!(loaded.text, "eggs\nmilk");
+
+    let edited =
+        crate::notes::save(&state, Some(&created.id), "Groceries", "eggs, milk, bread").unwrap();
+    assert_eq!(edited.id, created.id);
+    assert_eq!(edited.version, created.version + 1);
+    assert_eq!(
+        crate::notes::load(&state, &created.id).unwrap().text,
+        "eggs, milk, bread"
+    );
+
+    let listed = crate::notes::list(&state).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].title, "Groceries");
+}
+
+#[test]
+fn a_note_needs_a_title() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let err = crate::notes::save(&state, None, "   ", "body").unwrap_err();
+    assert!(err.to_string().contains("needs a title"), "{err}");
+    assert!(crate::notes::list(&state).unwrap().is_empty());
+}
+
+#[test]
+fn a_note_saved_by_chat_is_listed_in_the_editor() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let _ = handle_store_entry(
+        &state,
+        "Shopping list",
+        "note",
+        &[
+            ("title".into(), "Shopping list".into()),
+            ("text".into(), "eggs".into()),
+        ],
+        "saved",
+    )
+    .unwrap();
+    let listed = crate::notes::list(&state).unwrap();
+    assert!(
+        listed.iter().any(|n| n.title == "Shopping list"),
+        "{listed:?}"
+    );
+}
+
+#[test]
+fn an_edited_note_cannot_be_swapped_back_to_an_older_version() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let first = crate::notes::save(&state, None, "Plan", "v1").unwrap();
+    let old_ciphertext = state.repository.list_all_entries().unwrap()[0].clone();
+    crate::notes::save(&state, Some(&first.id), "Plan", "v2").unwrap();
+
+    // Put the first version's row back. Its AAD was bound to version 1, and
+    // the row now says version 2, so it must not open.
+    let mut restored = old_ciphertext;
+    restored.version = 2;
+    let payload = StoredPayload {
+        dek_wrapped: &restored.dek_wrapped,
+        nonce: &restored.nonce,
+        ciphertext: &restored.ciphertext,
+        name: &restored.name,
+        version: 2,
+        updated_at: &restored.updated_at.to_rfc3339(),
+    };
+    state
+        .repository
+        .update_entry_payload(&first.id, &payload)
+        .unwrap();
+    assert!(crate::notes::load(&state, &first.id).is_err());
 }
