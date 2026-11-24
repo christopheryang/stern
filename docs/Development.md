@@ -31,6 +31,14 @@ the app window against it. Frontend changes hot-reload; Rust changes
 rebuild and relaunch. First launch takes minutes (full dependency
 build); later launches are incremental.
 
+Dev builds are unoptimized, except the `argon2` and `blake2` crates,
+which the root `Cargo.toml` compiles with `opt-level = 3`
+(`[profile.dev.package.*]`). Without that, the vault's Argon2id key
+derivation (256 MB, 3 passes) takes about 5 s per unlock instead of
+about 0.3 s. It changes speed only — the KDF parameters
+([ADR-0003](adr/0003-Key-Hierarchy-2SKD.md)) are untouched, and release
+builds are unaffected.
+
 To work on the frontend alone in a browser, `cd desktop/stern-app &&
 trunk serve --port 1420` — note the UI expects the Tauri bridge
 (`window.__TAURI__`), so vault/chat actions fail outside the app shell;

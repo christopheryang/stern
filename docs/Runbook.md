@@ -73,6 +73,15 @@ without the password and the device Secret Key the vault cannot be
 opened, by anyone. The only way forward is a reset (below), which
 destroys the vault's contents.
 
+### Unlocking takes several seconds
+
+Unlocking runs a deliberately slow password hash and should take about
+a third of a second in a release build. Several seconds means an
+unoptimized build of the hashing crates: a dev build from before the
+`[profile.dev.package.argon2]` override in the root `Cargo.toml`, or a
+custom profile that dropped it. Rebuild from a current checkout. Do not
+lower the KDF parameters to make it faster.
+
 ### Unlocking is temporarily refused
 
 Repeated failed attempts trigger a lockout. Wait for it to expire
