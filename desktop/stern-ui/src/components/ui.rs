@@ -83,7 +83,7 @@ pub fn Icon(kind: IconKind, #[prop(optional, into)] class: Option<&'static str>)
     }
 }
 
-/// The Stern mark (ring, star, keyhole) — a static asset Trunk
+/// The Stern mark (a ring around a star) — a static asset Trunk
 /// copies next to the app.
 #[component]
 pub fn BrandMark(#[prop(optional, into)] class: Option<&'static str>) -> impl IntoView {

@@ -71,9 +71,9 @@ remaining inline style is the download progress bar's computed width.
 
 ![Logo](2026-11-23%20-%20UI-Redesign%20-%20Logo.png)
 
-The mark is a vault ring around a four-point star with a keyhole cut
-out of it — the old mark's vault door and spark, reduced to two shapes
-that stay legible at 16 px. The wordmark is drawn as stroked paths, so
+The mark is a vault ring around a four-point star — the old mark's
+vault door and spark, reduced to two plain shapes that stay legible at
+16 px. The wordmark is drawn as stroked paths, so
 it needs no font; in a light color scheme the logo SVG switches the
 wordmark to dark ink.
 
