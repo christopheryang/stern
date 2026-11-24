@@ -894,17 +894,96 @@ fn action_debug_redacts_secrets() {
 fn saving_a_named_kind_goes_straight_to_its_questions() {
     let handler = ChatHandler::new(None);
     handler.set_vault_state(true, true);
-    let first = handler.process_message("save a note");
-    assert_eq!(first.message, "What should I call this note?");
+    let first = handler.process_message("save a document");
+    assert_eq!(first.message, "What is the document called?");
     assert!(first.options.is_empty());
     assert!(!first.input_sensitive);
-    let text_prompt = handler.process_message("Shopping list");
-    // The note's text is the secret field: its prompt is masked.
+    let text_prompt = handler.process_message("Lease");
+    // A document's text is typed in the open, so its prompt is not masked.
     assert!(
-        text_prompt.input_sensitive,
+        !text_prompt.input_sensitive,
         "message: {}",
         text_prompt.message
     );
+}
+
+#[test]
+fn saving_a_note_opens_the_editor_instead_of_asking_questions() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let reply = handler.process_message("save a note");
+    assert!(
+        matches!(reply.action, Some(Action::OpenNoteEditor)),
+        "message: {}",
+        reply.message
+    );
+    assert!(reply.options.is_empty());
+    assert!(!reply.input_sensitive);
+    // Nothing is left waiting: the next message is an ordinary one.
+    let next = handler.process_message("help");
+    assert!(next.action.is_none());
+}
+
+#[test]
+fn choosing_note_from_the_kind_list_opens_the_editor() {
+    let handler = ChatHandler::new(None);
+    handler.set_vault_state(true, true);
+    let kinds = handler.process_message("store");
+    assert_eq!(kinds.options.first().map(String::as_str), Some("note"));
+    let reply = handler.process_message("a");
+    assert!(matches!(reply.action, Some(Action::OpenNoteEditor)));
+}
+
+#[test]
+fn polite_phrasing_is_the_same_request() {
+    for (text, name) in [
+        ("please edit my note Groceries", "groceries"),
+        ("Could you please change the Will", "will"),
+        ("can you edit my shopping list", "shopping list"),
+        ("please, could you edit my trip plan", "trip plan"),
+    ] {
+        match classify_intent(text) {
+            Intent::UpdateSecret {
+                name: found,
+                fields,
+            } => {
+                assert_eq!(found.to_lowercase(), name, "text: {text}");
+                assert!(fields.is_empty(), "text: {text}");
+            }
+            other => panic!("expected UpdateSecret for {text:?}, got: {other:?}"),
+        }
+    }
+    // The lead-in comes off whole words only, and never leaves nothing.
+    assert!(matches!(
+        classify_intent("pleasant weather"),
+        Intent::Unknown { .. }
+    ));
+    assert!(matches!(classify_intent("please"), Intent::Unknown { .. }));
+    assert!(matches!(
+        classify_intent("please find my shopping list"),
+        Intent::RetrieveSecret { .. }
+    ));
+}
+
+#[test]
+fn edit_my_note_asks_to_update_it_by_name() {
+    for (text, name) in [
+        ("edit my shopping list", "shopping list"),
+        ("edit my note called Groceries", "Groceries"),
+        ("change the Will", "Will"),
+    ] {
+        match classify_intent(text) {
+            Intent::UpdateSecret {
+                name: found,
+                fields,
+            } => {
+                // The classifier lowercases; note lookup ignores case.
+                assert_eq!(found.to_lowercase(), name.to_lowercase(), "text: {text}");
+                assert!(fields.is_empty(), "text: {text}");
+            }
+            other => panic!("expected UpdateSecret for {text:?}, got: {other:?}"),
+        }
+    }
 }
 
 #[test]
@@ -923,21 +1002,22 @@ fn chat_suggestions_lead_with_notes_not_passwords() {
 }
 
 #[test]
-fn a_saved_secret_is_never_echoed_back_in_the_reply() {
+fn a_saved_password_is_never_echoed_back_but_a_note_is_shown() {
     let handler = ChatHandler::new(None);
     handler.set_vault_state(true, true);
-    let _ = handler.process_message("save a note");
+    let _ = handler.process_message("save a document");
     let _ = handler.process_message("Groceries");
     let _ = handler.process_message("secret-note-text-123");
     let done = handler.process_message("yes");
     assert!(matches!(done.action, Some(Action::StoreEntry { .. })));
+    // A document's text is shown in full, as typed.
     assert!(
-        !done.message.contains("secret-note-text-123"),
+        done.message.contains("secret-note-text-123"),
         "{}",
         done.message
     );
     assert!(
-        done.message.contains("Saved your note \"Groceries\""),
+        done.message.contains("Saved your document \"Groceries\""),
         "{}",
         done.message
     );
@@ -959,7 +1039,8 @@ fn unknown_fields_and_unknown_kinds_are_masked_by_default() {
     assert!(!is_sensitive_field("password", "username"));
     assert!(is_sensitive_field("password", "mystery"));
     assert!(is_sensitive_field("biometric", "anything"));
-    assert!(is_sensitive_field("note", "text"));
+    assert!(!is_sensitive_field("note", "text"));
+    assert!(!is_sensitive_field("document", "content"));
     assert_eq!(kind_word("text"), "note");
     assert_eq!(kind_word("api key"), "password");
     assert_eq!(kind_word("biometric"), "biometric");

@@ -14,6 +14,8 @@
 //                                 separated by "|" (see below)
 //   ?page=settings|help           open that page after load
 //   ?theme=light|dark             set the theme (default: light)
+//   ?remove=1                     tap Remove on a model (with page=settings)
+//   ?lock=1                       tap the lock button (opens the dialog)
 //   ?fill=<password>              type it into both setup fields
 //
 // A one-shot headless screenshot cannot click, so `play` drives the
@@ -52,10 +54,13 @@
     latest_version: "1", size_bytes: 483000000, is_active: false,
     runtime_installed: false, is_downloading: false, downloaded_bytes: 0, total_bytes: 0,
   };
+  const removed = new Set();
   const models = () => {
     if (modelMode === "ready") {
       return [
-        { ...small, state: "installed", installed_version: "1", is_active: true, runtime_installed: true },
+        removed.has("s")
+          ? { ...small, runtime_installed: true }
+          : { ...small, state: "installed", installed_version: "1", is_active: true, runtime_installed: true },
         { ...large, runtime_installed: true },
       ];
     }
@@ -70,28 +75,18 @@
     options: [], input_sensitive: false, ...extra,
   });
 
-  // A tiny script of the real guided conversations.
-  let stage = "idle";
-  let title = "";
+  // A tiny script of the real chat replies.
   const chat = (text) => {
     const t = text.trim().toLowerCase();
-    if (stage === "title") {
-      title = text.trim(); stage = "text";
-      return reply("What is your note?", { input_sensitive: true });
-    }
-    if (stage === "text") {
-      stage = "confirm";
-      return reply(`Save this note?\n  title: ${title}\n  text: ••••`, { options: ["yes", "no"] });
-    }
-    if (stage === "confirm") {
-      stage = "idle";
-      if (t === "yes") {
-        return reply(`Saved your note "${title}".\n  title: ${title}\n  text: ••••`, { action: "store" });
-      }
-      return reply("Okay, I won't save it.");
-    }
     if (t === "save a note" || t === "store a note") {
-      stage = "title"; return reply("What should I call this note?");
+      return reply("Write your note below, then tap Save.", { action: "open_note_editor" });
+    }
+    if (t.startsWith("edit my ")) {
+      const wanted = t.slice(8);
+      const note = notes.find((n) => n.title.toLowerCase() === wanted);
+      if (note) {
+        return reply(`Opening "${note.title}" in the editor.`, { action: `open_note_editor:${note.id}` });
+      }
     }
     if (t === "store" || t === "save something") {
       return reply("What would you like to save?",
@@ -111,6 +106,10 @@
       "- \"save a note\"\n- \"find my shopping list\"\n- \"save a document\"\n- \"help\"");
   };
 
+  const notes = [{ id: "note-0", title: "Shopping list", text: "eggs, milk and bread", version: 1, updated_at: new Date().toISOString() }];
+  // The UI serializes its arguments with serde-wasm-bindgen,
+  // which can hand over Maps instead of plain objects.
+  const plain = (v) => (v instanceof Map ? Object.fromEntries([...v].map(([k, x]) => [k, plain(x)])) : v);
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
@@ -118,11 +117,30 @@
           return { is_initialized: phase !== "setup", is_unlocked: phase === "unlocked", entry_count: 1 };
         }
         if (cmd === "model_status") return models();
+        if (cmd === "remove_model") {
+          removed.add(plain(args).modelId);
+          return models();
+        }
+        if (cmd === "load_note") return notes.find((n) => n.id === plain(args).id) || Promise.reject("note not found");
+        if (cmd === "save_note") {
+          const { id, title, text } = plain(args);
+          const now = new Date().toISOString();
+          if (id) {
+            const n = notes.find((x) => x.id === id);
+            Object.assign(n, { title, text, version: n.version + 1, updated_at: now });
+            return n;
+          }
+          const n = { id: `note-${notes.length + 1}`, title, text, version: 1, updated_at: now };
+          notes.push(n);
+          return n;
+        }
         if (cmd === "send_chat_message") {
-          // The UI serializes its arguments with serde-wasm-bindgen,
-          // which can hand over Maps instead of plain objects.
-          const plain = (v) => (v instanceof Map ? Object.fromEntries([...v].map(([k, x]) => [k, plain(x)])) : v);
           return chat(plain(args).request.content);
+        }
+        if (cmd === "lock_vault") {
+          window.__lockCalls = (window.__lockCalls || 0) + 1;
+          await new Promise((r) => setTimeout(r, 400));
+          return { is_initialized: true, is_unlocked: false, entry_count: 1 };
         }
         return {};
       },
@@ -171,8 +189,16 @@
       }
     }
     if (pageName) {
-      const label = pageName === "settings" ? "Settings" : "Help";
+      const label = { settings: "Settings" }[pageName] || "Help";
       (await until(() => document.querySelector(`button[aria-label="${label}"]`)))?.click();
+    }
+    // ?remove=1 taps Remove on the first model (Settings must be open).
+    if (q.get("remove") === "1") {
+      (await until(() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Remove")))?.click();
+    }
+    // ?lock=1 taps the lock button, which opens the "Lock Stern?" dialog.
+    if (q.get("lock") === "1") {
+      (await until(() => document.querySelector(".lock-button")))?.click();
     }
     for (const step of play) {
       if (step.startsWith("@")) {

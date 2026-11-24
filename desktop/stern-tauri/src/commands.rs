@@ -174,6 +174,10 @@ fn unlock_vault_inner(state: &AppState, password: &str) -> Result<VaultStatus, V
 #[tauri::command]
 
 pub async fn lock_vault(state: State<'_, AppState>) -> Result<VaultStatus, VaultError> {
+    // A model download is a change to the installed models, which needs an
+    // unlocked vault: stop any that is running, so nothing installs or
+    // activates after the lock.
+    state.model_manager.cancel_downloads();
     let entry_count = state.repository.count_entries()?;
     {
         let mut session = state
@@ -291,8 +295,13 @@ fn execute_chat_response(
         Some(stern_core::ai::chat::Action::UnlockVaultWith { ref password }) => {
             handle_unlock_vault(state, password.as_str())
         }
+        Some(stern_core::ai::chat::Action::UpdateEntry {
+            ref name,
+            ref fields,
+        }) if fields.is_empty() => handle_edit_note(state, name, &response),
         Some(
-            stern_core::ai::chat::Action::ListEntries { .. }
+            stern_core::ai::chat::Action::OpenNoteEditor
+            | stern_core::ai::chat::Action::ListEntries { .. }
             | stern_core::ai::chat::Action::ConfirmDelete { .. }
             | stern_core::ai::chat::Action::UpdateEntry { .. }
             | stern_core::ai::chat::Action::ExportVault
@@ -307,6 +316,41 @@ fn execute_chat_response(
             options: response.options,
             input_sensitive: response.input_sensitive,
         }),
+    }
+}
+
+/// The chat action that opens the note editor on a note. The note's id
+/// follows the colon; with no id the editor opens on a new note.
+pub const OPEN_NOTE_ACTION: &str = "open_note_editor";
+
+/// "Edit my shopping list": open that note in the editor. Anything that
+/// is not a single note falls back to the plain reply.
+fn handle_edit_note(
+    state: &AppState,
+    name: &str,
+    response: &stern_core::ai::chat::ChatResponse,
+) -> Result<ChatResponse, VaultError> {
+    let matches = match crate::notes::find(state, name) {
+        Ok(matches) => matches,
+        Err(VaultError::VaultLocked) => return Ok(locked_chat_response()),
+        Err(e) => return Err(e),
+    };
+    match matches.as_slice() {
+        [] => Ok(passthrough_response(response)),
+        [note] => Ok(ChatResponse {
+            message: format!("Opening \"{}\" in the editor.", note.title),
+            action: Some(format!("{OPEN_NOTE_ACTION}:{}", note.id)),
+            user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
+        }),
+        _ => {
+            let titles: Vec<String> = matches.iter().map(|note| note.title.clone()).collect();
+            Ok(plain_chat_response(format!(
+                "More than one note matches \"{name}\": {}. Which one do you mean?",
+                titles.join(", ")
+            )))
+        }
     }
 }
 
@@ -370,6 +414,7 @@ fn passthrough_response(response: &stern_core::ai::chat::ChatResponse) -> ChatRe
 
 fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
     match action {
+        stern_core::ai::chat::Action::OpenNoteEditor => OPEN_NOTE_ACTION.to_string(),
         stern_core::ai::chat::Action::StoreEntry { .. } => "store".to_string(),
         stern_core::ai::chat::Action::SearchEntry { .. } => "search".to_string(),
         stern_core::ai::chat::Action::RevealEntry { .. } => "reveal".to_string(),
@@ -935,6 +980,21 @@ mod tests;
 // manager); exactly one installed model is active at a time.
 // ---------------------------------------------------------------------------
 
+/// Refuse a model change until the vault is unlocked. Choosing, downloading
+/// or removing a model is allowed only after sign-in, so the list of models
+/// can be seen before unlocking but not changed.
+fn require_unlocked(state: &AppState) -> Result<(), VaultError> {
+    let session = state
+        .session
+        .lock()
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+    if session.is_unlocked {
+        Ok(())
+    } else {
+        Err(VaultError::VaultLocked)
+    }
+}
+
 fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
     let progress = state
         .download_progress
@@ -1035,8 +1095,9 @@ async fn ensure_runtime_path(
     let progress = state.download_progress.clone();
     let progress_key = progress_id.map(str::to_string);
     let manager = state.model_manager.clone();
+    let epoch = manager.download_epoch();
     tauri::async_runtime::spawn_blocking(move || {
-        manager.ensure_runtime(&mut |downloaded, total_bytes| {
+        manager.ensure_runtime_at(epoch, &mut |downloaded, total_bytes| {
             if let Some(key) = &progress_key {
                 if let Ok(mut guard) = progress.lock() {
                     // Only ever update the slot while it still
@@ -1109,6 +1170,10 @@ pub async fn download_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    // Taken before the unlock check, so a lock that lands between the
+    // check and the first byte still cancels this download.
+    let epoch = state.model_manager.download_epoch();
+    require_unlocked(&state)?;
     let descriptor = catalog_model(&model_id)
         .copied()
         .ok_or_else(|| VaultError::Model(format!("unknown model: {model_id}")))?;
@@ -1140,7 +1205,7 @@ pub async fn download_model(
     let progress_id = model_id.clone();
 
     let result = tauri::async_runtime::spawn_blocking(move || {
-        manager.download(&descriptor, &mut |downloaded, total| {
+        manager.download_at(&descriptor, epoch, &mut |downloaded, total| {
             if let Ok(mut guard) = progress.lock() {
                 *guard = Some((progress_id.clone(), downloaded, total));
             }
@@ -1157,6 +1222,10 @@ pub async fn download_model(
             )));
         }
     }
+
+    // A lock that arrived as the download finished: the files are
+    // verified and stay, but nothing is loaded into chat while locked.
+    require_unlocked(&state)?;
 
     // Hot-load only when the downloaded model is the active one (first
     // install, or an update of the active model). Downloading a
@@ -1176,6 +1245,7 @@ pub async fn select_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    require_unlocked(&state)?;
     // Load *before* persisting the selection: if the load fails, the
     // manifest, the UI's active badge, and the chat handler all stay on
     // the previously active model instead of desyncing.
@@ -1211,6 +1281,7 @@ pub async fn remove_model(
     state: State<'_, AppState>,
     model_id: String,
 ) -> Result<Vec<ModelStatusDto>, VaultError> {
+    require_unlocked(&state)?;
     let was_active = state
         .model_manager
         .active_model()

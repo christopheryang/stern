@@ -408,6 +408,7 @@ impl ChatHandler {
                         input_sensitive: sensitive,
                     }
                 }
+                ConversationStep::NoteEditor => Self::note_editor_response(),
                 ConversationStep::Finished(intent) => self.finish(intent),
                 ConversationStep::Cancelled => ChatResponse {
                     message: "Cancelled — nothing was saved.".to_string(),
@@ -488,6 +489,7 @@ impl ChatHandler {
                         input_sensitive: sensitive,
                     }
                 }
+                ConversationStep::NoteEditor => Self::note_editor_response(),
                 ConversationStep::Finished(intent) => self.finish(intent),
                 ConversationStep::Cancelled => ChatResponse {
                     message: "Cancelled — nothing was saved.".to_string(),
@@ -500,6 +502,17 @@ impl ChatHandler {
         }
 
         self.finish(intent)
+    }
+
+    /// The reply that opens the note editor on a new note.
+    fn note_editor_response() -> ChatResponse {
+        ChatResponse {
+            message: "Write your note below, then tap Save.".to_string(),
+            action: Some(Action::OpenNoteEditor),
+            user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
+        }
     }
 
     /// Put an in-progress guided conversation back for the next
@@ -828,6 +841,8 @@ fn sensitive_prompt(message: &str) -> ChatResponse {
 }
 
 pub enum Action {
+    /// Open the note editor on a new, empty note.
+    OpenNoteEditor,
     StoreEntry {
         name: String,
         kind: String,
@@ -910,6 +925,7 @@ impl std::fmt::Debug for Action {
                 .field("name", name)
                 .field("field_keys", &keys(fields))
                 .finish(),
+            Self::OpenNoteEditor => f.write_str("OpenNoteEditor"),
             Self::ExportVault => f.write_str("ExportVault"),
             Self::ImportVault => f.write_str("ImportVault"),
             Self::CreateVault => f.write_str("CreateVault"),

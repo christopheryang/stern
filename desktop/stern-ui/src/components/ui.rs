@@ -31,6 +31,7 @@ pub enum IconKind {
     Sun,
     Moon,
     Minus,
+    Trash,
 }
 
 impl IconKind {
@@ -40,6 +41,9 @@ impl IconKind {
                 r#"<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>"#
             }
             Self::Minus => r#"<path d="M6 12h12"/>"#,
+            Self::Trash => {
+                r#"<path d="M4 7h16M10 11v6M14 11v6"/><path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12"/><path d="M9 7V4h6v3"/>"#
+            }
             Self::Sun => {
                 r#"<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>"#
             }
@@ -141,6 +145,81 @@ pub fn ErrorAlert(
             <div>
                 <span>{message}</span>
                 {detail.map(|text| view! { <small class="alert-detail">{text}</small> })}
+            </div>
+        </div>
+    }
+}
+
+/// A "are you sure?" dialog. Cancel is the focused default, so a stray
+/// Enter never confirms; Escape and a click outside cancel too. Tab stays
+/// inside the two buttons. `danger` styles the confirm button as a
+/// destructive action.
+#[component]
+pub fn ConfirmDialog(
+    #[prop(into)] title: String,
+    #[prop(into)] text: String,
+    confirm_label: &'static str,
+    confirm_icon: IconKind,
+    #[prop(optional)] danger: bool,
+    on_cancel: Callback<()>,
+    on_confirm: Callback<()>,
+) -> impl IntoView {
+    let cancel_ref = NodeRef::<leptos::html::Button>::new();
+    let confirm_ref = NodeRef::<leptos::html::Button>::new();
+    Effect::new(move |_| {
+        if let Some(button) = cancel_ref.get() {
+            drop(button.focus());
+        }
+    });
+    let on_keydown = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
+        "Escape" => on_cancel.run(()),
+        "Tab" => {
+            ev.prevent_default();
+            let on_cancel_button = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+                .zip(cancel_ref.get())
+                .is_some_and(|(active, cancel)| active == **cancel);
+            // From Cancel, Tab goes to the confirm button and Shift+Tab
+            // wraps to it; from the confirm button, the other way round.
+            let next = if on_cancel_button {
+                confirm_ref
+            } else {
+                cancel_ref
+            };
+            if let Some(button) = next.get() {
+                drop(button.focus());
+            }
+        }
+        _ => {}
+    };
+    let confirm_class = if danger {
+        "btn btn-danger"
+    } else {
+        "btn btn-primary"
+    };
+    view! {
+        <div class="modal-backdrop" on:click=move |_| on_cancel.run(())>
+            <div
+                class="modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="confirm-dialog-title"
+                aria-describedby="confirm-dialog-text"
+                on:click=move |ev| ev.stop_propagation()
+                on:keydown=on_keydown
+            >
+                <h2 id="confirm-dialog-title" class="modal-title">{title}</h2>
+                <p id="confirm-dialog-text" class="modal-text">{text}</p>
+                <div class="modal-actions">
+                    <button class="btn" node_ref=cancel_ref on:click=move |_| on_cancel.run(())>
+                        "Cancel"
+                    </button>
+                    <button class=confirm_class node_ref=confirm_ref on:click=move |_| on_confirm.run(())>
+                        <Icon kind=confirm_icon class="icon-sm" />
+                        {confirm_label}
+                    </button>
+                </div>
             </div>
         </div>
     }

@@ -88,20 +88,18 @@ Stern asks a few short questions, one at a time. First, a name:
 
 ![Stern asks what to call the note](User-Guide%20-%20Save%20A%20Note.png)
 
-Type a name such as `Shopping list` and press Enter. Then Stern asks for
-the note itself. This part is **private**: the box is marked **Private**,
-and each letter you type shows for a moment, then turns into a star, in
-case someone is looking over your shoulder.
+A box opens in the chat with a **Title** and a **Note** area. Write your
+note there, then tap **Save note**. Tap **Cancel** to close the box
+without saving.
 
-![Typing the private part of a note](User-Guide%20-%20Typing%20A%20Note.png)
+To change a note later, type `edit my shopping list` (use your note's
+name). The same box opens with the note in it. Chat starts and finds
+notes; the box is where you write and change them.
 
-Press Enter, and Stern shows what it is about to save. Your note's text
-is hidden as dots. Tap **yes** to save it, or **no** to throw it away.
+Notes are not hidden. Passwords, card numbers and similar details are the
+only things Stern masks.
 
-![Stern asks you to confirm](User-Guide%20-%20Confirm.png)
-
-Stern never writes your private text back into the chat. You can say
-`cancel` at any question to stop, and nothing is saved until you say yes.
+![Finding a saved note](User-Guide%20-%20Find%20A%20Note.png)
 
 ## 4. Find something you saved
 
@@ -132,23 +130,28 @@ info. You can tap a button or type its letter.
 
 ## 6. Settings, light and dark, and Help
 
-Along the top right are four buttons. The sun or moon switches between
-light and dark, the question mark opens Help, the gear opens Settings,
-and **Lock** locks Stern.
+Along the top right are the padlock, the question mark (Help) and the
+gear (Settings).
 
 ### Light and dark
 
-Tap the **moon** to switch to dark, and the **sun** to switch back. It
-works on every screen, even before you sign in, and Stern remembers your
-choice. Light is what you get the first time.
+Open **Settings** and pick Light or Dark under **Look**. It works before
+you sign in too, and Stern remembers your choice. Light is what you get
+the first time.
 
 ![Stern in dark mode](User-Guide%20-%20Dark%20Theme.png)
 
 ### Settings
 
-The gear opens Settings. **Look** is the same light and dark choice. **AI
+The gear opens Settings. **Look** is the light and dark choice. **AI
 model** lets you download the other model, switch between them with
-**Use this**, or free up space with **Remove**.
+**Use this**, or free up space with **Remove**. Remove asks you to
+confirm, then deletes the model from your computer; the other model, and
+everything you saved, is not touched. Removing the last model also
+deletes the files Stern downloaded to run it. Before you sign in, the
+model list is shown but cannot be changed; unlock your vault to change it.
+**Locking** has one choice, **Ask before locking**, which is on to begin
+with. See [Lock Stern and open it again](#7-lock-stern-and-open-it-again).
 
 ![Settings](User-Guide%20-%20Settings.png)
 
@@ -161,8 +164,14 @@ words. It is available at any time, including before you sign in.
 
 ## 7. Lock Stern and open it again
 
-Tap **Lock** when you step away. Stern hides everything until you enter
-your password again. It also locks when you close it.
+The padlock at the top right is open when Stern is unlocked and closed
+when it is locked. When you step away, tap it. Stern asks **Lock Stern?**;
+tap **Lock** to lock it, or **Cancel** to stay in. Stern then hides everything until
+you enter your password again. It also locks when you close it.
+
+If you would rather not be asked, open Settings and turn off **Ask before
+locking**. The padlock then locks Stern at once. This choice, like the AI
+model, can only be changed once you have signed in.
 
 ![Opening Stern with your password](User-Guide%20-%20Unlock.png)
 

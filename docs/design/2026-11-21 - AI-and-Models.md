@@ -151,14 +151,29 @@ click away.
 
 ### Removal and absence
 
-Each row's **Remove** action deletes that model's directory tree and
-manifest entry; removing the active model unloads it and leaves no
-model active. With no model installed (or none active), the app shows
-the model-required gate: chat — the app's interface to the vault — is
-unavailable until the user picks a model in Settings (ADR-0008). The
-runtime library stays installed when models are removed; it is shared
-by all of them. Removing models is the way to reclaim disk space; the
-app never re-downloads anything unprompted.
+Each row's **Remove** action first asks "Remove <model>?" in a
+confirmation dialog (Cancel is the focused default; the text says what
+is deleted and, for the active model, that chat stops understanding
+messages until another is chosen). Only on confirmation does it
+remove the model: the manifest is rewritten first and the model's
+directory tree deleted after it, so a failure part-way leaves an
+unlisted folder, never a listed model with no files. Removing the
+active model unloads it and leaves no model active. The command itself
+is refused while the vault is locked, and so are downloads: locking
+cancels any download in flight, and one that finishes just as the vault
+locks is verified and kept but not loaded. With no model installed (or none
+active), the app shows the model-required gate: chat — the app's
+interface to the vault — is unavailable until the user picks a model in
+Settings (ADR-0008).
+
+The ONNX Runtime library is shared by all models, so it stays while any
+model remains. Removing the **last** model also deletes
+`models/runtime/` and the manifest's runtime record, leaving nothing of
+the AI stack in the app data folder. The runtime goes first: if it
+cannot be removed (a library still in use, say) the removal stops with
+the model still installed and listed; the next download fetches the
+runtime again with its model. Removing models is the way to reclaim disk
+space; the app never re-downloads anything unprompted.
 
 ![Model lifecycle](2026-11-21%20-%20AI-and-Models%20-%20Model%20Lifecycle.png)
 

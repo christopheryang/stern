@@ -179,6 +179,14 @@ button:disabled { cursor: not-allowed; }
 }
 .btn-primary:hover:not(:disabled) { background: var(--accent-gradient); filter: brightness(1.1); }
 
+.btn-danger {
+  border-color: transparent;
+  background: var(--danger);
+  color: #fff;
+}
+.btn-danger:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-danger:focus-visible { outline: 2px solid var(--danger); outline-offset: 2px; }
+
 .btn-sm { height: 32px; padding: 0 12px; font-size: 13px; border-radius: 10px; }
 .btn-block { width: 100%; height: 42px; }
 .btn-quiet { border-color: transparent; color: var(--text-dim); }
@@ -198,6 +206,48 @@ button:disabled { cursor: not-allowed; }
 .icon { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .icon-sm { width: 15px; height: 15px; }
 .icon-lg { width: 26px; height: 26px; }
+
+/* ── Lock button ───────────────────────────────────────────── */
+
+.lock-button--open { color: var(--success); }
+.lock-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Settings toggle row ───────────────────────────────────── */
+
+.toggle-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 22px; font-size: 14px; cursor: pointer;
+}
+.toggle {
+  appearance: none; -webkit-appearance: none; flex-shrink: 0;
+  position: relative; width: 38px; height: 22px; margin: 0;
+  border-radius: 999px; background: var(--border-strong);
+  cursor: pointer; transition: background 0.15s;
+}
+.toggle::after {
+  content: ""; position: absolute; top: 3px; left: 3px;
+  width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25); transition: transform 0.15s;
+}
+.toggle:checked { background: var(--success); }
+.toggle:checked::after { transform: translateX(16px); }
+.toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── Confirmation dialog ───────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 12, 28, 0.45); padding: 20px;
+}
+.modal {
+  width: 100%; max-width: 380px; padding: 24px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
+  background: var(--surface-solid); box-shadow: var(--shadow-pop);
+}
+.modal-title { margin: 0 0 8px; font-size: 18px; font-weight: 700; }
+.modal-text { margin: 0 0 20px; font-size: 14px; color: var(--text-dim); line-height: 1.5; }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
 
 /* ── Status pill ───────────────────────────────────────────── */
 
@@ -262,6 +312,18 @@ button:disabled { cursor: not-allowed; }
 
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+
+/* Note editor: a title field and a text area, shown inside the chat. */
+.note-editor {
+  display: flex; flex-direction: column; gap: 8px; min-width: 0;
+  margin: 14px 0 6px; padding: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+.notes-text { height: auto; min-height: 180px; padding: 12px 14px; resize: vertical; font-family: inherit; line-height: 1.5; }
+.notes-actions { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+.settings-note { margin: 0 0 12px; font-size: 13px; color: var(--text-dim); }
+.notes-actions .muted { font-size: 13px; color: var(--text-dim); }
 
 .input {
   width: 100%;

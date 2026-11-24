@@ -33,6 +33,7 @@ questions.
 | [0012](0012-Notes-First-And-Plain-Text-Advice.md) | Notes and documents lead every prompt; plain text files are the advised long-term store | Accepted |
 | [0013](0013-Light-Default-Theme-Switch.md) | Light is the default theme; users can switch to dark in Settings | Accepted |
 | [0014](0014-Two-Model-Tiers-With-Pros-And-Cons.md) | Two AI model tiers (Small, Large) with pros and cons; the first-run screen picks and downloads in place | Accepted |
+| [0015](0015-Editor-For-Notes-Chat-For-Finding.md) | Notes are written in an editor inside the chat; chat creates and finds them; notes are not masked | Accepted |
 
 ADRs 0001–0005 record decisions already embodied in the codebase
 (retroactively documented 2026-11-21). ADR-0006 was recorded when the

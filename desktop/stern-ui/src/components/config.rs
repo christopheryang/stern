@@ -3,12 +3,15 @@
 
 //! The configuration view, opened from the gear button in the header.
 //!
-//! It holds the look (light or dark) and the AI model picker. Stern
+//! It holds the look (light or dark), whether locking asks first, and
+//! the AI model picker. The look
+//! is always available; the model can only be changed once unlocked. Stern
 //! ships with no model and no ONNX Runtime, so choosing and
 //! downloading a model here is the first thing a new user does — the
 //! chat stays gated until one is active.
 
 use super::model_setup::ModelSetup;
+use super::prefs;
 use super::theme::{self, Theme, ThemeSignal};
 use super::ui::{Icon, IconKind};
 use leptos::prelude::*;
@@ -70,8 +73,50 @@ fn Appearance() -> impl IntoView {
     }
 }
 
+/// Whether locking asks "Lock Stern?" first. Takes effect and is saved
+/// as soon as it is switched.
 #[component]
-pub fn ConfigView() -> impl IntoView {
+fn LockSetting() -> impl IntoView {
+    let confirm = prefs::confirm_lock_signal();
+    // Set when the browser refused to keep the choice.
+    let unsaved = RwSignal::new(false);
+    view! {
+        <div class="section">
+            <div class="section-head">
+                <div class="section-title">
+                    <Icon kind=IconKind::Lock />
+                    "Locking"
+                </div>
+                <p class="section-text">"Choose whether Stern checks with you before it locks."</p>
+            </div>
+            <label class="toggle-row">
+                <span>"Ask before locking"</span>
+                <input
+                    type="checkbox"
+                    role="switch"
+                    class="toggle"
+                    prop:checked=move || confirm.get()
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        unsaved.set(!prefs::confirm_lock_save(on));
+                        confirm.set(on);
+                    }
+                />
+            </label>
+            {move || unsaved.get().then(|| view! {
+                <p class="muted settings-note" role="status">
+                    "Stern could not save this choice, so it lasts only until you close Stern."
+                </p>
+            })}
+        </div>
+    }
+}
+
+/// The Settings page. The look can be changed at any time. The AI model
+/// can only be changed once the vault is unlocked; before that the list
+/// is shown read-only so the user can see what is installed.
+#[component]
+pub fn ConfigView(#[prop(optional)] locked: bool) -> impl IntoView {
     view! {
         <div class="page">
             <div class="page-inner">
@@ -80,7 +125,16 @@ pub fn ConfigView() -> impl IntoView {
                 </div>
                 <Appearance />
                 <div class="section-gap"></div>
-                <ModelSetup />
+                // Locking is a vault setting: before sign-in, anyone at the
+                // keyboard could switch the safety question off.
+                {(!locked).then(|| view! {
+                    <LockSetting />
+                    <div class="section-gap"></div>
+                })}
+                {locked.then(|| view! {
+                    <p class="muted settings-note">"Unlock your vault to change the AI model."</p>
+                })}
+                <ModelSetup locked=locked />
             </div>
         </div>
     }

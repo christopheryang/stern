@@ -14,7 +14,7 @@
 //! `model_status` for progress.
 
 use super::friendly::{friendly_error, FriendlyError};
-use super::ui::{ErrorAlert, Icon, IconKind};
+use super::ui::{ConfirmDialog, ErrorAlert, Icon, IconKind};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::cell::Cell;
@@ -195,10 +195,68 @@ fn megabytes(bytes: u64) -> u64 {
     bytes.checked_div(1_000_000).unwrap_or(0)
 }
 
+/// Show what an action returned: the new model list, or the error with
+/// the list re-fetched so the card matches what is on disk.
+#[allow(clippy::future_not_send)]
+async fn apply_action_result(
+    result: Result<serde_json::Value, String>,
+    set_models: WriteSignal<Vec<ModelStatus>>,
+    set_error: WriteSignal<Option<FriendlyError>>,
+    cancelled: ReadSignal<bool>,
+) {
+    match result {
+        Ok(value) => {
+            if let Ok(list) = serde_json::from_value::<Vec<ModelStatus>>(value) {
+                set_models.set(list);
+            }
+        }
+        Err(e) => {
+            set_error.set(Some(friendly_error(&e)));
+            if let Ok(list) = fetch_status().await {
+                if !cancelled.get_untracked() {
+                    set_models.set(list);
+                }
+            }
+        }
+    }
+}
+
+/// The "Remove <model>?" dialog. It says what is deleted, and, for the
+/// model in use, that Stern stops understanding messages until another
+/// is chosen.
+fn remove_dialog(
+    name: &str,
+    was_active: bool,
+    on_cancel: Callback<()>,
+    on_confirm: Callback<()>,
+) -> AnyView {
+    let consequence = if was_active {
+        " Stern will not understand your messages until you choose another model."
+    } else {
+        ""
+    };
+    let text = format!(
+        "This deletes the {name} AI model from your computer.{consequence} You can download it again later."
+    );
+    view! {
+        <ConfirmDialog
+            title=format!("Remove {name}?")
+            text=text
+            confirm_label="Remove"
+            confirm_icon=IconKind::Trash
+            danger=true
+            on_cancel=on_cancel
+            on_confirm=on_confirm
+        />
+    }
+    .into_any()
+}
+
 #[component]
 fn ModelRow(
     status: ModelStatus,
     any_downloading: bool,
+    locked: bool,
     on_download: Callback<String>,
     on_select: Callback<String>,
     on_remove: Callback<String>,
@@ -255,7 +313,7 @@ fn ModelRow(
                     {update_note.map(|note| view! { <div class="model-update">{note}</div> })}
                 </div>
                 <div class="model-actions">
-                    {(!downloading && !any_downloading).then(|| {
+                    {(!downloading && !any_downloading && !locked).then(|| {
                         let state = status.state.clone();
                         let is_active = status.is_active;
                         view! {
@@ -336,7 +394,10 @@ fn SectionHead() -> impl IntoView {
 /// or removal finishes, so a host (the first-run gate) can re-check
 /// whether chat is ready.
 #[component]
-pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl IntoView {
+pub fn ModelSetup(
+    #[prop(optional)] on_change: Option<Callback<()>>,
+    #[prop(optional)] locked: bool,
+) -> impl IntoView {
     let (models, set_models) = signal(Vec::<ModelStatus>::new());
     let (error, set_error) = signal(Option::<FriendlyError>::None);
     let (action_in_flight, set_action_in_flight) = signal(false);
@@ -367,21 +428,7 @@ pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl Int
             let result = invoke_cmd(cmd, serde_json::json!({ "modelId": model_id })).await;
             stop.set(true);
             if !cancelled.get_untracked() {
-                match result {
-                    Ok(value) => {
-                        if let Ok(list) = serde_json::from_value::<Vec<ModelStatus>>(value) {
-                            set_models.set(list);
-                        }
-                    }
-                    Err(e) => {
-                        set_error.set(Some(friendly_error(&e)));
-                        if let Ok(list) = fetch_status().await {
-                            if !cancelled.get_untracked() {
-                                set_models.set(list);
-                            }
-                        }
-                    }
-                }
+                apply_action_result(result, set_models, set_error, cancelled).await;
             }
             set_action_in_flight.set(false);
             if let Some(on_change) = on_change {
@@ -399,8 +446,21 @@ pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl Int
     // reports through the same progress slot as a model download.
     let on_select =
         Callback::new(move |model_id: String| run_action("select_model", model_id, true));
-    let on_remove =
-        Callback::new(move |model_id: String| run_action("remove_model", model_id, false));
+    // Removing deletes files, so it waits for a confirmation: the model's
+    // id, its name for the dialog, and whether it is the one in use.
+    let (pending_remove, set_pending_remove) = signal(Option::<(String, String, bool)>::None);
+    let on_remove = Callback::new(move |model_id: String| {
+        let list = models.get_untracked();
+        if let Some(m) = list.iter().find(|m| m.model_id == model_id) {
+            set_pending_remove.set(Some((model_id, m.display_name.clone(), m.is_active)));
+        }
+    });
+    let on_confirm_remove = Callback::new(move |()| {
+        if let Some((model_id, _, _)) = pending_remove.get_untracked() {
+            set_pending_remove.set(None);
+            run_action("remove_model", model_id, false);
+        }
+    });
 
     view! {
         <div>
@@ -420,6 +480,7 @@ pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl Int
                             <ModelRow
                                 status=m
                                 any_downloading=any_downloading
+                                locked=locked
                                 on_download=on_download
                                 on_select=on_select
                                 on_remove=on_remove
@@ -436,6 +497,14 @@ pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl Int
                 }
                 .into_any()
             }}
+            {move || pending_remove.get().map(|(_, name, was_active)| {
+                remove_dialog(
+                    &name,
+                    was_active,
+                    Callback::new(move |()| set_pending_remove.set(None)),
+                    on_confirm_remove,
+                )
+            })}
             {move || {
                 error.get().map(|e| {
                     view! { <div class="settings-error">{match e.detail {

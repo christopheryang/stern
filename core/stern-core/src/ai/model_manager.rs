@@ -40,7 +40,8 @@ use sha2::{Digest, Sha256};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// How a model's chat prompt is formatted for parsing commands.
@@ -312,16 +313,51 @@ pub struct ModelManager {
     /// cannot download to and rename the same `.part` archive or race
     /// the runtime record in `installed.json`.
     runtime_lock: Mutex<()>,
+    /// Bumped by [`ModelManager::cancel_downloads`]. A download remembers
+    /// the value it started under, and stops reading as soon as it changes.
+    cancel_epoch: Arc<AtomicU64>,
+}
+
+/// A download stream that fails once its epoch has been superseded, so a
+/// cancelled download stops at the next read instead of running to the end.
+struct CancellableReader {
+    inner: Box<dyn Read>,
+    epoch: u64,
+    current: Arc<AtomicU64>,
+}
+
+impl Read for CancellableReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        if self.current.load(Ordering::SeqCst) != self.epoch {
+            return Err(std::io::Error::other("download cancelled"));
+        }
+        self.inner.read(buf)
+    }
 }
 
 impl ModelManager {
     #[must_use]
-    pub const fn new(models_dir: PathBuf) -> Self {
+    pub fn new(models_dir: PathBuf) -> Self {
         Self {
             models_dir,
             manifest_lock: Mutex::new(()),
             runtime_lock: Mutex::new(()),
+            cancel_epoch: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    /// The value to pass to [`ModelManager::download_at`]: take it before
+    /// checking that the user is allowed to start a download, so a
+    /// cancellation in between still stops it.
+    #[must_use]
+    pub fn download_epoch(&self) -> u64 {
+        self.cancel_epoch.load(Ordering::SeqCst)
+    }
+
+    /// Stop every download that is running or about to start under an
+    /// earlier epoch. Files already verified and moved into place stay.
+    pub fn cancel_downloads(&self) {
+        self.cancel_epoch.fetch_add(1, Ordering::SeqCst);
     }
 
     /// Lock the manifest for a read-modify-write cycle, recovering the
@@ -503,6 +539,16 @@ impl ModelManager {
         &self,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<PathBuf, VaultError> {
+        self.ensure_runtime_at(self.download_epoch(), progress)
+    }
+
+    /// [`ModelManager::ensure_runtime`], stopping if downloads are
+    /// cancelled after `epoch` was taken.
+    pub fn ensure_runtime_at(
+        &self,
+        epoch: u64,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<PathBuf, VaultError> {
         // One install at a time: concurrent callers would otherwise
         // stream to the same `.part` archive, rename it over each
         // other, and race the manifest's runtime record. The second
@@ -528,7 +574,7 @@ impl ModelManager {
 
         let installed = (|| -> Result<InstalledRuntime, VaultError> {
             let (mut reader, total) =
-                Self::open_download(descriptor.archive_url, descriptor.size_bytes)?;
+                self.open_download(descriptor.archive_url, descriptor.size_bytes, epoch)?;
             let (digest, downloaded) = Self::stream_hash_to_file(
                 &mut reader,
                 total,
@@ -896,7 +942,15 @@ impl ModelManager {
     /// Open an HTTPS download and return its body reader plus the total
     /// byte count (the `Content-Length` when the server sends a usable
     /// one, otherwise `fallback_total`).
-    fn open_download(url: &str, fallback_total: u64) -> Result<(Box<dyn Read>, u64), VaultError> {
+    fn open_download(
+        &self,
+        url: &str,
+        fallback_total: u64,
+        epoch: u64,
+    ) -> Result<(Box<dyn Read>, u64), VaultError> {
+        if self.download_epoch() != epoch {
+            return Err(VaultError::Model("download cancelled".to_string()));
+        }
         let response = Self::download_agent()
             .get(url)
             .call()
@@ -917,7 +971,12 @@ impl ModelManager {
             .filter(|&n| n > 0)
             .unwrap_or(fallback_total);
 
-        Ok((Box::new(response.into_body().into_reader()), total))
+        let reader = CancellableReader {
+            inner: Box::new(response.into_body().into_reader()),
+            epoch,
+            current: Arc::clone(&self.cancel_epoch),
+        };
+        Ok((Box::new(reader), total))
     }
 
     /// Stream `reader` into `part_path` while hashing, reporting
@@ -976,6 +1035,17 @@ impl ModelManager {
         descriptor: &ModelDescriptor,
         progress: &mut dyn FnMut(u64, u64),
     ) -> Result<InstalledModel, VaultError> {
+        self.download_at(descriptor, self.download_epoch(), progress)
+    }
+
+    /// [`ModelManager::download`], stopping if downloads are cancelled
+    /// after `epoch` was taken (see [`ModelManager::cancel_downloads`]).
+    pub fn download_at(
+        &self,
+        descriptor: &ModelDescriptor,
+        epoch: u64,
+        progress: &mut dyn FnMut(u64, u64),
+    ) -> Result<InstalledModel, VaultError> {
         // Phase 1: the runtime, if missing. Its size is folded into the
         // progress totals so the three phases read as one download.
         let runtime_size = match current_runtime() {
@@ -986,12 +1056,14 @@ impl ModelManager {
             .saturating_add(descriptor.size_bytes)
             .saturating_add(descriptor.tokenizer_size_bytes);
         if runtime_size > 0 {
-            self.ensure_runtime(&mut |downloaded, _| progress(downloaded, combined_total))?;
+            self.ensure_runtime_at(epoch, &mut |downloaded, _| {
+                progress(downloaded, combined_total);
+            })?;
         }
 
         // Phase 2: the model itself, offset by the runtime bytes.
         let (mut reader, model_total) =
-            Self::open_download(descriptor.download_url, descriptor.size_bytes)?;
+            self.open_download(descriptor.download_url, descriptor.size_bytes, epoch)?;
         let installed = self.install_from_reader(
             descriptor,
             &mut reader,
@@ -1005,8 +1077,11 @@ impl ModelManager {
         // the model cannot run, so a failure here fails the download
         // (the model stays installed; a retry re-fetches both).
         let tokenizer_base = runtime_size.saturating_add(model_total);
-        let (mut reader, tokenizer_total) =
-            Self::open_download(descriptor.tokenizer_url, descriptor.tokenizer_size_bytes)?;
+        let (mut reader, tokenizer_total) = self.open_download(
+            descriptor.tokenizer_url,
+            descriptor.tokenizer_size_bytes,
+            epoch,
+        )?;
         self.install_tokenizer(
             descriptor,
             &mut reader,
@@ -1182,23 +1257,35 @@ impl ModelManager {
 
     /// Remove one installed model (all its versions) and its manifest
     /// record. If it was the active model, no model is active afterwards.
+    /// When it was the last model, the downloaded ONNX Runtime goes too:
+    /// it is fetched with the first model, so it is fetched again with
+    /// the next, and nothing is left behind in the app data folder.
     pub fn remove_model(&self, model_id: &str) -> Result<(), VaultError> {
         // Validate before touching the filesystem: `model_id` comes from
         // the UI/IPC layer, and joining an unchecked id (e.g. one with
         // `..` or a path separator) would let `remove_dir_all` escape
         // the models directory.
         self.validate_stored_model_id(model_id)?;
+        // Same order as `ensure_runtime`: runtime lock, then manifest lock.
+        let _runtime_guard = self.lock_runtime();
         let _guard = self.lock_manifest();
-        let model_dir = self.models_dir.join(model_id);
-        if model_dir.exists() {
-            fs::remove_dir_all(&model_dir)
-                .map_err(|e| VaultError::Model(format!("remove model: {e}")))?;
-        }
         let mut manifest = self.manifest();
         manifest.models.retain(|m| m.model_id != model_id);
         if manifest.active_model_id.as_deref() == Some(model_id) {
             manifest.active_model_id = None;
         }
+        // Take the runtime away first, and only when this was the last
+        // model. If that fails (a library still in use, a permission
+        // error), nothing else has been touched: the model is still
+        // installed and on disk, and the manifest still says so, so the
+        // user can try again. The manifest is the source of truth, so it
+        // is written before the model's files go: a crash in between
+        // leaves an unlisted folder, never a listed model with no files.
+        if manifest.models.is_empty() {
+            self.remove_runtime_files()?;
+            manifest.runtime = None;
+        }
+        let model_dir = self.models_dir.join(model_id);
         if manifest.models.is_empty()
             && manifest.active_model_id.is_none()
             && manifest.runtime.is_none()
@@ -1210,6 +1297,23 @@ impl ModelManager {
             }
         } else {
             self.write_manifest(&manifest)?;
+        }
+        if model_dir.exists() {
+            fs::remove_dir_all(&model_dir)
+                .map_err(|e| VaultError::Model(format!("remove model: {e}")))?;
+        }
+        Ok(())
+    }
+}
+
+impl ModelManager {
+    /// Delete every downloaded runtime version. The caller holds the
+    /// runtime and manifest locks.
+    fn remove_runtime_files(&self) -> Result<(), VaultError> {
+        let runtime_dir = self.models_dir.join("runtime");
+        if runtime_dir.exists() {
+            fs::remove_dir_all(&runtime_dir)
+                .map_err(|e| VaultError::Model(format!("remove runtime: {e}")))?;
         }
         Ok(())
     }
@@ -1411,6 +1515,111 @@ mod tests {
             &dir.path().join("absent.dylib"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_cancelled_download_stops_at_the_next_read() {
+        let manager = ModelManager::new(tempfile::tempdir().unwrap().keep());
+        let epoch = manager.download_epoch();
+        let mut reader = CancellableReader {
+            inner: Box::new(std::io::Cursor::new(vec![7u8; 8])),
+            epoch,
+            current: Arc::clone(&manager.cancel_epoch),
+        };
+        let mut buf = [0u8; 4];
+        assert_eq!(reader.read(&mut buf).unwrap(), 4);
+        manager.cancel_downloads();
+        let err = reader.read(&mut buf).unwrap_err();
+        assert!(err.to_string().contains("cancelled"), "{err}");
+        // A download that starts under the new epoch is not cancelled, and
+        // one that took the old epoch cannot even open a connection.
+        assert_ne!(manager.download_epoch(), epoch);
+        let refused = manager.open_download("https://example.invalid/x", 1, epoch);
+        assert!(matches!(refused, Err(VaultError::Model(m)) if m.contains("cancelled")));
+    }
+
+    #[test]
+    fn a_failed_runtime_removal_leaves_the_model_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ModelManager::new(dir.path().join("models"));
+        let descriptor = current_runtime().unwrap();
+        let model_dir = manager.models_dir().join("model-a").join("1.0.0");
+        fs::create_dir_all(&model_dir).unwrap();
+        fs::write(model_dir.join("model.onnx"), b"weights").unwrap();
+        // A file where the runtime directory should be makes its removal
+        // fail, standing in for a library that is still in use.
+        fs::write(manager.models_dir().join("runtime"), b"not a directory").unwrap();
+        let manifest = ModelManifest {
+            models: vec![InstalledModel {
+                model_id: "model-a".to_string(),
+                version: "1.0.0".to_string(),
+                file_name: "model.onnx".to_string(),
+                sha256: "ab".repeat(32),
+                size_bytes: 7,
+                installed_at: "2026-11-24T00:00:00+00:00".to_string(),
+            }],
+            active_model_id: Some("model-a".to_string()),
+            runtime: Some(InstalledRuntime {
+                version: descriptor.version.to_string(),
+                lib_file_name: descriptor.lib_file_name.to_string(),
+                sha256: "ab".repeat(32),
+                size_bytes: 7,
+                installed_at: "2026-11-24T00:00:00+00:00".to_string(),
+            }),
+        };
+        manager.write_manifest(&manifest).unwrap();
+
+        assert!(manager.remove_model("model-a").is_err());
+
+        // Nothing changed: still listed, still active, files still there.
+        assert_eq!(manager.manifest(), manifest);
+        assert!(model_dir.join("model.onnx").exists());
+    }
+
+    #[test]
+    fn removing_the_last_model_removes_the_runtime_but_not_while_another_remains() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ModelManager::new(dir.path().join("models"));
+        let descriptor = current_runtime().unwrap();
+        let lib_dir = manager.runtime_version_dir(descriptor.version);
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::write(lib_dir.join(descriptor.lib_file_name), b"library").unwrap();
+        for id in ["model-a", "model-b"] {
+            let model_dir = manager.models_dir().join(id).join("1.0.0");
+            fs::create_dir_all(&model_dir).unwrap();
+            fs::write(model_dir.join("model.onnx"), b"weights").unwrap();
+        }
+        let model = |id: &str| InstalledModel {
+            model_id: id.to_string(),
+            version: "1.0.0".to_string(),
+            file_name: "model.onnx".to_string(),
+            sha256: "ab".repeat(32),
+            size_bytes: 7,
+            installed_at: "2026-11-24T00:00:00+00:00".to_string(),
+        };
+        manager
+            .write_manifest(&ModelManifest {
+                models: vec![model("model-a"), model("model-b")],
+                active_model_id: Some("model-a".to_string()),
+                runtime: Some(InstalledRuntime {
+                    version: descriptor.version.to_string(),
+                    lib_file_name: descriptor.lib_file_name.to_string(),
+                    sha256: "ab".repeat(32),
+                    size_bytes: 7,
+                    installed_at: "2026-11-24T00:00:00+00:00".to_string(),
+                }),
+            })
+            .unwrap();
+
+        manager.remove_model("model-a").unwrap();
+        assert!(!manager.models_dir().join("model-a").exists());
+        assert!(lib_dir.exists(), "another model still needs the runtime");
+
+        manager.remove_model("model-b").unwrap();
+        assert!(!manager.models_dir().join("model-b").exists());
+        assert!(!manager.models_dir().join("runtime").exists());
+        assert!(!manager.manifest_path().exists());
+        assert_eq!(manager.runtime_path(), None);
     }
 
     #[test]

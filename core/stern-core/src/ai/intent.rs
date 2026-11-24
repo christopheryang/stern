@@ -54,6 +54,41 @@ const LIST_VERBS: &[&str] = &["list", "show", "display", "all"];
 const DELETE_VERBS: &[&str] = &["delete", "remove", "destroy", "drop"];
 const UPDATE_VERBS: &[&str] = &["update", "change", "modify", "edit"];
 
+/// Polite lead-ins that carry no meaning of their own, longest first so
+/// "can you please" goes before "can you".
+const POLITE_LEADS: &[&str] = &[
+    "can you please",
+    "could you please",
+    "would you please",
+    "will you please",
+    "can you",
+    "could you",
+    "would you",
+    "will you",
+    "please",
+    "kindly",
+];
+
+/// The request without its polite lead-in: "please edit my note" is the
+/// same request as "edit my note", and every rule keys on the verb being
+/// first. Stripping repeats ("please, could you ..."). When nothing would
+/// be left, the text is kept as it was.
+fn strip_polite_lead(lower: &str) -> &str {
+    let mut rest = lower.trim_start();
+    loop {
+        let stripped = POLITE_LEADS.iter().find_map(|lead| {
+            let after = rest.strip_prefix(lead)?;
+            // Whole words only: "pleasant" does not start with "please".
+            (after.is_empty() || after.starts_with([' ', ',']))
+                .then(|| after.trim_start_matches([' ', ',']))
+        });
+        match stripped {
+            Some(after) if !after.is_empty() => rest = after,
+            _ => return rest,
+        }
+    }
+}
+
 #[must_use]
 pub fn classify_intent(text: &str) -> Intent {
     // Expand a sentence-initial question contraction, so "what's
@@ -67,7 +102,7 @@ pub fn classify_intent(text: &str) -> Intent {
     } else if raw_lower.starts_with("where's ") {
         raw_lower.replacen("where's", "where is", 1)
     } else {
-        raw_lower
+        strip_polite_lead(&raw_lower).to_string()
     };
     let words: Vec<&str> = lower.split_whitespace().collect();
     // The greeting/help checks compare whole words, so strip the
@@ -84,6 +119,15 @@ pub fn classify_intent(text: &str) -> Intent {
 
     if is_help(&clean_words) {
         return Intent::Help;
+    }
+
+    // A leading edit verb is an edit, whatever the rest says: "edit my
+    // shopping list" is not a list request, and "edit my note" is not a
+    // store request, though both contain words those rules look for.
+    if words.first().is_some_and(|w| UPDATE_VERBS.contains(w)) {
+        if let Some(intent) = detect_update(&words, &lower) {
+            return intent;
+        }
     }
 
     if let Some(intent) = detect_store(&words, &lower) {
@@ -304,8 +348,14 @@ fn detect_update(words: &[&str], full_text: &str) -> Option<Intent> {
     if !is_update_context(words) {
         return None;
     }
-    let name = extract_retrieve_name(full_text);
     let fields = extract_key_value_pairs(full_text);
+    // With field values the request names a login to change; without
+    // any it names the note or entry to open for editing.
+    let name = if fields.is_empty() {
+        extract_update_name(full_text)
+    } else {
+        extract_retrieve_name(full_text)
+    };
     Some(Intent::UpdateSecret { name, fields })
 }
 
@@ -516,6 +566,40 @@ fn extract_store_value(full_text: &str, kind: &str) -> Vec<(String, String)> {
     }
 
     pairs
+}
+
+/// The name an edit request points at: what follows the verb, without
+/// the filler words in front ("edit my note called Groceries" gives
+/// "Groceries"). Falls back to the general name rules when nothing is left.
+fn extract_update_name(full_text: &str) -> String {
+    const FILLER: &[&str] = &[
+        "my", "the", "a", "an", "note", "document", "entry", "called", "named", "for", "of",
+    ];
+    let mut words = full_text.split_whitespace();
+    let leading_verb = words
+        .next()
+        .is_some_and(|w| UPDATE_VERBS.contains(&w.to_lowercase().as_str()));
+    let rest: Vec<&str> = if leading_verb {
+        words.collect()
+    } else {
+        full_text.split_whitespace().collect()
+    };
+    let start = rest
+        .iter()
+        .position(|w| !FILLER.contains(&w.to_lowercase().as_str()))
+        .unwrap_or(rest.len());
+    let name = rest
+        .get(start..)
+        .unwrap_or_default()
+        .join(" ")
+        .trim_end_matches(['.', '!', '?'])
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        extract_retrieve_name(full_text)
+    } else {
+        name
+    }
 }
 
 #[allow(clippy::arithmetic_side_effects)]

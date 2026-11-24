@@ -56,7 +56,7 @@ The model runs entirely on-device via ONNX Runtime. A rule-based classifier cove
 
 The model is **not bundled** with the app. After installation, Settings (the gear in the header) offers a choice of two on-device AI models — Small (~118 MB) or Large (~483 MB), each shown with its pros and cons — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active). Each model also downloads its tokenizer file, verified the same way, and the first download also fetches the ONNX Runtime library the model runs on.
 
-Because the model lives outside the app bundle, it can evolve independently: when a new Stern build ships with a newer catalog version, the app detects the difference and offers an in-place update. The new file is downloaded and verified first and only then swapped in, so a failed download never breaks a working install. You can keep several models installed, switch between them, or remove them at any time from the Settings picker.
+Because the model lives outside the app bundle, it can evolve independently: when a new Stern build ships with a newer catalog version, the app detects the difference and offers an in-place update. The new file is downloaded and verified first and only then swapped in, so a failed download never breaks a working install. You can keep several models installed, switch between them, or remove them at any time from the Settings picker. Removing asks you to confirm, then deletes the model's files; removing the last model also deletes the downloaded runtime.
 
 That download is the only network request Stern ever makes, and it happens only when you explicitly start it. Your vault data never leaves the device.
 
@@ -116,10 +116,12 @@ just build
 3. On later launches, the login screen asks for the password
    before anything else is reachable. After unlocking, choose an AI model
    (Small or Large) on the first-run screen or in Settings (the gear,
-   top right) — the first download also fetches the ONNX Runtime. The
-   sun/moon button in the top bar switches between light and dark on
-   any screen, including before you sign in. The help button (the
-   question mark) opens [plain-language help](docs/Help.md) at any
+   top right); changing the model needs the vault unlocked, and the first
+   download also fetches the ONNX Runtime. Settings also holds the light
+   and dark choice, which works before you sign in too, and whether
+   locking asks "Lock Stern?" first. The padlock at the top right shows
+   locked or unlocked and locks the vault. The help button
+   (the question mark) opens [plain-language help](docs/Help.md) at any
    time, including before you unlock.
 4. In chat, try "show all passwords", "what's my password for Gmail?",
    or "save a note". Storing runs as a short guided

@@ -156,3 +156,39 @@ fn raw_backend_diagnostics_never_become_small_print() {
         assert!(!error.message.contains("table"), "{raw}");
     }
 }
+
+#[test]
+fn locking_asks_first_unless_the_choice_was_switched_off() {
+    use stern_ui::components::prefs::confirm_lock_from_stored;
+    assert!(confirm_lock_from_stored(None));
+    assert!(confirm_lock_from_stored(Some("on")));
+    assert!(confirm_lock_from_stored(Some("garbage")));
+    assert!(!confirm_lock_from_stored(Some("off")));
+}
+
+#[test]
+fn help_covers_removing_a_model_and_stays_plain() {
+    let blocks = parse(HELP);
+    let headings: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Heading(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    for wanted in [
+        "How do I remove an AI model?",
+        "How do I change a note I saved?",
+        "How do I save a document?",
+    ] {
+        assert!(headings.iter().any(|h| h == wanted), "Help lacks {wanted}");
+    }
+    // Every question has an answer that says something.
+    for section in sections(&blocks) {
+        assert!(
+            !section.body.is_empty(),
+            "{} has no answer",
+            section.heading
+        );
+    }
+}
