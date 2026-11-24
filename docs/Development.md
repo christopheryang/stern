@@ -53,7 +53,7 @@ it is useful for layout work only.
    ticked, and a "Don't lose your password" step follows. Quit and
    relaunch: the login screen now asks for the password before anything
    else.
-3. Store an entry in chat (step 4); lock (the top bar's lock switch) and
+3. Store an entry in chat (step 4); lock (the top bar's padlock) and
    unlock; ask for the entry and confirm it decrypts. Copy a secret
    and confirm the clipboard auto-clears.
    Open Help (the question mark) and the Disclaimer from the setup

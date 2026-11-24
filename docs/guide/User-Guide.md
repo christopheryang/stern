@@ -130,8 +130,8 @@ info. You can tap a button or type its letter.
 
 ## 6. Settings, light and dark, and Help
 
-Along the top right are the lock switch, the question mark (Help) and
-the gear (Settings).
+Along the top right are the padlock, the question mark (Help) and the
+gear (Settings).
 
 ### Light and dark
 
@@ -161,13 +161,13 @@ words. It is available at any time, including before you sign in.
 
 ## 7. Lock Stern and open it again
 
-The switch at the top right shows **Unlocked** or **Locked**. When you
-step away, turn the switch off. Stern asks **Lock Stern?**; tap **Lock**
-to lock it, or **Cancel** to stay in. Stern then hides everything until
+The padlock at the top right is open when Stern is unlocked and closed
+when it is locked. When you step away, tap it. Stern asks **Lock Stern?**;
+tap **Lock** to lock it, or **Cancel** to stay in. Stern then hides everything until
 you enter your password again. It also locks when you close it.
 
 If you would rather not be asked, open Settings and turn off **Ask before
-locking**. The switch then locks Stern at once.
+locking**. The padlock then locks Stern at once.
 
 ![Opening Stern with your password](User-Guide%20-%20Unlock.png)
 

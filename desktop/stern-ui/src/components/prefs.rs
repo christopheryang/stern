@@ -36,5 +36,5 @@ pub fn confirm_lock_save(on: bool) {
 }
 
 /// The app-wide "ask before locking" signal. `AppShell` provides it once,
-/// so the Lock switch and the Settings choice always agree.
+/// so the lock button and the Settings choice always agree.
 pub type ConfirmLockSignal = leptos::prelude::RwSignal<bool>;

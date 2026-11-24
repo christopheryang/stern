@@ -338,7 +338,7 @@ fn ConfirmLockDialog(on_cancel: Callback<()>, on_lock: Callback<()>) -> impl Int
 }
 
 /// The top bar's right-hand side: Settings and Help before
-/// authentication, a Back button on any page, and the Lock switch / Help /
+/// authentication, a Back button on any page, and the lock button / Help /
 /// Settings on the main view.
 fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicBool>) -> AnyView {
     if state.page != Page::Main {
@@ -381,22 +381,28 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
     let confirm_lock = expect_context::<ConfirmLockSignal>();
     let locking = state.locking;
     let unlocked = state.auth == Some(AuthPhase::Unlocked);
-    // The switch shows where the vault stands. It is not on the first-run
-    // setup screen, where there is no vault to lock yet.
-    let lock_switch =
+    // A padlock shows where the vault stands: open when unlocked (click
+    // to lock), closed when locked. It is not on the first-run setup
+    // screen, where there is no vault to lock yet.
+    let lock_button =
         matches!(state.auth, Some(AuthPhase::Unlocked | AuthPhase::Login)).then(|| {
+            let label = if unlocked {
+                "Lock Stern"
+            } else {
+                "Stern is locked. Enter your password to unlock it."
+            };
+            let icon = if unlocked {
+                IconKind::Unlock
+            } else {
+                IconKind::Lock
+            };
             view! {
                 <button
                     type="button"
-                    class="lock-switch"
-                    class:lock-switch--on=unlocked
-                    role="switch"
-                    aria-checked=if unlocked { "true" } else { "false" }
-                    aria-label=if unlocked {
-                        "Vault unlocked. Turn off to lock it."
-                    } else {
-                        "Vault locked. Enter your password to unlock it."
-                    }
+                    class="btn-icon lock-button"
+                    class:lock-button--open=unlocked
+                    aria-label=label
+                    title=label
                     prop:disabled=locking
                     on:click=move |_| {
                         if !unlocked {
@@ -409,12 +415,7 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
                         }
                     }
                 >
-                    <span class="lock-switch-label">
-                        {if unlocked { "Unlocked" } else { "Locked" }}
-                    </span>
-                    <span class="lock-switch-track" aria-hidden="true">
-                        <span class="lock-switch-thumb"></span>
-                    </span>
+                    <Icon kind=icon />
                 </button>
             }
         });
@@ -422,9 +423,9 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
         // Before sign-in: Settings (the look; the model is locked) and Help.
         return view! {
             <div class="topbar-actions">
-                {lock_switch}
-                {settings_button}
+                {lock_button}
                 {help_button}
+                {settings_button}
             </div>
         }
         .into_any();
@@ -432,7 +433,7 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
     view! {
         <div class="topbar-actions">
             {state.lock_error.map(|error| view! { <span class="inline-error">{error}</span> })}
-            {lock_switch}
+            {lock_button}
             {help_button}
             {settings_button}
         </div>

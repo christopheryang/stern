@@ -14,7 +14,7 @@
 //                                 separated by "|" (see below)
 //   ?page=settings|help           open that page after load
 //   ?theme=light|dark             set the theme (default: light)
-//   ?lock=1                       tap the lock switch (opens the dialog)
+//   ?lock=1                       tap the lock button (opens the dialog)
 //   ?fill=<password>              type it into both setup fields
 //
 // A one-shot headless screenshot cannot click, so `play` drives the
@@ -180,9 +180,9 @@
       const label = { settings: "Settings" }[pageName] || "Help";
       (await until(() => document.querySelector(`button[aria-label="${label}"]`)))?.click();
     }
-    // ?lock=1 taps the lock switch, which opens the "Lock Stern?" dialog.
+    // ?lock=1 taps the lock button, which opens the "Lock Stern?" dialog.
     if (q.get("lock") === "1") {
-      (await until(() => document.querySelector(".lock-switch")))?.click();
+      (await until(() => document.querySelector(".lock-button")))?.click();
     }
     for (const step of play) {
       if (step.startsWith("@")) {

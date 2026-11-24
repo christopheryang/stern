@@ -199,29 +199,10 @@ button:disabled { cursor: not-allowed; }
 .icon-sm { width: 15px; height: 15px; }
 .icon-lg { width: 26px; height: 26px; }
 
-/* ── Lock switch ───────────────────────────────────────────── */
+/* ── Lock button ───────────────────────────────────────────── */
 
-.lock-switch {
-  display: inline-flex; align-items: center; gap: 9px;
-  height: 32px; padding: 0 8px 0 12px;
-  border: 1px solid var(--border-strong); border-radius: 999px;
-  background: var(--surface); color: var(--text-dim);
-  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
-}
-.lock-switch:disabled { opacity: 0.6; cursor: default; }
-.lock-switch-track {
-  position: relative; width: 34px; height: 20px; border-radius: 999px;
-  background: var(--border-strong); transition: background 0.15s;
-}
-.lock-switch-thumb {
-  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
-  border-radius: 50%; background: #fff; transition: transform 0.15s;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-}
-.lock-switch--on { color: var(--text); }
-.lock-switch--on .lock-switch-track { background: var(--success); }
-.lock-switch--on .lock-switch-thumb { transform: translateX(14px); }
-.lock-switch:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.lock-button--open { color: var(--success); }
+.lock-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ── Settings toggle row ───────────────────────────────────── */
 

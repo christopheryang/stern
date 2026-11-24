@@ -54,7 +54,7 @@ Check that you are online, then try again. Some work or school networks block do
 
 ## What does Lock do?
 
-Lock hides everything until you enter your password again. Stern also locks when you close it. The switch at the top right shows whether Stern is locked or unlocked. Turn it off to lock Stern. Stern asks "Lock Stern?" first, so you do not lock it by accident. You can turn that question off under Locking in Settings.
+Lock hides everything until you enter your password again. Stern also locks when you close it. The padlock at the top right is open when Stern is unlocked and closed when it is locked. Tap it to lock Stern. Stern asks "Lock Stern?" first, so you do not lock it by accident. You can turn that question off under Locking in Settings.
 
 ## Why can't I unlock right now?
 

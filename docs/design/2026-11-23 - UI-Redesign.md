@@ -40,11 +40,12 @@ remaining inline style is the download progress bar's computed width.
 ## Screens
 
 - **Top bar** — the Stern logo on the left; on the right a
-  **lock switch** that reads Unlocked or Locked, a Help icon, and a
-  Settings icon. Turning the switch off locks the vault, after a
-  "Lock Stern?" dialog that Settings → Locking can turn off. When the
-  vault is locked the switch is a cue to the password box. The first-run
-  setup screen has no switch, since there is no vault to lock yet. On Settings, Help, or the
+  **padlock** icon, a Help icon, and a Settings icon. The padlock is
+  open and green when the vault is unlocked; clicking it locks the
+  vault, after a "Lock Stern?" dialog that Settings → Locking can turn
+  off. When the vault is locked it is closed, and clicking it moves to
+  the password box. The first-run setup screen has no padlock, since
+  there is no vault to lock yet. On Settings, Help, or the
   Disclaimer the right side is a single **Back** button; the main view
   stays mounted underneath, so nothing typed there is lost.
 - **Setup** — brand mark, "Welcome to Stern", a live requirements

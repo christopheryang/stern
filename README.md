@@ -119,7 +119,7 @@ just build
    top right); changing the model needs the vault unlocked, and the first
    download also fetches the ONNX Runtime. Settings also holds the light
    and dark choice, which works before you sign in too, and whether
-   locking asks "Lock Stern?" first. The switch at the top right shows
+   locking asks "Lock Stern?" first. The padlock at the top right shows
    locked or unlocked and locks the vault. The help button
    (the question mark) opens [plain-language help](docs/Help.md) at any
    time, including before you unlock.
