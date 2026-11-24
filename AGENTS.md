@@ -81,6 +81,11 @@ full rules are in `.agents/skills/repo-skills.md`. In short:
   `tauri::async_runtime::spawn_blocking`, with progress kept in `AppState`
   for the frontend to poll — there is no event bus.
 - **Tests** live in per-crate `tests/` directories, not in `src/`.
+  Where a test needs private items (as the Tauri command tests do),
+  keep it in a `tests/` directory under the module
+  (`src/commands/tests/mod.rs`) rather than inline: CodeQL ignores
+  `**/tests/**`, and fixture passwords in an inline `mod tests` are
+  reported as critical hard-coded credentials.
 - **App data** for manual debugging: the platform app-data dir for
   `com.stern.app` (macOS: `~/Library/Application Support/com.stern.app/`).
   The vault is `stern.db`; downloaded AI models and the ONNX Runtime
