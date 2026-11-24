@@ -27,6 +27,8 @@ fn descriptor_for_id(id: &'static str, bytes: &[u8], version: &'static str) -> M
         id,
         display_name: "Test Model",
         description: "A model used by the test suite.",
+        pros: &[],
+        cons: &[],
         version,
         file_name: "model.onnx",
         download_url: "https://example.invalid/model.onnx",
@@ -331,11 +333,18 @@ fn remove_model_rejects_path_traversal_and_unknown_ids() {
 }
 
 #[test]
-fn catalog_offers_three_size_tiers_without_model_names() {
+fn catalog_offers_two_tiers_without_model_names() {
     let names: Vec<&str> = MODEL_CATALOG.iter().map(|m| m.display_name).collect();
-    assert_eq!(names, ["Small", "Medium", "Large"]);
+    assert_eq!(names, ["Small", "Large"]);
     for model in MODEL_CATALOG {
-        let shown = format!("{} {}", model.display_name, model.description).to_lowercase();
+        let shown = format!(
+            "{} {} {} {}",
+            model.display_name,
+            model.description,
+            model.pros.join(" "),
+            model.cons.join(" ")
+        )
+        .to_lowercase();
         for forbidden in ["smollm", "qwen", "135m", "360m", "0.5b"] {
             assert!(
                 !shown.contains(forbidden),
@@ -349,6 +358,52 @@ fn catalog_offers_three_size_tiers_without_model_names() {
     assert!(sizes.windows(2).all(|pair| pair[0] < pair[1]));
     assert_eq!(MODEL_CATALOG[0].id, DEFAULT_MODEL_ID);
     assert!(catalog_model("smollm-135m").is_none());
+    // Medium was dropped: nothing may offer it, and it counts as retired.
+    assert!(catalog_model("smollm2-360m-instruct").is_none());
+}
+
+#[test]
+fn every_tier_states_its_pros_and_cons_in_plain_words() {
+    for model in MODEL_CATALOG {
+        assert!(!model.pros.is_empty(), "{} has no pros", model.display_name);
+        assert!(!model.cons.is_empty(), "{} has no cons", model.display_name);
+        let all = [model.pros, model.cons].concat().join(" ").to_lowercase();
+        for jargon in [
+            "onnx",
+            "token",
+            "parameter",
+            "quantiz",
+            "gpu",
+            "inference",
+            "llm",
+        ] {
+            assert!(
+                !all.contains(jargon),
+                "{} uses jargon {jargon:?}",
+                model.display_name
+            );
+        }
+    }
+    // The recommended default is the Small tier.
+    assert_eq!(MODEL_CATALOG[0].display_name, "Small");
+    assert_eq!(MODEL_CATALOG[0].id, DEFAULT_MODEL_ID);
+}
+
+#[test]
+fn an_installed_medium_model_is_retired_at_startup() {
+    let (dir, manager) = manager();
+    let bytes = b"medium model bytes";
+    let medium = descriptor_for_id("smollm2-360m-instruct", bytes, "1.0.0");
+    install(&manager, &medium, bytes);
+    assert!(manager
+        .installed_model_path("smollm2-360m-instruct")
+        .is_some());
+    let removed = manager.remove_retired_models();
+    assert_eq!(removed, vec!["smollm2-360m-instruct".to_string()]);
+    assert!(manager
+        .installed_model_path("smollm2-360m-instruct")
+        .is_none());
+    drop(dir);
 }
 
 #[test]

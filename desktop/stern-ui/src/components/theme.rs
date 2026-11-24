@@ -68,3 +68,25 @@ pub fn set(theme: Theme) {
         drop(storage.set_item(STORAGE_KEY, theme.as_str()));
     }
 }
+
+/// The app-wide theme signal. `AppShell` provides it once, so the
+/// header toggle and the Settings choice always agree.
+pub type ThemeSignal = leptos::prelude::RwSignal<Theme>;
+
+/// Switch to `theme` everywhere: the shared signal, the page, and storage.
+pub fn choose(signal: ThemeSignal, theme: Theme) {
+    use leptos::prelude::Set;
+    set(theme);
+    signal.set(theme);
+}
+
+impl Theme {
+    /// The other theme.
+    #[must_use]
+    pub const fn other(self) -> Self {
+        match self {
+            Self::Light => Self::Dark,
+            Self::Dark => Self::Light,
+        }
+    }
+}

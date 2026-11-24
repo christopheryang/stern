@@ -111,8 +111,9 @@ what makes the "what's my password for ...?" phrasing parse at all.
   for the 135M models. Every message ends up handled correctly
   across the model + guard + rules combination. (These figures were
   measured on the catalog as it stood then; SmolLM-135M has since been
-  retired and the tiers are Small = SmolLM2-135M-Instruct, Medium =
-  SmolLM2-360M-Instruct, Large = Qwen2.5-0.5B-Instruct — ADR-0010.)
+  retired and the tiers are Small = SmolLM2-135M-Instruct and
+  Large = Qwen2.5-0.5B-Instruct — ADR-0010, ADR-0014; a Medium tier,
+  SmolLM2-360M-Instruct, existed briefly.)
 
 ## UI (slice 4, landed)
 

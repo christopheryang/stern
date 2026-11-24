@@ -9,24 +9,21 @@
 //! chat stays gated until one is active.
 
 use super::model_setup::ModelSetup;
-use super::theme::{self, Theme};
+use super::theme::{self, Theme, ThemeSignal};
 use super::ui::{Icon, IconKind};
 use leptos::prelude::*;
 
 /// Light / Dark choice. Takes effect and is saved as soon as it is tapped.
 #[component]
 fn Appearance() -> impl IntoView {
-    let (current, set_current) = signal(theme::load());
+    let current = expect_context::<ThemeSignal>();
     let option = move |value: Theme, label: &'static str, icon: IconKind| {
         view! {
             <button
                 class="theme-option"
                 role="radio"
                 aria-checked=move || (current.get() == value).to_string()
-                on:click=move |_| {
-                    theme::set(value);
-                    set_current.set(value);
-                }
+                on:click=move |_| theme::choose(current, value)
             >
                 <Icon kind=icon class="icon-sm" />
                 {label}

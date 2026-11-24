@@ -69,7 +69,7 @@ it is useful for layout work only.
    <note title>", "save my GitHub password" (a named store files
    immediately; a bare "store" runs the guided conversation, notes first — secret fields use the
    peek-mask input and never appear in the transcript).
-5. Settings (gear) → model size picker (Small / Medium / Large): Download → progress → installed.
+5. First-run screen and Settings (gear) → AI model picker (Small / Large, each with pros and cons; Small is Recommended): Download → progress → installed.
    Remove → the picker shows it gone and chat still answers via rules.
 6. Model update drill: bump the catalog `version` string in
    `core/stern-core/src/ai/model_manager.rs` locally, restart — the

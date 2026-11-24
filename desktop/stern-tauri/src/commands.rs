@@ -2,7 +2,9 @@
 
 use crate::AppState;
 use std::sync::Arc;
-use stern_core::ai::model_manager::{catalog_model, current_runtime, ModelState, MODEL_CATALOG};
+use stern_core::ai::model_manager::{
+    catalog_model, current_runtime, ModelState, DEFAULT_MODEL_ID, MODEL_CATALOG,
+};
 use stern_core::ai::AiModel;
 use stern_core::application::vault::ports::crypto::CryptoProvider;
 use stern_core::application::vault::ports::kdf::KeyDerivationProvider;
@@ -1304,6 +1306,22 @@ mod tests {
     }
 
     #[test]
+    fn model_status_carries_pros_cons_and_one_recommendation() {
+        let (state, _path) = make_test_app_state();
+        let rows = model_status_dtos(&state);
+        assert_eq!(rows.len(), 2);
+        assert!(rows
+            .iter()
+            .all(|r| !r.pros.is_empty() && !r.cons.is_empty()));
+        let recommended: Vec<&str> = rows
+            .iter()
+            .filter(|r| r.recommended)
+            .map(|r| r.display_name.as_str())
+            .collect();
+        assert_eq!(recommended, ["Small"]);
+    }
+
+    #[test]
     fn chat_saves_a_note_without_the_kind_question() {
         let (state, _path) = make_test_app_state();
         create_vault_inner(&state, "correct horse battery").unwrap();
@@ -1382,6 +1400,9 @@ fn model_status_dtos(state: &AppState) -> Vec<ModelStatusDto> {
                 model_id: descriptor.id.to_string(),
                 display_name: descriptor.display_name.to_string(),
                 description: descriptor.description.to_string(),
+                pros: descriptor.pros.iter().map(|p| (*p).to_string()).collect(),
+                cons: descriptor.cons.iter().map(|c| (*c).to_string()).collect(),
+                recommended: descriptor.id == DEFAULT_MODEL_ID,
                 state: state_str.to_string(),
                 installed_version,
                 latest_version: descriptor.version.to_string(),

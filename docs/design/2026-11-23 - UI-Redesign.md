@@ -25,6 +25,7 @@ loaded by Trunk from `desktop/stern-app/index.html`.
 
 | Piece | Choice |
 | --- | --- |
+| Theme switch | A sun/moon button sits in the top bar on every screen, including login and setup, so the theme can be changed before authenticating. Settings → Look is the second way; both share one signal. |
 | Theming | CSS custom properties on `:root`; a `:root[data-theme="dark"]` block overrides them. Light is the default; Settings → Look switches to dark, saved in the webview's local storage and applied before first paint by a small script in `index.html` ([ADR-0013](../adr/0013-Light-Default-Theme-Switch.md)). |
 | Palette | Deep indigo background with soft radial glows; one accent gradient (sky `#38bdf8` → indigo `#6366f1` → violet `#a855f7`) used for primary buttons, the send button, user bubbles, and progress bars. |
 | Surfaces | Translucent "glass" panels with a hairline border and backdrop blur for the top bar and cards. |
@@ -52,7 +53,7 @@ remaining inline style is the download progress bar's computed width.
   (`password_rules`), so they cannot disagree.
 - **Login** — "Welcome back" (no mark: the top bar already shows the
   logo), a password field, **Open**, and a small Disclaimer link.
-- **Gates** — "Choose a size to get started" and one shared "Something
+- **Gates** — "Choose an AI model to get started" and one shared "Something
   went wrong" card (used for both the vault and the helper status
   checks) are centered cards with an icon badge and one action.
 - **Chat** — an empty state (mark, "How can I help?", three starter chips
@@ -66,10 +67,12 @@ remaining inline style is the download progress bar's computed width.
   assistant message asks for a secret the pill turns amber and shows a
   **Private** tag; the peek-mask behavior itself (each character visible
   for 2 seconds, then `*`) is unchanged.
-- **Settings** — one "Helper size" card with a one-line explanation. Rows
-  show the tier (Small, Medium, Large), its download size, a short
-  description, an **Active** tag, and Download / Use this / Update /
-  Remove; a percentage and a gradient bar show downloads. A failed
+- **Settings and first run** — one "AI model" card that says what an AI
+  model is and suggests Small if unsure. Rows show the tier (Small or
+  Large), its download size, a short description, a **Recommended** tag,
+  what you gain and what you give up (ADR-0014), an **Active** tag, and
+  Download / Use this / Update / Remove. The first-run gate shows the
+  same card, so a new user picks and downloads right there; a percentage and a gradient bar show downloads. A failed
   download shows one plain sentence with the technical text as small
   print.
 - **Help and Disclaimer** — Help is a list of collapsible questions

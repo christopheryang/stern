@@ -35,10 +35,10 @@ Picking the first model is the first-run setup step.
 
 ## The model
 
-- **Catalog (ADR-0007, ADR-0010):** the user picks a size — **Small**
-  (SmolLM2-135M-Instruct q4f16, ~118 MB), **Medium**
-  (SmolLM2-360M-Instruct q4f16, ~273 MB), or **Large**
-  (Qwen2.5-0.5B-Instruct q4f16, ~483 MB). The UI shows only the tier
+- **Catalog (ADR-0007, ADR-0010):** the user picks **Small**
+  (SmolLM2-135M-Instruct q4f16, ~118 MB) or **Large**
+  (Qwen2.5-0.5B-Instruct q4f16, ~483 MB); a Medium tier
+  (SmolLM2-360M-Instruct) was dropped in ADR-0014. The UI shows only the tier
   name, its approximate size, and a plain-language description of the
   speed/quality trade-off; the underlying model is never named. The
   catalog's `display_name` *is* the tier. The base SmolLM-135M model

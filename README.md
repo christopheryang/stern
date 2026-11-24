@@ -50,7 +50,7 @@ The model runs entirely on-device via ONNX Runtime. A rule-based classifier cove
 
 ### Model download & updates
 
-The model is **not bundled** with the app. After installation, Settings (the gear in the header) offers a choice of three on-device model sizes — Small (~118 MB), Medium (~273 MB), or Large (~483 MB) — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active). Each model also downloads its tokenizer file, verified the same way, and the first download also fetches the ONNX Runtime library the model runs on.
+The model is **not bundled** with the app. After installation, Settings (the gear in the header) offers a choice of two on-device AI models — Small (~118 MB) or Large (~483 MB), each shown with its pros and cons — each downloaded from Hugging Face only when you pick it. The file is verified against a SHA-256 pinned in the app's model catalog before it is used, and stored in the app data folder (`models/<model-id>/<version>/`, with an `installed.json` manifest recording what is installed and which model is active). Each model also downloads its tokenizer file, verified the same way, and the first download also fetches the ONNX Runtime library the model runs on.
 
 Because the model lives outside the app bundle, it can evolve independently: when a new Stern build ships with a newer catalog version, the app detects the difference and offers an in-place update. The new file is downloaded and verified first and only then swapped in, so a failed download never breaks a working install. You can keep several models installed, switch between them, or remove them at any time from the Settings picker.
 
@@ -110,9 +110,11 @@ just build
    generates a device Secret Key; password + Secret Key together unlock the
    vault (see [docs/design/2026-11-21%20-%20Security.md](docs/design/2026-11-21%20-%20Security.md)).
 3. On later launches, the login screen asks for the password
-   before anything else is reachable. After unlocking, pick a size
-   (Small, Medium, or Large) in Settings (the gear, top right) — the
-   first download also fetches the ONNX Runtime. The help button (the
+   before anything else is reachable. After unlocking, choose an AI model
+   (Small or Large) on the first-run screen or in Settings (the gear,
+   top right) — the first download also fetches the ONNX Runtime. The
+   sun/moon button in the top bar switches between light and dark on
+   any screen, including before you sign in. The help button (the
    question mark) opens [plain-language help](docs/Help.md) at any
    time, including before you unlock.
 4. In chat, try "show all passwords", "what's my password for Gmail?",

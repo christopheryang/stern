@@ -29,6 +29,12 @@ struct ModelStatus {
     model_id: String,
     display_name: String,
     description: String,
+    #[serde(default)]
+    pros: Vec<String>,
+    #[serde(default)]
+    cons: Vec<String>,
+    #[serde(default)]
+    recommended: bool,
     /// One of `not_installed`, `installed`, `update_available`.
     state: String,
     installed_version: Option<String>,
@@ -228,9 +234,24 @@ fn ModelRow(
                                 "Active"
                             </span>
                         })}
+                        {status.recommended.then(|| view! {
+                            <span class="tag tag--accent">"Recommended"</span>
+                        })}
                         <span class="model-meta">{meta_line}</span>
                     </div>
                     <div class="model-desc">{status.description.clone()}</div>
+                    <div class="pros-cons">
+                        <ul class="pc-list pc-list--pros" aria-label="Good things">
+                            {status.pros.iter().map(|text| view! {
+                                <li><Icon kind=IconKind::Check class="icon-sm" />{text.clone()}</li>
+                            }).collect_view()}
+                        </ul>
+                        <ul class="pc-list pc-list--cons" aria-label="Things to know">
+                            {status.cons.iter().map(|text| view! {
+                                <li><Icon kind=IconKind::Minus class="icon-sm" />{text.clone()}</li>
+                            }).collect_view()}
+                        </ul>
+                    </div>
                     {update_note.map(|note| view! { <div class="model-update">{note}</div> })}
                 </div>
                 <div class="model-actions">
@@ -290,7 +311,7 @@ fn ModelRow(
     }
 }
 
-/// The picker's heading and explanation. Sizes are described in
+/// The picker's heading and explanation. Models are described in
 /// plain language; the underlying models are never named (ADR-0010).
 #[component]
 fn SectionHead() -> impl IntoView {
@@ -298,15 +319,24 @@ fn SectionHead() -> impl IntoView {
         <div class="section-head">
             <div class="section-title">
                 <Icon kind=IconKind::Chip />
-                "Helper size"
+                "AI model"
             </div>
-            <p class="section-text">"Pick one. Bigger is smarter but slower."</p>
+            <p class="section-text">
+                "An AI model is a small program that understands what you type, "
+                "like \"save a note\". It runs on your computer, so nothing you write leaves it."
+            </p>
+            <p class="section-text">
+                "Not sure? Choose Small. You can change it any time in Settings."
+            </p>
         </div>
     }
 }
 
+/// The AI model picker. `on_change` runs after a download, selection,
+/// or removal finishes, so a host (the first-run gate) can re-check
+/// whether chat is ready.
 #[component]
-pub fn ModelSetup() -> impl IntoView {
+pub fn ModelSetup(#[prop(optional)] on_change: Option<Callback<()>>) -> impl IntoView {
     let (models, set_models) = signal(Vec::<ModelStatus>::new());
     let (error, set_error) = signal(Option::<FriendlyError>::None);
     let (action_in_flight, set_action_in_flight) = signal(false);
@@ -354,6 +384,11 @@ pub fn ModelSetup() -> impl IntoView {
                 }
             }
             set_action_in_flight.set(false);
+            if let Some(on_change) = on_change {
+                if !cancelled.get_untracked() {
+                    on_change.run(());
+                }
+            }
         });
     };
 

@@ -104,3 +104,21 @@ fn the_stylesheet_is_light_by_default_and_dark_only_on_request() {
     assert!(light < dark);
     assert!(css[light..dark].contains("--bg: #f4f5fd;"));
 }
+
+#[test]
+fn help_explains_what_an_ai_model_is_and_how_to_choose() {
+    let blocks = parse(HELP);
+    let headings: Vec<String> = blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Heading(text) => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(headings.iter().any(|h| h == "What is an AI model?"));
+    assert!(headings
+        .iter()
+        .any(|h| h == "Which AI model should I choose?"));
+    assert!(!HELP.contains("Medium"), "Medium no longer exists");
+    assert!(!HELP.to_lowercase().contains("a size"));
+}

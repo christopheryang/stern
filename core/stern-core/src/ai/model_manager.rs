@@ -63,14 +63,18 @@ pub const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 pub struct ModelDescriptor {
     /// Stable model identifier (directory name, manifest key).
     pub id: &'static str,
-    /// The size tier shown in the UI ("Small", "Medium", "Large").
-    /// Deliberately not the underlying model's name: users choose a
-    /// size, not a model (ADR-0010).
+    /// The tier shown in the UI ("Small" or "Large"). Deliberately not
+    /// the underlying model's name: users choose a size, not a model
+    /// (ADR-0010, ADR-0014).
     pub display_name: &'static str,
     /// Plain-language guidance shown next to the tier in the picker:
     /// what it is good at and what it costs (size, speed). Never names
     /// the underlying model.
     pub description: &'static str,
+    /// What the user gains by choosing this tier, in plain words.
+    pub pros: &'static [&'static str],
+    /// What the user gives up by choosing this tier, in plain words.
+    pub cons: &'static [&'static str],
     /// Catalog version of this model build (dotted numeric, e.g. "1.0.0").
     pub version: &'static str,
     /// File name the model is stored under inside its version directory.
@@ -95,8 +99,8 @@ pub struct ModelDescriptor {
     pub size_bytes: u64,
 }
 
-/// The model selected automatically when the user has not chosen one:
-/// the Small tier.
+/// The model Stern recommends to someone who is not sure: the Small
+/// tier. It is quick, a small download, and can be swapped any time.
 pub const DEFAULT_MODEL_ID: &str = "smollm2-135m-instruct";
 
 /// Every model this build of Stern offers, smallest first. The UI
@@ -112,7 +116,13 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
     ModelDescriptor {
         id: DEFAULT_MODEL_ID,
         display_name: "Small",
-        description: "Fast and light. Good for simple requests.",
+        description: "Quick and light. Best for short, simple requests.",
+        pros: &[
+            "Replies quickly",
+            "Small download",
+            "Light on your computer's memory",
+        ],
+        cons: &["May misread longer or unusual wording"],
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/onnx/model_q4f16.onnx",
@@ -123,26 +133,20 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         tokenizer_size_bytes: 2_104_556,
         prompt_style: PromptStyle::ChatMl,
     },
-    // Medium: SmolLM2-360M-Instruct.
-    ModelDescriptor {
-        id: "smollm2-360m-instruct",
-        display_name: "Medium",
-        description: "Best for most people.",
-        version: "1.0.0",
-        file_name: "model_q4f16.onnx",
-        download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/onnx/model_q4f16.onnx",
-        sha256: "cc63370efc2aca6d5307518b85162777132cc5b8d68eeb8154ea9b5fce09ad46",
-        size_bytes: 273_000_000, // 273 MB as listed on the model page
-        tokenizer_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/tokenizer.json",
-        tokenizer_sha256: "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
-        tokenizer_size_bytes: 2_104_556,
-        prompt_style: PromptStyle::ChatMl,
-    },
     // Large: Qwen2.5-0.5B-Instruct.
     ModelDescriptor {
         id: "qwen2.5-0.5b-instruct",
         display_name: "Large",
         description: "Understands you best, but is slower.",
+        pros: &[
+            "Understands more ways of saying things",
+            "Fewer misunderstandings",
+        ],
+        cons: &[
+            "Takes a few seconds to reply",
+            "Several times bigger to download",
+            "Uses more of your computer's memory",
+        ],
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct/resolve/main/onnx/model_q4f16.onnx",

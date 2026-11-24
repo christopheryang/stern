@@ -34,15 +34,19 @@ Nobody can get your information back, not even the people who made Stern. That i
 
 ## Can I change how Stern looks?
 
-Yes. Open Settings and pick Light or Dark under Look. Stern remembers your choice. Light is what you get the first time.
+Yes. Tap the sun or moon at the top right, on any screen, even before you sign in. You can also pick Light or Dark under Look in Settings. Stern remembers your choice. Light is what you get the first time.
 
-## What do Small, Medium, and Large mean?
+## What is an AI model?
 
-They are three sizes of the assistant that understands what you type. Small is fast and light. Medium is best for most people. Large understands you best, but it is slower and a bigger download. You can switch or remove a size at any time in Settings.
+It is a small program that understands what you type. When you say "save a note", the AI model works out what you mean, and Stern does the rest. It runs on your computer, so what you write never leaves it.
+
+## Which AI model should I choose?
+
+Small is quick and a small download. It handles short, simple requests well, but it can misread longer or unusual wording. Large understands more ways of saying things and makes fewer mistakes, but it takes a few seconds to reply, is several times bigger to download, and uses more of your computer's memory. Not sure? Choose Small. You can switch or remove a model at any time in Settings.
 
 ## Why does Stern download something?
 
-Stern does not come with an assistant, which keeps the app small. When you choose a size, Stern downloads what it needs and keeps it on your computer. This is the only thing Stern uses the internet for. Your passwords are never sent anywhere.
+Stern does not come with an AI model, which keeps the app small. When you choose an AI model, Stern downloads what it needs and keeps it on your computer. This is the only thing Stern uses the internet for. Your passwords are never sent anywhere.
 
 ## The download did not work. What now?
 

@@ -1,7 +1,8 @@
-# ADR-0010: Models are offered as Small, Medium, and Large tiers, never by name
+# ADR-0010: Models are offered as size tiers, never by name
 
 - **Status:** Accepted
 - **Date:** 2026-11-23
+- **Amended by:** ADR-0014 (the Medium tier was dropped; two tiers remain)
 - **Amends:** ADR-0007 (user-selectable models — what the user selects, and which models are offered)
 
 ## Context

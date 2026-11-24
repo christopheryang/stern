@@ -30,6 +30,7 @@ use crate::components::chat::ChatView;
 use crate::components::config::ConfigView;
 use crate::components::friendly::friendly_error;
 use crate::components::help::{DisclaimerView, HelpView};
+use crate::components::model_setup::ModelSetup;
 use crate::components::theme;
 use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
 use leptos::prelude::*;
@@ -145,24 +146,23 @@ pub enum Page {
     Disclaimer,
 }
 
-/// The gate shown when no model is ready: Stern ships without one,
-/// so the first run routes the user to Settings to pick one.
+/// The gate shown when no model is ready: Stern ships without one, so
+/// the first run lets the user pick and download one right here, with
+/// the pros and cons of each. Chat opens as soon as one is ready.
 #[component]
-fn ModelRequiredGate(set_page: WriteSignal<Page>) -> impl IntoView {
+fn ModelRequiredGate(on_change: Callback<()>) -> impl IntoView {
     view! {
         <div class="stage">
-            <div class="card">
-                <div class="badge-icon"><Icon kind=IconKind::Chip /></div>
-                <h2 class="title">"Choose a size to get started"</h2>
-                <p class="subtitle">
-                    "Stern needs to download a helper. You only do this once."
-                </p>
-                <div class="btn-row">
-                    <button class="btn btn-primary" on:click=move |_| set_page.set(Page::Settings)>
-                        <Icon kind=IconKind::Download class="icon-sm" />
-                        "Choose a size"
-                    </button>
+            <div class="guide">
+                <div class="guide-head">
+                    <div class="badge-icon"><Icon kind=IconKind::Chip /></div>
+                    <h2 class="title">"Choose an AI model to get started"</h2>
+                    <p class="subtitle">
+                        "Stern needs an AI model to understand you. "
+                        "You only do this once."
+                    </p>
                 </div>
+                <ModelSetup on_change=on_change />
             </div>
         </div>
     }
@@ -196,7 +196,6 @@ fn ErrorGate(error: String, on_retry: Callback<()>) -> impl IntoView {
 fn unlocked_main(
     model_ready: Option<bool>,
     status_error: Option<String>,
-    set_page: WriteSignal<Page>,
     set_model_ready: WriteSignal<Option<bool>>,
     set_status_error: WriteSignal<Option<String>>,
     cancelled: Arc<AtomicBool>,
@@ -204,7 +203,10 @@ fn unlocked_main(
     if model_ready == Some(true) {
         view! { <ChatView /> }.into_any()
     } else if model_ready == Some(false) {
-        view! { <ModelRequiredGate set_page=set_page /> }.into_any()
+        let on_change = Callback::new(move |()| {
+            spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+        });
+        view! { <ModelRequiredGate on_change=on_change /> }.into_any()
     } else if let Some(error) = status_error {
         let retry = Callback::new(move |()| {
             set_status_error.set(None);
@@ -234,6 +236,33 @@ struct HeaderSetters {
     status_error: WriteSignal<Option<String>>,
     locking: WriteSignal<bool>,
     lock_error: WriteSignal<Option<String>>,
+}
+
+/// The light/dark switch. It lives in the top bar, so it works on every
+/// screen, including the ones shown before the vault is unlocked.
+#[component]
+fn ThemeToggle() -> impl IntoView {
+    let current = expect_context::<theme::ThemeSignal>();
+    view! {
+        <button
+            class="btn-icon"
+            aria-label=move || {
+                if current.get() == theme::Theme::Light { "Switch to dark" } else { "Switch to light" }
+            }
+            title=move || {
+                if current.get() == theme::Theme::Light { "Switch to dark" } else { "Switch to light" }
+            }
+            on:click=move |_| theme::choose(current, current.get_untracked().other())
+        >
+            {move || {
+                if current.get() == theme::Theme::Light {
+                    view! { <Icon kind=IconKind::Moon /> }.into_any()
+                } else {
+                    view! { <Icon kind=IconKind::Sun /> }.into_any()
+                }
+            }}
+        </button>
+    }
 }
 
 /// The top bar's right-hand side: Help alone before authentication,
@@ -341,7 +370,6 @@ fn main_pane(
         Some(AuthPhase::Unlocked) => unlocked_main(
             model_ready,
             status_error,
-            set_page,
             set_model_ready,
             set_status_error,
             cancelled,
@@ -363,7 +391,9 @@ fn main_pane(
 pub fn AppShell() -> impl IntoView {
     // Also applied from index.html before first paint; this covers
     // a webview that blocks the inline script.
-    theme::apply(theme::load());
+    let theme_signal: theme::ThemeSignal = RwSignal::new(theme::load());
+    provide_context(theme_signal);
+    theme::apply(theme_signal.get_untracked());
     let (page, set_page) = signal(Page::Main);
     // The outermost gate: the vault. None = still checking. Until
     // this is Some(Unlocked), neither chat nor Settings (and so no
@@ -424,6 +454,8 @@ pub fn AppShell() -> impl IntoView {
         <div class="app">
             <header class="topbar">
                 <BrandLogo />
+                <div class="topbar-actions">
+                <ThemeToggle />
                 {move || header_actions(
                     HeaderState {
                         auth: auth.get(),
@@ -434,6 +466,7 @@ pub fn AppShell() -> impl IntoView {
                     setters,
                     cancelled_header.clone(),
                 )}
+                </div>
             </header>
             <main class="main">
                 <div class="pane" class:is-hidden=move || page.get() != Page::Main>
