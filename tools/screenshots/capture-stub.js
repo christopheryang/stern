@@ -12,8 +12,9 @@
 //   ?model=none|downloading|ready AI model state (default: ready)
 //   ?play=<steps>                 messages to send once the chat loads,
 //                                 separated by "|" (see below)
-//   ?page=settings|notes|help     open that page after load
+//   ?page=settings|help           open that page after load
 //   ?theme=light|dark             set the theme (default: light)
+//   ?lock=1                       tap the lock switch (opens the dialog)
 //   ?fill=<password>              type it into both setup fields
 //
 // A one-shot headless screenshot cannot click, so `play` drives the
@@ -70,28 +71,18 @@
     options: [], input_sensitive: false, ...extra,
   });
 
-  // A tiny script of the real guided conversations.
-  let stage = "idle";
-  let title = "";
+  // A tiny script of the real chat replies.
   const chat = (text) => {
     const t = text.trim().toLowerCase();
-    if (stage === "title") {
-      title = text.trim(); stage = "text";
-      return reply("What is your note?", { input_sensitive: true });
-    }
-    if (stage === "text") {
-      stage = "confirm";
-      return reply(`Save this note?\n  title: ${title}\n  text: ••••`, { options: ["yes", "no"] });
-    }
-    if (stage === "confirm") {
-      stage = "idle";
-      if (t === "yes") {
-        return reply(`Saved your note "${title}".\n  title: ${title}\n  text: ••••`, { action: "store" });
-      }
-      return reply("Okay, I won't save it.");
-    }
     if (t === "save a note" || t === "store a note") {
-      stage = "title"; return reply("What should I call this note?");
+      return reply("Write your note below, then tap Save.", { action: "open_note_editor" });
+    }
+    if (t.startsWith("edit my ")) {
+      const wanted = t.slice(8);
+      const note = notes.find((n) => n.title.toLowerCase() === wanted);
+      if (note) {
+        return reply(`Opening "${note.title}" in the editor.`, { action: `open_note_editor:${note.id}` });
+      }
     }
     if (t === "store" || t === "save something") {
       return reply("What would you like to save?",
@@ -112,6 +103,9 @@
   };
 
   const notes = [{ id: "note-0", title: "Shopping list", text: "eggs, milk and bread", version: 1, updated_at: new Date().toISOString() }];
+  // The UI serializes its arguments with serde-wasm-bindgen,
+  // which can hand over Maps instead of plain objects.
+  const plain = (v) => (v instanceof Map ? Object.fromEntries([...v].map(([k, x]) => [k, plain(x)])) : v);
   window.__TAURI__ = {
     core: {
       invoke: async (cmd, args) => {
@@ -119,10 +113,9 @@
           return { is_initialized: phase !== "setup", is_unlocked: phase === "unlocked", entry_count: 1 };
         }
         if (cmd === "model_status") return models();
-        if (cmd === "list_notes") return notes.map(({ id, title, updated_at }) => ({ id, title, updated_at }));
-        if (cmd === "load_note") return notes.find((n) => n.id === args.id) || Promise.reject("note not found");
+        if (cmd === "load_note") return notes.find((n) => n.id === plain(args).id) || Promise.reject("note not found");
         if (cmd === "save_note") {
-          const { id, title, text } = args.request;
+          const { id, title, text } = plain(args);
           const now = new Date().toISOString();
           if (id) {
             const n = notes.find((x) => x.id === id);
@@ -134,11 +127,9 @@
           return n;
         }
         if (cmd === "send_chat_message") {
-          // The UI serializes its arguments with serde-wasm-bindgen,
-          // which can hand over Maps instead of plain objects.
-          const plain = (v) => (v instanceof Map ? Object.fromEntries([...v].map(([k, x]) => [k, plain(x)])) : v);
           return chat(plain(args).request.content);
         }
+        if (cmd === "lock_vault") return { is_initialized: true, is_unlocked: false, entry_count: 1 };
         return {};
       },
     },
@@ -186,8 +177,12 @@
       }
     }
     if (pageName) {
-      const label = { settings: "Settings", notes: "Notes" }[pageName] || "Help";
+      const label = { settings: "Settings" }[pageName] || "Help";
       (await until(() => document.querySelector(`button[aria-label="${label}"]`)))?.click();
+    }
+    // ?lock=1 taps the lock switch, which opens the "Lock Stern?" dialog.
+    if (q.get("lock") === "1") {
+      (await until(() => document.querySelector(".lock-switch")))?.click();
     }
     for (const step of play) {
       if (step.startsWith("@")) {

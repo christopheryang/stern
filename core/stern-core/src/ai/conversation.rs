@@ -153,6 +153,9 @@ const CONTACT_FIELDS: &[FieldSpec] = &[
     },
 ];
 
+/// The id of the note kind, whose text is written in the note editor.
+const NOTE_KIND_ID: &str = "text";
+
 /// The kinds the kind question offers, in the order it offers them.
 /// Notes and documents come first: that is what Stern is mostly used
 /// for. Letters in the kind question follow this order (a = note).
@@ -249,6 +252,9 @@ pub enum Step {
         options: Vec<String>,
         sensitive: bool,
     },
+    /// The user chose a note: writing one happens in the note editor,
+    /// not one prompt at a time, so the conversation hands over.
+    NoteEditor,
     /// The conversation collected a complete store request.
     Finished(Intent),
     /// The user cancelled, or declined at the confirmation.
@@ -298,7 +304,14 @@ impl Conversation {
             Some((mut conversation, _)) => {
                 // A fresh interview, so optional fields are asked too.
                 conversation.ask_optional = true;
-                let step = conversation.next_prompt();
+                let step = if conversation
+                    .kind
+                    .is_some_and(|kind| kind.id == NOTE_KIND_ID)
+                {
+                    Step::NoteEditor
+                } else {
+                    conversation.next_prompt()
+                };
                 (conversation, step)
             }
             None => Self::start(),
@@ -381,6 +394,9 @@ impl Conversation {
         };
         self.kind = Some(kind);
         self.stage = Stage::Collecting;
+        if kind.id == NOTE_KIND_ID {
+            return Step::NoteEditor;
+        }
         self.next_prompt()
     }
 
@@ -559,12 +575,7 @@ mod tests {
     #[test]
     fn kind_choice_accepts_a_letter_or_a_label() {
         let mut by_letter = start_at_fields();
-        match by_letter.handle("a") {
-            Step::Prompt { message, .. } => {
-                assert_eq!(message, "What should I call this note?");
-            }
-            _ => panic!("expected the note title prompt"),
-        }
+        assert!(matches!(by_letter.handle("a"), Step::NoteEditor));
         let mut login_by_letter = start_at_fields();
         match login_by_letter.handle("c") {
             Step::Prompt { message, .. } => {
@@ -748,26 +759,32 @@ mod tests {
     }
 
     #[test]
-    fn a_named_kind_skips_the_kind_question() {
-        let (mut conversation, step) = Conversation::start_for_kind("note");
+    fn a_named_note_hands_over_to_the_editor() {
+        let (_, step) = Conversation::start_for_kind("note");
+        assert!(matches!(step, Step::NoteEditor), "got: {step:?}");
+    }
+
+    #[test]
+    fn a_named_document_skips_the_kind_question() {
+        let (mut conversation, step) = Conversation::start_for_kind("document");
         match step {
             Step::Prompt {
                 message, options, ..
             } => {
-                assert_eq!(message, "What should I call this note?");
+                assert_eq!(message, "What is the document called?");
                 assert!(options.is_empty());
             }
-            other => panic!("expected the note title prompt, got: {other:?}"),
+            other => panic!("expected the document title prompt, got: {other:?}"),
         }
-        conversation.handle("Shopping list");
-        match conversation.handle("eggs and milk") {
-            Step::Prompt { message, .. } => assert!(message.starts_with("Save this note?")),
+        conversation.handle("Lease");
+        match conversation.handle("The tenant agrees") {
+            Step::Prompt { message, .. } => assert!(message.starts_with("Save this document?")),
             other => panic!("expected the confirmation, got: {other:?}"),
         }
         match conversation.handle("yes") {
             Step::Finished(Intent::StoreSecret { name, kind, .. }) => {
-                assert_eq!(name, "Shopping list");
-                assert_eq!(kind, "text");
+                assert_eq!(name, "Lease");
+                assert_eq!(kind, "document");
             }
             other => panic!("expected a finished store intent, got: {other:?}"),
         }

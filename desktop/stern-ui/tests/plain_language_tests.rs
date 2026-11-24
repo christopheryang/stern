@@ -156,3 +156,12 @@ fn raw_backend_diagnostics_never_become_small_print() {
         assert!(!error.message.contains("table"), "{raw}");
     }
 }
+
+#[test]
+fn locking_asks_first_unless_the_choice_was_switched_off() {
+    use stern_ui::components::prefs::confirm_lock_from_stored;
+    assert!(confirm_lock_from_stored(None));
+    assert!(confirm_lock_from_stored(Some("on")));
+    assert!(confirm_lock_from_stored(Some("garbage")));
+    assert!(!confirm_lock_from_stored(Some("off")));
+}

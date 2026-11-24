@@ -6,5 +6,6 @@ pub mod help;
 pub mod markdown;
 pub mod model_setup;
 pub mod notes;
+pub mod prefs;
 pub mod theme;
 pub mod ui;

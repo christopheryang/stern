@@ -3,13 +3,15 @@
 
 //! The configuration view, opened from the gear button in the header.
 //!
-//! It holds the look (light or dark) and the AI model picker. The look
+//! It holds the look (light or dark), whether locking asks first, and
+//! the AI model picker. The look
 //! is always available; the model can only be changed once unlocked. Stern
 //! ships with no model and no ONNX Runtime, so choosing and
 //! downloading a model here is the first thing a new user does — the
 //! chat stays gated until one is active.
 
 use super::model_setup::ModelSetup;
+use super::prefs::{self, ConfirmLockSignal};
 use super::theme::{self, Theme, ThemeSignal};
 use super::ui::{Icon, IconKind};
 use leptos::prelude::*;
@@ -71,6 +73,38 @@ fn Appearance() -> impl IntoView {
     }
 }
 
+/// Whether locking asks "Lock Stern?" first. Takes effect and is saved
+/// as soon as it is switched.
+#[component]
+fn LockSetting() -> impl IntoView {
+    let confirm = expect_context::<ConfirmLockSignal>();
+    view! {
+        <div class="section">
+            <div class="section-head">
+                <div class="section-title">
+                    <Icon kind=IconKind::Lock />
+                    "Locking"
+                </div>
+                <p class="section-text">"Choose whether Stern checks with you before it locks."</p>
+            </div>
+            <label class="toggle-row">
+                <span>"Ask before locking"</span>
+                <input
+                    type="checkbox"
+                    role="switch"
+                    class="toggle"
+                    prop:checked=move || confirm.get()
+                    on:change=move |ev| {
+                        let on = event_target_checked(&ev);
+                        prefs::confirm_lock_save(on);
+                        confirm.set(on);
+                    }
+                />
+            </label>
+        </div>
+    }
+}
+
 /// The Settings page. The look can be changed at any time. The AI model
 /// can only be changed once the vault is unlocked; before that the list
 /// is shown read-only so the user can see what is installed.
@@ -83,6 +117,8 @@ pub fn ConfigView(#[prop(optional)] locked: bool) -> impl IntoView {
                     <h2 class="title">"Settings"</h2>
                 </div>
                 <Appearance />
+                <div class="section-gap"></div>
+                <LockSetting />
                 <div class="section-gap"></div>
                 {locked.then(|| view! {
                     <p class="muted settings-note">"Unlock your vault to change the AI model."</p>

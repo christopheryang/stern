@@ -291,8 +291,13 @@ fn execute_chat_response(
         Some(stern_core::ai::chat::Action::UnlockVaultWith { ref password }) => {
             handle_unlock_vault(state, password.as_str())
         }
+        Some(stern_core::ai::chat::Action::UpdateEntry {
+            ref name,
+            ref fields,
+        }) if fields.is_empty() => handle_edit_note(state, name, &response),
         Some(
-            stern_core::ai::chat::Action::ListEntries { .. }
+            stern_core::ai::chat::Action::OpenNoteEditor
+            | stern_core::ai::chat::Action::ListEntries { .. }
             | stern_core::ai::chat::Action::ConfirmDelete { .. }
             | stern_core::ai::chat::Action::UpdateEntry { .. }
             | stern_core::ai::chat::Action::ExportVault
@@ -307,6 +312,41 @@ fn execute_chat_response(
             options: response.options,
             input_sensitive: response.input_sensitive,
         }),
+    }
+}
+
+/// The chat action that opens the note editor on a note. The note's id
+/// follows the colon; with no id the editor opens on a new note.
+pub const OPEN_NOTE_ACTION: &str = "open_note_editor";
+
+/// "Edit my shopping list": open that note in the editor. Anything that
+/// is not a single note falls back to the plain reply.
+fn handle_edit_note(
+    state: &AppState,
+    name: &str,
+    response: &stern_core::ai::chat::ChatResponse,
+) -> Result<ChatResponse, VaultError> {
+    let matches = match crate::notes::find(state, name) {
+        Ok(matches) => matches,
+        Err(VaultError::VaultLocked) => return Ok(locked_chat_response()),
+        Err(e) => return Err(e),
+    };
+    match matches.as_slice() {
+        [] => Ok(passthrough_response(response)),
+        [note] => Ok(ChatResponse {
+            message: format!("Opening \"{}\" in the editor.", note.title),
+            action: Some(format!("{OPEN_NOTE_ACTION}:{}", note.id)),
+            user_message_display: None,
+            options: Vec::new(),
+            input_sensitive: false,
+        }),
+        _ => {
+            let titles: Vec<String> = matches.iter().map(|note| note.title.clone()).collect();
+            Ok(plain_chat_response(format!(
+                "More than one note matches \"{name}\": {}. Which one do you mean?",
+                titles.join(", ")
+            )))
+        }
     }
 }
 
@@ -370,6 +410,7 @@ fn passthrough_response(response: &stern_core::ai::chat::ChatResponse) -> ChatRe
 
 fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
     match action {
+        stern_core::ai::chat::Action::OpenNoteEditor => OPEN_NOTE_ACTION.to_string(),
         stern_core::ai::chat::Action::StoreEntry { .. } => "store".to_string(),
         stern_core::ai::chat::Action::SearchEntry { .. } => "search".to_string(),
         stern_core::ai::chat::Action::RevealEntry { .. } => "reveal".to_string(),

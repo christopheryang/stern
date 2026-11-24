@@ -95,7 +95,7 @@ model gate and the chat become reachable — Settings included, so
 setup precedes any model download. Frontend → `unlock_vault` command
 → vault service derives keys from password + device Secret Key (see [2026-11-21 - Security.md](../design/2026-11-21%20-%20Security.md))
 → constant-time verify against `VaultMeta` → session holds the master
-key in `SecretMem`. Locking (the top bar's Lock button, or app exit)
+key in `SecretMem`. Locking (the top bar's lock switch, or app exit)
 drops the session and zeroizes the keys.
 
 **Store / retrieve an entry.** Commands delegate to the vault service,

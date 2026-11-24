@@ -10,7 +10,7 @@ Stern is made for your notes and documents: things you want kept private and out
 
 ## How do I save a note or document?
 
-Tap "Save a note" or "Save a document", or type "save a note". Stern asks for a name, then for the text, and shows it in full so you can check it. To write a longer note or change one later, open Notes in the top bar. There you can see your notes, and create or edit them in a text box.
+Tap "Save a note", or type "save a note". A box opens in the chat with a title and room for your text. Write the note and tap Save note. To change a note later, type "edit my shopping list" (use your note's name) and the same box opens with the note in it. For a document, tap "Save a document". Stern asks for a name, then for the text, and shows it in full so you can check it.
 
 ## How do I save a password?
 
@@ -54,7 +54,7 @@ Check that you are online, then try again. Some work or school networks block do
 
 ## What does Lock do?
 
-Lock hides everything until you enter your password again. Stern also locks when you close it.
+Lock hides everything until you enter your password again. Stern also locks when you close it. The switch at the top right shows whether Stern is locked or unlocked. Turn it off to lock Stern. Stern asks "Lock Stern?" first, so you do not lock it by accident. You can turn that question off under Locking in Settings.
 
 ## Why can't I unlock right now?
 

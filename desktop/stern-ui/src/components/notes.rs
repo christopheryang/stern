@@ -1,35 +1,23 @@
 // Copyright (c) 2026 Christopher Yang
 // SPDX-License-Identifier: MIT
 
-//! The note editor: a list of notes and a plain text area to write
-//! and change them. Chat creates and finds notes; this page edits them.
+//! The note editor: a title field and a plain text area, shown in the
+//! chat when a note is created or opened for editing. Chat starts and
+//! finds notes; this is where their text is written and changed.
 //!
 //! The DTOs are local mirrors of `desktop/stern-tauri/src/notes.rs`,
 //! because this crate does not depend on `stern-ipc`.
 
+use super::friendly::friendly_error;
 use leptos::prelude::*;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use wasm_bindgen::JsCast;
-
-#[derive(Clone, Debug, Deserialize, PartialEq)]
-struct NoteSummary {
-    id: String,
-    title: String,
-}
 
 #[derive(Clone, Debug, Deserialize)]
 struct NoteDto {
     id: String,
     title: String,
     text: String,
-    version: u64,
-}
-
-#[derive(Serialize)]
-struct SaveRequest<'a> {
-    id: Option<&'a str>,
-    title: &'a str,
-    text: &'a str,
 }
 
 #[allow(clippy::future_not_send)]
@@ -58,12 +46,6 @@ async fn invoke(name: &str, args: serde_json::Value) -> Result<serde_json::Value
 }
 
 #[allow(clippy::future_not_send)]
-async fn list_notes() -> Result<Vec<NoteSummary>, String> {
-    let value = invoke("list_notes", serde_json::json!({})).await?;
-    serde_json::from_value(value).map_err(|e| e.to_string())
-}
-
-#[allow(clippy::future_not_send)]
 async fn load_note(id: &str) -> Result<NoteDto, String> {
     let value = invoke("load_note", serde_json::json!({ "id": id })).await?;
     serde_json::from_value(value).map_err(|e| e.to_string())
@@ -71,145 +53,82 @@ async fn load_note(id: &str) -> Result<NoteDto, String> {
 
 #[allow(clippy::future_not_send)]
 async fn save_note(id: Option<String>, title: String, text: String) -> Result<NoteDto, String> {
-    let request = SaveRequest {
-        id: id.as_deref(),
-        title: &title,
-        text: &text,
-    };
-    let args = serde_json::json!({ "request": request });
+    let args = serde_json::json!({ "id": id, "title": title, "text": text });
     let value = invoke("save_note", args).await?;
     serde_json::from_value(value).map_err(|e| e.to_string())
 }
 
-/// The notes page: the list on the left, the editor beside it.
+/// The editor for one note. `note_id` is `None` for a new note.
+/// `on_done` gets the saved note's title, or `None` when the user
+/// cancels.
 #[component]
-#[allow(clippy::too_many_lines)]
-pub fn NotesView() -> impl IntoView {
-    let notes = RwSignal::new(Vec::<NoteSummary>::new());
-    // `None` means a new note; `Some(id)` edits an existing note.
-    let current_id = RwSignal::new(Option::<String>::None);
+pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) -> impl IntoView {
+    let current_id = RwSignal::new(note_id.clone());
     let title = RwSignal::new(String::new());
     let text = RwSignal::new(String::new());
-    let version = RwSignal::new(0u64);
     let status = RwSignal::new(Option::<String>::None);
-    let saving = RwSignal::new(false);
+    let busy = RwSignal::new(note_id.is_some());
 
-    let refresh_list = move || {
-        leptos::task::spawn_local(async move {
-            match list_notes().await {
-                Ok(list) => notes.set(list),
-                Err(error) => status.set(Some(
-                    crate::components::friendly::friendly_error(&error).message,
-                )),
-            }
-        });
-    };
-    refresh_list();
-
-    let open_note = move |id: String| {
+    if let Some(id) = note_id {
         leptos::task::spawn_local(async move {
             match load_note(&id).await {
                 Ok(note) => {
                     current_id.set(Some(note.id));
                     title.set(note.title);
                     text.set(note.text);
-                    version.set(note.version);
-                    status.set(None);
                 }
-                Err(error) => status.set(Some(
-                    crate::components::friendly::friendly_error(&error).message,
-                )),
+                Err(error) => status.set(Some(friendly_error(&error).message)),
             }
+            busy.set(false);
         });
-    };
-
-    let new_note = move |_| {
-        current_id.set(None);
-        title.set(String::new());
-        text.set(String::new());
-        version.set(0);
-        status.set(None);
-    };
+    }
 
     let save = move |_| {
-        if saving.get_untracked() {
+        if busy.get_untracked() {
             return;
         }
-        saving.set(true);
+        busy.set(true);
         status.set(None);
         let id = current_id.get_untracked();
         let title_value = title.get_untracked();
         let text_value = text.get_untracked();
         leptos::task::spawn_local(async move {
             match save_note(id, title_value, text_value).await {
-                Ok(note) => {
-                    current_id.set(Some(note.id));
-                    version.set(note.version);
-                    status.set(Some("Saved.".to_string()));
-                    refresh_list();
+                Ok(note) => on_done.run(Some(note.title)),
+                Err(error) => {
+                    status.set(Some(friendly_error(&error).message));
+                    busy.set(false);
                 }
-                Err(error) => status.set(Some(
-                    crate::components::friendly::friendly_error(&error).message,
-                )),
             }
-            saving.set(false);
         });
     };
 
     view! {
-        <div class="page">
-            <div class="page-inner">
-                <div class="page-head">
-                    <h1 class="title">"Notes"</h1>
-                </div>
-        <section class="notes">
-            <aside class="notes-list" aria-label="Your notes">
-                <button class="btn btn-sm" on:click=new_note>"New note"</button>
-                <ul>
-                    <For
-                        each=move || notes.get()
-                        key=|note| note.id.clone()
-                        children=move |note| {
-                            let id = note.id.clone();
-                            view! {
-                                <li>
-                                    <button class="btn-link" on:click=move |_| open_note(id.clone())>
-                                        {note.title}
-                                    </button>
-                                </li>
-                            }
-                        }
-                    />
-                </ul>
-            </aside>
-            <div class="notes-editor">
-                <label class="field-label" for="note-title">"Title"</label>
-                <input
-                    id="note-title"
-                    class="input"
-                    type="text"
-                    prop:value=move || title.get()
-                    on:input=move |ev| title.set(event_target_value(&ev))
-                />
-                <label class="field-label" for="note-text">"Note"</label>
-                <textarea
-                    id="note-text"
-                    class="input notes-text"
-                    rows="16"
-                    prop:value=move || text.get()
-                    on:input=move |ev| text.set(event_target_value(&ev))
-                ></textarea>
-                <div class="notes-actions">
-                    <button class="btn btn-primary" prop:disabled=move || saving.get() on:click=save>
-                        {move || if current_id.get().is_some() { "Save changes" } else { "Save note" }}
-                    </button>
-                    <span class="muted" role="status">
-                        {move || status.get().unwrap_or_default()}
-                    </span>
-                </div>
+        <section class="note-editor" aria-label="Note editor">
+            <label class="field-label" for="note-title">"Title"</label>
+            <input
+                id="note-title"
+                class="input"
+                type="text"
+                autocomplete="off"
+                prop:value=move || title.get()
+                on:input=move |ev| title.set(event_target_value(&ev))
+            />
+            <label class="field-label" for="note-text">"Note"</label>
+            <textarea
+                id="note-text"
+                class="input notes-text"
+                rows="8"
+                prop:value=move || text.get()
+                on:input=move |ev| text.set(event_target_value(&ev))
+            ></textarea>
+            <div class="notes-actions">
+                <button class="btn btn-primary" prop:disabled=move || busy.get() on:click=save>
+                    "Save note"
+                </button>
+                <button class="btn" on:click=move |_| on_done.run(None)>"Cancel"</button>
+                <span class="muted" role="status">{move || status.get().unwrap_or_default()}</span>
             </div>
         </section>
-            </div>
-        </div>
     }
 }

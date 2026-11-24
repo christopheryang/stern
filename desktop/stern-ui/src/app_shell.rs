@@ -31,7 +31,7 @@ use crate::components::config::ConfigView;
 use crate::components::friendly::friendly_error;
 use crate::components::help::{DisclaimerView, HelpView};
 use crate::components::model_setup::ModelSetup;
-use crate::components::notes::NotesView;
+use crate::components::prefs::{self, ConfirmLockSignal};
 use crate::components::theme;
 use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
 use leptos::prelude::*;
@@ -143,7 +143,6 @@ pub enum Page {
     /// The vault screens, the chat, or the model gate.
     Main,
     Settings,
-    Notes,
     Help,
     Disclaimer,
 }
@@ -238,11 +237,109 @@ struct HeaderSetters {
     status_error: WriteSignal<Option<String>>,
     locking: WriteSignal<bool>,
     lock_error: WriteSignal<Option<String>>,
+    /// Opens the "Lock Stern?" dialog.
+    confirming: WriteSignal<bool>,
+}
+
+/// Lock the vault now: back to the main view, so the sign-in screen
+/// never inherits an open Settings or Help page. A failure is shown next
+/// to the switch instead of swallowed.
+fn perform_lock(set: HeaderSetters) {
+    set.confirming.set(false);
+    set.locking.set(true);
+    set.lock_error.set(None);
+    spawn_local(async move {
+        if crate::components::auth::lock_vault().await.is_ok() {
+            set.page.set(Page::Main);
+            set.auth.set(Some(AuthPhase::Login));
+        } else {
+            set.lock_error
+                .set(Some("Couldn't lock Stern. Please try again.".to_string()));
+        }
+        // The shell outlives the lock, so the switch must be
+        // usable again after the next sign-in.
+        set.locking.set(false);
+    });
+}
+
+/// Put the cursor in the sign-in screen's password box.
+fn focus_password_box() {
+    use wasm_bindgen::JsCast;
+    let input = web_sys::window()
+        .and_then(|w| w.document())
+        .and_then(|d| d.query_selector("main input").ok().flatten())
+        .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
+    if let Some(input) = input {
+        drop(input.focus());
+    }
+}
+
+/// The "Lock Stern?" dialog. Cancel is the default action, so a stray
+/// Enter never locks the vault; Escape cancels too.
+#[component]
+fn ConfirmLockDialog(on_cancel: Callback<()>, on_lock: Callback<()>) -> impl IntoView {
+    let cancel_ref = NodeRef::<leptos::html::Button>::new();
+    let lock_ref = NodeRef::<leptos::html::Button>::new();
+    Effect::new(move |_| {
+        if let Some(button) = cancel_ref.get() {
+            drop(button.focus());
+        }
+    });
+    let on_keydown = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
+        "Escape" => on_cancel.run(()),
+        // Keep Tab inside the dialog, which has just the two buttons.
+        "Tab" => {
+            ev.prevent_default();
+            let target = if ev.shift_key() { lock_ref } else { cancel_ref };
+            let other = if ev.shift_key() { cancel_ref } else { lock_ref };
+            let on_cancel_button = web_sys::window()
+                .and_then(|w| w.document())
+                .and_then(|d| d.active_element())
+                .zip(cancel_ref.get())
+                .is_some_and(|(active, cancel)| active == **cancel);
+            let next = if on_cancel_button == ev.shift_key() {
+                target
+            } else {
+                other
+            };
+            if let Some(button) = next.get() {
+                drop(button.focus());
+            }
+        }
+        _ => {}
+    };
+    view! {
+        <div class="modal-backdrop" on:click=move |_| on_cancel.run(())>
+            <div
+                class="modal"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="lock-dialog-title"
+                aria-describedby="lock-dialog-text"
+                on:click=move |ev| ev.stop_propagation()
+                on:keydown=on_keydown
+            >
+                <h2 id="lock-dialog-title" class="modal-title">"Lock Stern?"</h2>
+                <p id="lock-dialog-text" class="modal-text">
+                    "You will need your password to open it again."
+                </p>
+                <div class="modal-actions">
+                    <button class="btn" node_ref=cancel_ref on:click=move |_| on_cancel.run(())>
+                        "Cancel"
+                    </button>
+                    <button class="btn btn-primary" node_ref=lock_ref on:click=move |_| on_lock.run(())>
+                        <Icon kind=IconKind::Lock class="icon-sm" />
+                        "Lock"
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 /// The top bar's right-hand side: Settings and Help before
-/// authentication, a Back button on any page, and Lock / Notes / Help /
-/// Settings on the main view once unlocked.
+/// authentication, a Back button on any page, and the Lock switch / Help /
+/// Settings on the main view.
 fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicBool>) -> AnyView {
     if state.page != Page::Main {
         return view! {
@@ -271,16 +368,6 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
             <Icon kind=IconKind::Help />
         </button>
     };
-    let notes_button = view! {
-        <button
-            class="btn btn-sm"
-            aria-label="Notes"
-            on:click=move |_| set.page.set(Page::Notes)
-        >
-            <Icon kind=IconKind::Note class="icon-sm" />
-            "Notes"
-        </button>
-    };
     let settings_button = view! {
         <button
             class="btn-icon"
@@ -291,47 +378,61 @@ fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicB
             <Icon kind=IconKind::Settings />
         </button>
     };
-    if state.auth != Some(AuthPhase::Unlocked) {
-        // Before sign-in: Help and Settings (theme only; model is locked).
-        return view! { {settings_button} {help_button} }.into_any();
-    }
+    let confirm_lock = expect_context::<ConfirmLockSignal>();
     let locking = state.locking;
+    let unlocked = state.auth == Some(AuthPhase::Unlocked);
+    // The switch shows where the vault stands. It is not on the first-run
+    // setup screen, where there is no vault to lock yet.
+    let lock_switch =
+        matches!(state.auth, Some(AuthPhase::Unlocked | AuthPhase::Login)).then(|| {
+            view! {
+                <button
+                    type="button"
+                    class="lock-switch"
+                    class:lock-switch--on=unlocked
+                    role="switch"
+                    aria-checked=if unlocked { "true" } else { "false" }
+                    aria-label=if unlocked {
+                        "Vault unlocked. Turn off to lock it."
+                    } else {
+                        "Vault locked. Enter your password to unlock it."
+                    }
+                    prop:disabled=locking
+                    on:click=move |_| {
+                        if !unlocked {
+                            // Locked: the way in is the password box.
+                            focus_password_box();
+                        } else if confirm_lock.get_untracked() {
+                            set.confirming.set(true);
+                        } else {
+                            perform_lock(set);
+                        }
+                    }
+                >
+                    <span class="lock-switch-label">
+                        {if unlocked { "Unlocked" } else { "Locked" }}
+                    </span>
+                    <span class="lock-switch-track" aria-hidden="true">
+                        <span class="lock-switch-thumb"></span>
+                    </span>
+                </button>
+            }
+        });
+    if !unlocked {
+        // Before sign-in: Settings (the look; the model is locked) and Help.
+        return view! {
+            <div class="topbar-actions">
+                {lock_switch}
+                {settings_button}
+                {help_button}
+            </div>
+        }
+        .into_any();
+    }
     view! {
         <div class="topbar-actions">
             {state.lock_error.map(|error| view! { <span class="inline-error">{error}</span> })}
-            <span class="pill">
-                <span class="pill-dot"></span>
-                "Unlocked"
-            </span>
-            <button
-                class="btn btn-sm"
-                prop:disabled=locking
-                on:click=move |_| {
-                    if locking {
-                        return;
-                    }
-                    set.locking.set(true);
-                    set.lock_error.set(None);
-                    spawn_local(async move {
-                        if crate::components::auth::lock_vault().await.is_ok() {
-                            // Back to the main view, so the sign-in screen never
-                            // inherits an open Settings or Help page.
-                            set.page.set(Page::Main);
-                            set.auth.set(Some(AuthPhase::Login));
-                        } else {
-                            set.lock_error
-                                .set(Some("Couldn't lock Stern. Please try again.".to_string()));
-                        }
-                        // The shell outlives the lock, so the button must be
-                        // usable again after the next sign-in.
-                        set.locking.set(false);
-                    });
-                }
-            >
-                <Icon kind=IconKind::Lock class="icon-sm" />
-                "Lock"
-            </button>
-            {notes_button}
+            {lock_switch}
             {help_button}
             {settings_button}
         </div>
@@ -387,6 +488,8 @@ pub fn AppShell() -> impl IntoView {
     // a webview that blocks the inline script.
     let theme_signal: theme::ThemeSignal = RwSignal::new(theme::load());
     provide_context(theme_signal);
+    let confirm_lock: ConfirmLockSignal = RwSignal::new(prefs::confirm_lock_load());
+    provide_context(confirm_lock);
     theme::apply(theme_signal.get_untracked());
     let (page, set_page) = signal(Page::Main);
     // The outermost gate: the vault. None = still checking. Until
@@ -404,6 +507,8 @@ pub fn AppShell() -> impl IntoView {
     // shown next to the button instead of swallowed.
     let (locking, set_locking) = signal(false);
     let (lock_error, set_lock_error) = signal(Option::<String>::None);
+    // Whether the "Lock Stern?" dialog is open.
+    let (confirming, set_confirming) = signal(false);
     // Set on unmount so a late status fetch never writes a dead
     // signal. An `Arc<AtomicBool>`, not a signal: the flag itself must
     // stay readable after this component is disposed, when reading a
@@ -429,6 +534,7 @@ pub fn AppShell() -> impl IntoView {
         status_error: set_status_error,
         locking: set_locking,
         lock_error: set_lock_error,
+        confirming: set_confirming,
     };
     // The pages beside the main view. Settings only counts once the
     // vault is unlocked, however it was reached.
@@ -441,11 +547,8 @@ pub fn AppShell() -> impl IntoView {
             let to_disclaimer = Callback::new(move |()| set_page.set(Page::Disclaimer));
             view! { <HelpView on_disclaimer=to_disclaimer /> }.into_any()
         }
-        Page::Notes if auth.get() == Some(AuthPhase::Unlocked) => {
-            view! { <NotesView /> }.into_any()
-        }
         Page::Disclaimer => view! { <DisclaimerView /> }.into_any(),
-        _ => ().into_any(),
+        Page::Main => ().into_any(),
     };
 
     view! {
@@ -482,6 +585,12 @@ pub fn AppShell() -> impl IntoView {
                 </div>
                 {side_page}
             </main>
+            {move || confirming.get().then(|| view! {
+                <ConfirmLockDialog
+                    on_cancel=Callback::new(move |()| set_confirming.set(false))
+                    on_lock=Callback::new(move |()| perform_lock(setters))
+                />
+            })}
         </div>
     }
 }

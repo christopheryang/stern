@@ -105,6 +105,25 @@ pub fn list(state: &AppState) -> Result<Vec<NoteSummary>, VaultError> {
     Ok(notes)
 }
 
+/// The notes whose title matches `query`: an exact match (ignoring case)
+/// wins; otherwise every title that contains it.
+pub fn find(state: &AppState, query: &str) -> Result<Vec<NoteSummary>, VaultError> {
+    let needle = query.trim().to_lowercase();
+    let all = list(state)?;
+    let exact: Vec<NoteSummary> = all
+        .iter()
+        .filter(|note| note.title.to_lowercase() == needle)
+        .cloned()
+        .collect();
+    if !exact.is_empty() {
+        return Ok(exact);
+    }
+    Ok(all
+        .into_iter()
+        .filter(|note| note.title.to_lowercase().contains(&needle))
+        .collect())
+}
+
 /// One note, with its text.
 pub fn load(state: &AppState, id: &str) -> Result<NoteDto, VaultError> {
     let kek = unlocked_kek(state)?;

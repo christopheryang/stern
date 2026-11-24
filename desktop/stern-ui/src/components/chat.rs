@@ -1,4 +1,5 @@
 use super::friendly::friendly_error;
+use super::notes::NoteEditor;
 use super::ui::{BrandMark, Icon, IconKind};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
@@ -21,10 +22,49 @@ struct ChatMsg {
     input_sensitive: bool,
 }
 
-/// Send one message and return the reply text, any choices the
-/// reply offers, and whether the next reply is a secret.
+/// Which note the editor opens on.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EditorRequest {
+    /// A new, empty note.
+    New,
+    /// An existing note, by id.
+    Existing(String),
+}
+
+/// What a chat reply carries besides its text.
+struct Reply {
+    message: String,
+    options: Vec<String>,
+    input_sensitive: bool,
+    /// Set when the reply asks for the note editor.
+    open_editor: Option<EditorRequest>,
+}
+
+impl Reply {
+    const fn text(message: String) -> Self {
+        Self {
+            message,
+            options: Vec::new(),
+            input_sensitive: false,
+            open_editor: None,
+        }
+    }
+}
+
+/// The note the reply's action asks the editor to open, if it does.
+fn editor_request(action: Option<&str>) -> Option<EditorRequest> {
+    let action = action?;
+    if action == "open_note_editor" {
+        return Some(EditorRequest::New);
+    }
+    action
+        .strip_prefix("open_note_editor:")
+        .map(|id| EditorRequest::Existing(id.to_string()))
+}
+
+/// Send one message and return the reply.
 #[allow(clippy::future_not_send)]
-async fn invoke_chat(content: String) -> Result<(String, Vec<String>, bool), String> {
+async fn invoke_chat(content: String) -> Result<Reply, String> {
     let args = serde_json::json!({ "request": { "content": content } });
     let args_js = serde_wasm_bindgen::to_value(&args).map_err(|e| e.to_string())?;
 
@@ -77,7 +117,13 @@ async fn invoke_chat(content: String) -> Result<(String, Vec<String>, bool), Str
         .get("input_sensitive")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
-    Ok((message, options, input_sensitive))
+    let open_editor = editor_request(response.get("action").and_then(|v| v.as_str()));
+    Ok(Reply {
+        message,
+        options,
+        input_sensitive,
+        open_editor,
+    })
 }
 
 /// How long a typed secret character stays visible, in
@@ -247,6 +293,7 @@ fn make_sender(
     set_messages: WriteSignal<Vec<ChatMsg>>,
     loading: ReadSignal<bool>,
     set_loading: WriteSignal<bool>,
+    set_editor: WriteSignal<Option<EditorRequest>>,
 ) -> Callback<(String, Option<String>)> {
     Callback::new(move |(text, display): (String, Option<String>)| {
         if text.trim().is_empty() || loading.get() {
@@ -263,19 +310,55 @@ fn make_sender(
         set_loading.set(true);
 
         spawn_local(async move {
-            let (response_text, options, input_sensitive) = invoke_chat(text)
+            let reply = invoke_chat(text)
                 .await
-                .unwrap_or_else(|e| (friendly_error(&e).message, Vec::new(), false));
+                .unwrap_or_else(|e| Reply::text(friendly_error(&e).message));
 
             let assistant_msg = ChatMsg {
                 id: uuid::Uuid::new_v4().to_string(),
                 role: "assistant".to_string(),
-                content: response_text,
-                options,
-                input_sensitive,
+                content: reply.message,
+                options: reply.options,
+                input_sensitive: reply.input_sensitive,
             };
             set_messages.update(|msgs| msgs.push(assistant_msg));
+            if let Some(request) = reply.open_editor {
+                set_editor.set(Some(request));
+            }
             set_loading.set(false);
+        });
+    })
+}
+
+/// The note editor for a request.
+fn editor_view(request: EditorRequest, on_done: Callback<Option<String>>) -> AnyView {
+    let note_id = match request {
+        EditorRequest::New => None,
+        EditorRequest::Existing(id) => Some(id),
+    };
+    view! { <NoteEditor note_id=note_id on_done=on_done /> }.into_any()
+}
+
+/// What happens when the note editor closes: it goes away and the
+/// transcript says whether the note was saved or the user cancelled.
+fn editor_done_callback(
+    set_messages: WriteSignal<Vec<ChatMsg>>,
+    set_editor: WriteSignal<Option<EditorRequest>>,
+) -> Callback<Option<String>> {
+    Callback::new(move |saved: Option<String>| {
+        set_editor.set(None);
+        let content = saved.map_or_else(
+            || "Cancelled — nothing was saved.".to_string(),
+            |title| format!("Saved your note \"{title}\"."),
+        );
+        set_messages.update(|msgs| {
+            msgs.push(ChatMsg {
+                id: uuid::Uuid::new_v4().to_string(),
+                role: "assistant".to_string(),
+                content,
+                options: Vec::new(),
+                input_sensitive: false,
+            });
         });
     })
 }
@@ -550,7 +633,10 @@ pub fn ChatView() -> impl IntoView {
         }
     });
 
-    let send_text = make_sender(set_messages, loading, set_loading);
+    // The note editor shown under the transcript, when a reply asked for it.
+    let (editor, set_editor) = signal(Option::<EditorRequest>::None);
+    let send_text = make_sender(set_messages, loading, set_loading, set_editor);
+    let editor_done = editor_done_callback(set_messages, set_editor);
 
     let reconcile_secret = move |new_display: String, caret_utf16: Option<u32>| {
         let (next_secret, next_reveals) = fold_secret_edit(
@@ -620,6 +706,7 @@ pub fn ChatView() -> impl IntoView {
             <div class="transcript" node_ref=transcript_ref>
                 <div class="transcript-inner">
                     {move || transcript_view(messages, loading, send_text)}
+                    {move || editor.get().map(|request| editor_view(request, editor_done))}
                 </div>
             </div>
             <Composer

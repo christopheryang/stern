@@ -25,7 +25,7 @@ loaded by Trunk from `desktop/stern-app/index.html`.
 
 | Piece | Choice |
 | --- | --- |
-| Theme switch | A sun/moon button sits in the top bar on every screen, including login and setup, so the theme can be changed before authenticating. Settings → Look is the second way; both share one signal. |
+| Theme switch | Settings → Look holds the light/dark choice. Settings opens from the top bar on every screen, including login and setup, so the theme can be changed before authenticating. |
 | Theming | CSS custom properties on `:root`; a `:root[data-theme="dark"]` block overrides them. Light is the default; Settings → Look switches to dark, saved in the webview's local storage and applied before first paint by a small script in `index.html` ([ADR-0013](../adr/0013-Light-Default-Theme-Switch.md)). |
 | Palette | Deep indigo background with soft radial glows; one accent gradient (sky `#38bdf8` → indigo `#6366f1` → violet `#a855f7`) used for primary buttons, the send button, user bubbles, and progress bars. |
 | Surfaces | Translucent "glass" panels with a hairline border and backdrop blur for the top bar and cards. |
@@ -39,9 +39,12 @@ remaining inline style is the download progress bar's computed width.
 
 ## Screens
 
-- **Top bar** — the Stern logo on the left; once unlocked, an
-  "Unlocked" pill, a **Lock** button, a Help icon, and a Settings icon.
-  Before unlocking only Help shows. On Settings, Help, or the
+- **Top bar** — the Stern logo on the left; on the right a
+  **lock switch** that reads Unlocked or Locked, a Help icon, and a
+  Settings icon. Turning the switch off locks the vault, after a
+  "Lock Stern?" dialog that Settings → Locking can turn off. When the
+  vault is locked the switch is a cue to the password box. The first-run
+  setup screen has no switch, since there is no vault to lock yet. On Settings, Help, or the
   Disclaimer the right side is a single **Back** button; the main view
   stays mounted underneath, so nothing typed there is lost.
 - **Setup** — brand mark, "Welcome to Stern", a live requirements

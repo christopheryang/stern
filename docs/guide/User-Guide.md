@@ -88,14 +88,13 @@ Stern asks a few short questions, one at a time. First, a name:
 
 ![Stern asks what to call the note](User-Guide%20-%20Save%20A%20Note.png)
 
-Type a name such as `Shopping list` and press Enter. Then Stern asks for
-the note itself, and shows what you type in full, so you can check it.
+A box opens in the chat with a **Title** and a **Note** area. Write your
+note there, then tap **Save note**. Tap **Cancel** to close the box
+without saving.
 
-For a longer note, or to change one later, open **Notes** in the top bar.
-The list on the left shows your note titles. Pick one to edit it, or tap
-**New note**. Type in the title and text boxes, then tap **Save note** (or
-**Save changes** for a note you are editing). Chat finds notes; the Notes
-page writes and changes them.
+To change a note later, type `edit my shopping list` (use your note's
+name). The same box opens with the note in it. Chat starts and finds
+notes; the box is where you write and change them.
 
 Notes are not hidden. Passwords, card numbers and similar details are the
 only things Stern masks.
@@ -131,8 +130,8 @@ info. You can tap a button or type its letter.
 
 ## 6. Settings, light and dark, and Help
 
-Along the top right are the buttons. The gear opens Settings, the
-question mark opens Help, and **Lock** locks Stern.
+Along the top right are the lock switch, the question mark (Help) and
+the gear (Settings).
 
 ### Light and dark
 
@@ -148,6 +147,8 @@ The gear opens Settings. **Look** is the light and dark choice. **AI
 model** lets you download the other model, switch between them with
 **Use this**, or free up space with **Remove**. Before you sign in, the
 model list is shown but cannot be changed; unlock your vault to change it.
+**Locking** has one choice, **Ask before locking**, which is on to begin
+with. See [Lock Stern and open it again](#7-lock-stern-and-open-it-again).
 
 ![Settings](User-Guide%20-%20Settings.png)
 
@@ -160,8 +161,13 @@ words. It is available at any time, including before you sign in.
 
 ## 7. Lock Stern and open it again
 
-Tap **Lock** when you step away. Stern hides everything until you enter
-your password again. It also locks when you close it.
+The switch at the top right shows **Unlocked** or **Locked**. When you
+step away, turn the switch off. Stern asks **Lock Stern?**; tap **Lock**
+to lock it, or **Cancel** to stay in. Stern then hides everything until
+you enter your password again. It also locks when you close it.
+
+If you would rather not be asked, open Settings and turn off **Ask before
+locking**. The switch then locks Stern at once.
 
 ![Opening Stern with your password](User-Guide%20-%20Unlock.png)
 

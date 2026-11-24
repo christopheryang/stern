@@ -512,25 +512,69 @@ fn model_status_carries_pros_cons_and_one_recommendation() {
 }
 
 #[test]
-fn chat_saves_a_note_without_the_kind_question() {
+fn chat_saves_a_document_without_the_kind_question() {
     let (state, _path) = make_test_app_state();
     create_vault_inner(&state, "correct horse battery").unwrap();
     unlock_test_session(&state);
 
-    let first = chat(&state, "save a note");
-    assert_eq!(first.message, "What should I call this note?");
+    let first = chat(&state, "save a document");
+    assert_eq!(first.message, "What is the document called?");
     chat(&state, "Shopping list");
     let confirm = chat(&state, "eggs and milk");
-    assert!(confirm.message.contains("Save this note?"));
+    assert!(confirm.message.contains("Save this document?"));
     let done = chat(&state, "yes");
     assert_eq!(done.action.as_deref(), Some("store"));
     assert_eq!(state.repository.count_entries().unwrap(), 1);
 
-    let found = handle_search_entry(&state, "shopping", Some("text")).unwrap();
+    let found = handle_search_entry(&state, "shopping", Some("content")).unwrap();
     assert!(
         found.message.contains("eggs and milk"),
         "message: {}",
         found.message
+    );
+}
+
+#[test]
+fn chat_opens_the_editor_for_a_new_note_and_nothing_is_saved_by_chat() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+
+    let reply = chat(&state, "save a note");
+    assert_eq!(reply.action.as_deref(), Some("open_note_editor"));
+    assert_eq!(state.repository.count_entries().unwrap(), 0);
+}
+
+#[test]
+fn chat_edit_opens_the_named_note_in_the_editor() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    let note = crate::notes::save(&state, None, "Shopping list", "eggs").unwrap();
+
+    let reply = chat(&state, "edit my shopping list");
+    assert_eq!(
+        reply.action.as_deref(),
+        Some(format!("open_note_editor:{}", note.id).as_str()),
+        "message: {}",
+        reply.message
+    );
+}
+
+#[test]
+fn chat_edit_says_so_when_two_notes_match() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    crate::notes::save(&state, None, "Trip plan", "a").unwrap();
+    crate::notes::save(&state, None, "Trip packing", "b").unwrap();
+
+    let reply = chat(&state, "edit my trip");
+    assert!(reply.action.is_none(), "action: {:?}", reply.action);
+    assert!(
+        reply.message.contains("More than one note"),
+        "{}",
+        reply.message
     );
 }
 
