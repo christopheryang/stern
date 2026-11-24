@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 160" width="570" height="160">
-  <defs><linearGradient id="stern-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset=".55" stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient><style>@media (prefers-color-scheme: light){.stern-wordmark{stroke:#1b1e4b}}</style></defs>
+  <defs><linearGradient id="stern-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#38bdf8"/><stop offset=".55" stop-color="#6366f1"/><stop offset="1" stop-color="#a855f7"/></linearGradient></defs>
   <g transform="translate(80 80) scale(0.158)"><circle r="318" fill="none" stroke="url(#stern-g)" stroke-width="52"/><path d="M0 -262 C34 -112 112 -34 262 0 C112 34 34 112 0 262 C-34 112 -112 34 -262 0 C-112 -34 -34 -112 0 -262 Z" fill="url(#stern-g)"/></g>
-  <g class="stern-wordmark" fill="none" stroke="#eef0ff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+  <g class="stern-wordmark" fill="none" stroke="#1b1e4b" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
     <path transform="translate(214 48)" d="M46 15 C40 5 24 1 14 7 C3 14 7 27 24 33 C41 39 47 48 38 58 C28 66 8 63 2 50"/><path transform="translate(288 48)" d="M0 0 H48 M24 0 V64"/><path transform="translate(362 48)" d="M44 0 H4 V64 H44 M4 32 H38"/><path transform="translate(432 48)" d="M4 64 V0 H28 C47 0 47 34 28 34 H4 M26 34 L46 64"/><path transform="translate(506 48)" d="M4 64 V0 L44 64 V0"/>
   </g>
 </svg>

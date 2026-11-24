@@ -28,6 +28,8 @@ pub enum IconKind {
     Refresh,
     Help,
     Note,
+    Sun,
+    Moon,
 }
 
 impl IconKind {
@@ -36,6 +38,10 @@ impl IconKind {
             Self::Lock => {
                 r#"<rect x="4" y="11" width="16" height="10" rx="2.5"/><path d="M8 11V7.5a4 4 0 0 1 8 0V11"/>"#
             }
+            Self::Sun => {
+                r#"<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M4.6 4.6l1.4 1.4M18 18l1.4 1.4M2.5 12h2M19.5 12h2M4.6 19.4 6 18M18 6l1.4-1.4"/>"#
+            }
+            Self::Moon => r#"<path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/>"#,
             Self::Note => {
                 r#"<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>"#
             }
@@ -103,7 +109,8 @@ pub fn BrandMark(#[prop(optional, into)] class: Option<&'static str>) -> impl In
 pub fn BrandLogo() -> impl IntoView {
     view! {
         <div class="brand">
-            <img class="brand-logo" src="stern-logo.svg" alt="Stern" />
+            <img class="brand-logo brand-logo--light" src="stern-logo.svg" alt="Stern" />
+            <img class="brand-logo brand-logo--dark" src="stern-logo-dark.svg" alt="" />
         </div>
     }
 }

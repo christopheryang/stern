@@ -2,15 +2,55 @@
    SPDX-License-Identifier: MIT
 
    Stern design system. Plain CSS (no build step beyond Trunk), themed
-   with custom properties: dark by default, light when the OS asks for
-   it. System fonts only — the app makes no network requests. */
+   with custom properties: light by default, dark when the user picks
+   it in Settings (:root[data-theme="dark"]). System fonts only — the
+   app makes no network requests. */
 
 :root {
-  color-scheme: dark light;
+  color-scheme: light;
 
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable", "Segoe UI",
     Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius-sm: 8px;
+  --radius: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --topbar-h: 56px;
+
+  --bg: #f4f5fd;
+  --bg-glow-a: rgba(99, 102, 241, 0.14);
+  --bg-glow-b: rgba(56, 189, 248, 0.14);
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-solid: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-hover: rgba(99, 102, 241, 0.08);
+  --border: rgba(24, 28, 80, 0.1);
+  --border-strong: rgba(24, 28, 80, 0.22);
+  --text: #14173a;
+  --text-dim: #4d5384;
+  --text-faint: #7d83ad;
+  --accent-1: #38bdf8;
+  --accent-2: #6366f1;
+  --accent-3: #a855f7;
+  --accent: #4f46e5;
+  --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #6366f1 55%, #a855f7 100%);
+  --accent-soft: rgba(79, 70, 229, 0.1);
+  --on-accent: #ffffff;
+  --success: #059669;
+  --success-soft: rgba(5, 150, 105, 0.11);
+  --danger: #e11d48;
+  --danger-soft: rgba(225, 29, 72, 0.09);
+  --warning: #b45309;
+  --warning-soft: rgba(180, 83, 9, 0.1);
+  --user-bubble: linear-gradient(135deg, #4f6bf5 0%, #7c4dff 100%);
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 24px 50px -28px rgba(40, 44, 120, 0.35);
+  --shadow-pop: 0 10px 26px -12px rgba(79, 70, 229, 0.55);
+  --ring: 0 0 0 3px rgba(79, 70, 229, 0.3);
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 
   --bg: #080a1a;
   --bg-glow-a: rgba(99, 102, 241, 0.22);
@@ -24,7 +64,6 @@
   --text: #eef0ff;
   --text-dim: #a3a9d4;
   --text-faint: #6f76a8;
-
   --accent-1: #38bdf8;
   --accent-2: #6366f1;
   --accent-3: #a855f7;
@@ -32,54 +71,16 @@
   --accent-gradient: linear-gradient(135deg, #38bdf8 0%, #6366f1 55%, #a855f7 100%);
   --accent-soft: rgba(124, 131, 255, 0.16);
   --on-accent: #ffffff;
-
   --success: #34d399;
   --success-soft: rgba(52, 211, 153, 0.14);
   --danger: #fb7185;
   --danger-soft: rgba(251, 113, 133, 0.13);
   --warning: #fbbf24;
   --warning-soft: rgba(251, 191, 36, 0.13);
-
   --user-bubble: linear-gradient(135deg, #4f6bf5 0%, #7c4dff 100%);
   --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 24px 60px -24px rgba(0, 0, 0, 0.7);
   --shadow-pop: 0 10px 30px -12px rgba(99, 102, 241, 0.65);
   --ring: 0 0 0 3px rgba(124, 131, 255, 0.4);
-
-  --radius-sm: 8px;
-  --radius: 12px;
-  --radius-lg: 18px;
-  --radius-xl: 24px;
-  --topbar-h: 56px;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --bg: #f4f5fd;
-    --bg-glow-a: rgba(99, 102, 241, 0.14);
-    --bg-glow-b: rgba(56, 189, 248, 0.14);
-    --surface: rgba(255, 255, 255, 0.78);
-    --surface-solid: #ffffff;
-    --surface-raised: #ffffff;
-    --surface-hover: rgba(99, 102, 241, 0.08);
-    --border: rgba(24, 28, 80, 0.1);
-    --border-strong: rgba(24, 28, 80, 0.22);
-    --text: #14173a;
-    --text-dim: #4d5384;
-    --text-faint: #7d83ad;
-
-    --accent: #4f46e5;
-    --accent-soft: rgba(79, 70, 229, 0.1);
-    --success: #059669;
-    --success-soft: rgba(5, 150, 105, 0.11);
-    --danger: #e11d48;
-    --danger-soft: rgba(225, 29, 72, 0.09);
-    --warning: #b45309;
-    --warning-soft: rgba(180, 83, 9, 0.1);
-
-    --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.9) inset, 0 24px 50px -28px rgba(40, 44, 120, 0.35);
-    --shadow-pop: 0 10px 26px -12px rgba(79, 70, 229, 0.55);
-    --ring: 0 0 0 3px rgba(79, 70, 229, 0.3);
-  }
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -134,6 +135,9 @@ button:disabled { cursor: not-allowed; }
 
 .brand { display: flex; align-items: center; }
 .brand-logo { height: 30px; width: auto; display: block; }
+.brand-logo--dark { display: none; }
+:root[data-theme="dark"] .brand-logo--light { display: none; }
+:root[data-theme="dark"] .brand-logo--dark { display: block; }
 
 .topbar-actions { display: flex; align-items: center; gap: 8px; }
 
@@ -287,7 +291,7 @@ button:disabled { cursor: not-allowed; }
   font-size: 13px; line-height: 1.45; text-align: left;
 }
 .alert .icon { margin-top: 1px; }
-.alert-error { background: var(--danger-soft); color: var(--danger); border-color: rgba(251, 113, 133, 0.25); }
+.alert-error { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 30%, transparent); }
 .alert-info { background: var(--accent-soft); color: var(--text-dim); border-color: var(--border); }
 
 .requirements { list-style: none; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: -2px; }
@@ -462,6 +466,19 @@ button:disabled { cursor: not-allowed; }
 .section-title { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 650; }
 .section-title .icon { color: var(--accent); }
 .section-text { margin-top: 6px; font-size: 13px; color: var(--text-dim); line-height: 1.55; }
+
+.section-gap { height: 18px; }
+.theme-options { display: flex; gap: 10px; padding: 18px 22px; }
+.theme-option {
+  flex: 1; display: flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 12px 14px; border-radius: var(--radius);
+  border: 1px solid var(--border-strong); background: var(--surface-raised);
+  color: var(--text); font-weight: 600;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.theme-option:hover { background: var(--surface-hover); }
+.theme-option:focus-visible { outline: none; box-shadow: var(--ring); }
+.theme-option[aria-checked="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 
 .model-row { padding: 18px 22px; border-top: 1px solid var(--border); }
 .section-head + .model-row { border-top: none; }

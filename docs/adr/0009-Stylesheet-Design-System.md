@@ -23,8 +23,8 @@ modern UI needs.
 
 - One plain stylesheet, `desktop/stern-ui/styles/stern.css`, loaded by
   Trunk's built-in `css` asset handling. Components use class names only.
-- Theming through CSS custom properties: dark by default, light via
-  `prefers-color-scheme`. No in-app toggle.
+- Theming through CSS custom properties. (Amended by ADR-0013: light
+  by default, dark by an in-app choice.)
 - System fonts only and inline SVG icons, so the redesign adds no
   network access and no dependencies — the no-network invariant in
   AGENTS.md is untouched.
@@ -42,8 +42,8 @@ modern UI needs.
   includes them.
 - Class names are not checked by the compiler: a typo silently drops a
   style. Mitigation is the manual pass in `docs/Development.md`.
-- The look follows the OS color scheme; users cannot override it inside
-  the app.
+- (Superseded by ADR-0013.) The look followed the OS color scheme
+  and could not be overridden inside the app.
 - Native webview rendering (WKWebView, WebKitGTK) can differ from the
   browser used to check the redesign — notably `backdrop-filter`
   support — so `just dev` remains the acceptance check.

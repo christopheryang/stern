@@ -81,3 +81,26 @@ fn shipped_pages_parse_and_use_no_inline_markup() {
         assert!(!help.contains(jargon), "Help mentions {jargon}");
     }
 }
+
+#[test]
+fn light_is_the_default_theme_and_unknown_values_fall_back_to_it() {
+    use stern_ui::components::theme::Theme;
+
+    assert_eq!(Theme::default(), Theme::Light);
+    assert_eq!(Theme::from_stored(None), Theme::Light);
+    assert_eq!(Theme::from_stored(Some("light")), Theme::Light);
+    assert_eq!(Theme::from_stored(Some("purple")), Theme::Light);
+    assert_eq!(Theme::from_stored(Some("dark")), Theme::Dark);
+    assert_eq!(Theme::from_stored(Some(Theme::Dark.as_str())), Theme::Dark);
+}
+
+#[test]
+fn the_stylesheet_is_light_by_default_and_dark_only_on_request() {
+    let css = include_str!("../styles/stern.css");
+    assert!(css.contains(":root[data-theme=\"dark\"]"));
+    assert!(!css.contains("prefers-color-scheme"));
+    let light = css.find(":root {").unwrap();
+    let dark = css.find("\n:root[data-theme=\"dark\"] {").unwrap();
+    assert!(light < dark);
+    assert!(css[light..dark].contains("--bg: #f4f5fd;"));
+}

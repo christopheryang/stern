@@ -30,6 +30,7 @@ use crate::components::chat::ChatView;
 use crate::components::config::ConfigView;
 use crate::components::friendly::friendly_error;
 use crate::components::help::{DisclaimerView, HelpView};
+use crate::components::theme;
 use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -360,6 +361,9 @@ fn main_pane(
 
 #[component]
 pub fn AppShell() -> impl IntoView {
+    // Also applied from index.html before first paint; this covers
+    // a webview that blocks the inline script.
+    theme::apply(theme::load());
     let (page, set_page) = signal(Page::Main);
     // The outermost gate: the vault. None = still checking. Until
     // this is Some(Unlocked), neither chat nor Settings (and so no

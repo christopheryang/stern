@@ -9,8 +9,8 @@ IPC, or security behavior changed.
 
 ## Goals
 
-- A modern, calm look that fits a security product: dark by default,
-  light when the OS asks for it.
+- A modern, calm look that fits a security product: light by default,
+  dark when the user picks it in Settings.
 - One place to change the look. Before this change every component
   carried its own inline `style="..."` strings and hex colors.
 - A real identity: an app icon for the dock / task bar and a logo inside
@@ -25,7 +25,7 @@ loaded by Trunk from `desktop/stern-app/index.html`.
 
 | Piece | Choice |
 | --- | --- |
-| Theming | CSS custom properties on `:root`; a `prefers-color-scheme: light` block overrides them. No toggle — the app follows the OS. |
+| Theming | CSS custom properties on `:root`; a `:root[data-theme="dark"]` block overrides them. Light is the default; Settings → Look switches to dark, saved in the webview's local storage and applied before first paint by a small script in `index.html` ([ADR-0013](../adr/0013-Light-Default-Theme-Switch.md)). |
 | Palette | Deep indigo background with soft radial glows; one accent gradient (sky `#38bdf8` → indigo `#6366f1` → violet `#a855f7`) used for primary buttons, the send button, user bubbles, and progress bars. |
 | Surfaces | Translucent "glass" panels with a hairline border and backdrop blur for the top bar and cards. |
 | Type | System font stack only (`-apple-system`, Segoe UI, Roboto…). The app never fetches web fonts. |
@@ -89,15 +89,17 @@ remaining inline style is the download progress bar's computed width.
 The mark is a vault ring around a four-point star — the old mark's
 vault door and spark, reduced to two plain shapes that stay legible at
 16 px. The wordmark is drawn as stroked paths, so
-it needs no font; in a light color scheme the logo SVG switches the
-wordmark to dark ink.
+it needs no font. The logo ships twice, with a dark-ink wordmark
+(`stern-logo.svg`, light theme) and a pale one (`stern-logo-dark.svg`);
+the stylesheet shows the one that matches the chosen theme.
 
 Sources (the SVGs are the source of truth; the PNGs above are renders):
 
 | File | Use |
 | --- | --- |
 | `desktop/stern-ui/assets/stern-icon.svg` | App icon: gradient tile with the mark. Rendered to 1024 px and fed to `cargo tauri icon`. Also the browser favicon in dev. |
-| `desktop/stern-ui/assets/stern-logo.svg` | Logo (mark + wordmark) in the top bar. |
+| `desktop/stern-ui/assets/stern-logo.svg` | Logo (mark + wordmark) in the top bar, light theme. |
+| `desktop/stern-ui/assets/stern-logo-dark.svg` | The same logo with a pale wordmark, dark theme. |
 | `desktop/stern-ui/assets/stern-mark.svg` | Mark only: hero on auth/empty states, assistant avatar. |
 | `desktop/stern-tauri/icons/` | Generated `icon.icns`, `icon.ico`, and PNG sizes, listed in `bundle.icon` in `tauri.conf.json`. |
 
@@ -123,7 +125,7 @@ text is kept as small print where it helps whoever supports the user.
   --target wasm32-unknown-unknown -- -D warnings` pass; `trunk build`
   succeeds.
 - Each screen was rendered in a browser against a stubbed
-  `window.__TAURI__` bridge in both color schemes, including the guided
+  `window.__TAURI__` bridge in both themes, including the guided
   store flow and the secret-mode composer (mask confirmed after the
   2-second window).
 - Not covered: native rendering inside the Tauri webview (WKWebView on

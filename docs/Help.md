@@ -32,6 +32,10 @@ It is the one password you create when you first open Stern. It protects everyth
 
 Nobody can get your information back, not even the people who made Stern. That is how your information stays private. Write your password down and keep it somewhere safe. If it is lost, the only way forward is to start over, which erases everything saved in Stern.
 
+## Can I change how Stern looks?
+
+Yes. Open Settings and pick Light or Dark under Look. Stern remembers your choice. Light is what you get the first time.
+
 ## What do Small, Medium, and Large mean?
 
 They are three sizes of the assistant that understands what you type. Small is fast and light. Medium is best for most people. Large understands you best, but it is slower and a bigger download. You can switch or remove a size at any time in Settings.

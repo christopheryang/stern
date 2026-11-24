@@ -31,6 +31,7 @@ questions.
 | [0010](0010-Model-Size-Tiers.md) | Models are offered as Small / Medium / Large tiers, never by name; SmolLM-135M retired | Accepted |
 | [0011](0011-Plain-Language-Help-And-Disclaimer.md) | Plain-language UI copy; Help and Disclaimer pages embedded from docs/ and agreed to at setup | Accepted |
 | [0012](0012-Notes-First-And-Plain-Text-Advice.md) | Notes and documents lead every prompt; plain text files are the advised long-term store | Accepted |
+| [0013](0013-Light-Default-Theme-Switch.md) | Light is the default theme; users can switch to dark in Settings | Accepted |
 
 ADRs 0001–0005 record decisions already embodied in the codebase
 (retroactively documented 2026-11-21). ADR-0006 was recorded when the
