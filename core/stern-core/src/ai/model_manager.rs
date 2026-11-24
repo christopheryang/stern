@@ -112,8 +112,7 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
     ModelDescriptor {
         id: DEFAULT_MODEL_ID,
         display_name: "Small",
-        description: "Fastest and lightest, with the smallest download. Best for \
-                      simple, direct commands.",
+        description: "Fast and light. Good for simple requests.",
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/onnx/model_q4f16.onnx",
@@ -128,8 +127,7 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
     ModelDescriptor {
         id: "smollm2-360m-instruct",
         display_name: "Medium",
-        description: "Recommended for most people. Handles varied phrasing \
-                      noticeably better, and is still fast.",
+        description: "Best for most people.",
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/onnx/model_q4f16.onnx",
@@ -144,9 +142,7 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
     ModelDescriptor {
         id: "qwen2.5-0.5b-instruct",
         display_name: "Large",
-        description: "The most capable, with the widest understanding of how \
-                      you phrase things. The biggest download and the slowest \
-                      to respond.",
+        description: "Understands you best, but is slower.",
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct/resolve/main/onnx/model_q4f16.onnx",

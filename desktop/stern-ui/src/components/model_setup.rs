@@ -13,6 +13,7 @@
 //! no ONNX code at all). While a download runs, the card polls
 //! `model_status` for progress.
 
+use super::friendly::{friendly_error, FriendlyError};
 use super::ui::{ErrorAlert, Icon, IconKind};
 use leptos::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -145,7 +146,7 @@ async fn poll_download_progress(
 #[allow(clippy::future_not_send)]
 async fn load_initial_status(
     set_models: WriteSignal<Vec<ModelStatus>>,
-    set_error: WriteSignal<Option<String>>,
+    set_error: WriteSignal<Option<FriendlyError>>,
     cancelled: ReadSignal<bool>,
 ) {
     match fetch_status().await {
@@ -167,7 +168,7 @@ async fn load_initial_status(
         }
         Err(e) => {
             if !cancelled.get_untracked() {
-                set_error.set(Some(e));
+                set_error.set(Some(friendly_error(&e)));
             }
         }
     }
@@ -198,8 +199,8 @@ fn ModelRow(
 ) -> impl IntoView {
     let id = status.model_id.clone();
     let meta_line = format!("~{} MB", megabytes(status.size_bytes));
-    let update_note = (status.state == "update_available")
-        .then(|| "An improved version is available.".to_string());
+    let update_note =
+        (status.state == "update_available").then(|| "A better version is ready.".to_string());
 
     let id_download = id.clone();
     let id_select = id.clone();
@@ -207,12 +208,7 @@ fn ModelRow(
     let downloading = status.is_downloading;
     let pct = percent(status.downloaded_bytes, status.total_bytes);
     let bar_width = format!("width:{pct}%");
-    let progress_label = format!(
-        "Downloading — {} MB of {} MB ({}%)",
-        megabytes(status.downloaded_bytes),
-        megabytes(status.total_bytes),
-        pct,
-    );
+    let progress_label = format!("Downloading… {pct}%");
 
     let row_class = if status.is_active {
         "model-row model-row--active"
@@ -265,7 +261,7 @@ fn ModelRow(
                                     let id = id_select.clone();
                                     view! {
                                         <button class="btn btn-sm btn-primary" on:click=move |_| on_select.run(id.clone())>
-                                            "Use this size"
+                                            "Use this"
                                         </button>
                                     }
                                 })}
@@ -302,15 +298,9 @@ fn SectionHead() -> impl IntoView {
         <div class="section-head">
             <div class="section-title">
                 <Icon kind=IconKind::Chip />
-                "AI model size"
+                "Helper size"
             </div>
-            <p class="section-text">
-                "Stern needs an AI model to chat. Choose a size and download it — \
-                bigger understands more phrasings but is slower and takes more \
-                space. The first download also fetches the ONNX Runtime (~21 MB), \
-                and everything is stored only on this device. You can switch or \
-                remove it at any time."
-            </p>
+            <p class="section-text">"Pick one. Bigger is smarter but slower."</p>
         </div>
     }
 }
@@ -318,7 +308,7 @@ fn SectionHead() -> impl IntoView {
 #[component]
 pub fn ModelSetup() -> impl IntoView {
     let (models, set_models) = signal(Vec::<ModelStatus>::new());
-    let (error, set_error) = signal(Option::<String>::None);
+    let (error, set_error) = signal(Option::<FriendlyError>::None);
     let (action_in_flight, set_action_in_flight) = signal(false);
 
     // Set by `on_cleanup` when the card unmounts (e.g. navigation), so
@@ -354,12 +344,7 @@ pub fn ModelSetup() -> impl IntoView {
                         }
                     }
                     Err(e) => {
-                        let label = if cmd == "download_model" {
-                            format!("Download failed: {e}")
-                        } else {
-                            e
-                        };
-                        set_error.set(Some(label));
+                        set_error.set(Some(friendly_error(&e)));
                         if let Ok(list) = fetch_status().await {
                             if !cancelled.get_untracked() {
                                 set_models.set(list);
@@ -418,7 +403,10 @@ pub fn ModelSetup() -> impl IntoView {
             }}
             {move || {
                 error.get().map(|e| {
-                    view! { <div class="settings-error"><ErrorAlert message=e /></div> }
+                    view! { <div class="settings-error">{match e.detail {
+                            Some(detail) => view! { <ErrorAlert message=e.message detail=detail /> }.into_any(),
+                            None => view! { <ErrorAlert message=e.message /> }.into_any(),
+                        }}</div> }
                 })
             }}
         </div>

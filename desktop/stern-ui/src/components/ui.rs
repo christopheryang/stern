@@ -26,6 +26,7 @@ pub enum IconKind {
     Chip,
     Download,
     Refresh,
+    Help,
 }
 
 impl IconKind {
@@ -64,6 +65,9 @@ impl IconKind {
                 r#"<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>"#
             }
             Self::Refresh => r#"<path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 4v5h-5"/>"#,
+            Self::Help => {
+                r#"<circle cx="12" cy="12" r="9"/><path d="M9.6 9.4a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1.1.9-1.1 1.7"/><path d="M12 17h.01"/>"#
+            }
         }
     }
 }
@@ -111,13 +115,20 @@ pub fn Loading(#[prop(optional, into)] label: Option<&'static str>) -> impl Into
     }
 }
 
-/// An error line with an alert icon.
+/// An error line with an alert icon: a short, plain-language
+/// message, plus an optional smaller line with the technical detail.
 #[component]
-pub fn ErrorAlert(#[prop(into)] message: String) -> impl IntoView {
+pub fn ErrorAlert(
+    #[prop(into)] message: String,
+    #[prop(optional, into)] detail: Option<String>,
+) -> impl IntoView {
     view! {
         <div class="alert alert-error" role="alert">
             <Icon kind=IconKind::Alert class="icon-sm" />
-            <span>{message}</span>
+            <div>
+                <span>{message}</span>
+                {detail.map(|text| view! { <small class="alert-detail">{text}</small> })}
+            </div>
         </div>
     }
 }

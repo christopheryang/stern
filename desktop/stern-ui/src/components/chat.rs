@@ -1,3 +1,4 @@
+use super::friendly::friendly_error;
 use super::ui::{BrandMark, Icon, IconKind};
 use leptos::ev::SubmitEvent;
 use leptos::prelude::*;
@@ -264,7 +265,7 @@ fn make_sender(
         spawn_local(async move {
             let (response_text, options, input_sensitive) = invoke_chat(text)
                 .await
-                .unwrap_or_else(|e| (format!("Error: {e}"), Vec::new(), false));
+                .unwrap_or_else(|e| (friendly_error(&e).message, Vec::new(), false));
 
             let assistant_msg = ChatMsg {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -281,14 +282,9 @@ fn make_sender(
 
 /// Starter prompts shown on the empty chat. Each is sent as an
 /// ordinary message, so it takes the same path as typed text.
-const SUGGESTIONS: [(IconKind, &str, &str); 3] = [
+const SUGGESTIONS: [(IconKind, &str, &str); 2] = [
     (IconKind::Key, "Save a password", "store a password"),
-    (
-        IconKind::Search,
-        "Find a secret",
-        "find my password for GitHub",
-    ),
-    (IconKind::List, "List everything", "list all passwords"),
+    (IconKind::List, "Show my passwords", "list all passwords"),
 ];
 
 /// The empty state: brand mark, a greeting, and starter prompts.
@@ -313,8 +309,8 @@ fn empty_view(loading: ReadSignal<bool>, send_text: Callback<(String, Option<Str
     view! {
         <div class="empty">
             <BrandMark />
-            <h2 class="title">"What would you like to keep safe?"</h2>
-            <p class="subtitle">"Ask Stern to store, find, or manage your secrets."</p>
+            <h2 class="title">"How can I help?"</h2>
+            <p class="subtitle">"Save a password, or find one you saved."</p>
             <div class="suggestions">{chips}</div>
         </div>
     }
@@ -472,7 +468,7 @@ fn Composer(
             >
                 <span class="secure-tag">
                     <Icon kind=IconKind::Lock class="icon-sm" />
-                    "Secret"
+                    "Private"
                 </span>
                 <input
                     class="composer-input"
@@ -493,7 +489,7 @@ fn Composer(
                 </button>
             </form>
             <p class="composer-note">
-                "Secrets are masked as you type and stay on this device."
+                "Your information stays on this computer."
             </p>
         </div>
     }
@@ -605,9 +601,9 @@ pub fn ChatView() -> impl IntoView {
     };
     let placeholder = move || {
         if is_sensitive() {
-            "Type here — each character hides after 2 seconds"
+            "Type it here. Letters hide after a moment."
         } else {
-            "Ask Stern anything…"
+            "Type a message…"
         }
     };
 

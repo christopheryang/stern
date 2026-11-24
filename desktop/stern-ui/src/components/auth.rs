@@ -11,6 +11,7 @@
 //! unlocked, nothing else in the app is reachable: no chat, and
 //! not even the model picker — setup comes first.
 
+use super::friendly::friendly_error;
 use super::ui::{BrandMark, ErrorAlert, Icon, IconKind};
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
@@ -150,27 +151,27 @@ fn ShowToggle(show: ReadSignal<bool>, set_show: WriteSignal<bool>) -> impl IntoV
 fn password_rules(password: &str) -> [(&'static str, &'static str, bool); 5] {
     [
         (
-            "8+ characters",
-            "8+ characters",
+            "At least 8 characters",
+            "at least 8 characters",
             password.chars().count() >= 8,
         ),
         (
-            "A lowercase letter",
-            "a lowercase letter",
+            "A small letter (a–z)",
+            "a small letter",
             password.chars().any(char::is_lowercase),
         ),
         (
-            "An uppercase letter",
-            "an uppercase letter",
+            "A capital letter (A–Z)",
+            "a capital letter",
             password.chars().any(char::is_uppercase),
         ),
         (
-            "A number",
+            "A number (0–9)",
             "a number",
             password.chars().any(|c| c.is_ascii_digit()),
         ),
         (
-            "A symbol",
+            "A symbol, like ! or ?",
             "a symbol",
             password.chars().any(|c| !c.is_alphanumeric()),
         ),
@@ -217,6 +218,19 @@ fn Requirements(password: RwSignal<String>) -> impl IntoView {
     }
 }
 
+/// The small "Disclaimer" link under the auth cards, so it can be
+/// read before agreeing to it and on every later launch.
+#[component]
+fn DisclaimerLink(on_disclaimer: Callback<()>) -> impl IntoView {
+    view! {
+        <p class="fine-print">
+            <button type="button" class="link-btn" on:click=move |_| on_disclaimer.run(())>
+                "Disclaimer"
+            </button>
+        </p>
+    }
+}
+
 /// Step two of setup: the no-recovery warning, shown once a valid
 /// password has been entered, before anything is created.
 #[component]
@@ -230,11 +244,10 @@ fn RecoveryWarning(
         <div class="badge-icon badge-icon--warn">
             <Icon kind=IconKind::Alert />
         </div>
-        <h2 class="title">"There is no recovery"</h2>
+        <h2 class="title">"Don't lose your password"</h2>
         <p class="subtitle">
-            "If you forget this password, your vault can never be \
-            opened again — there is no way to recover it. Write it \
-            down somewhere safe."
+            "If you forget it, no one can get your information back. \
+            Write it down and keep it somewhere safe."
         </p>
         {move || error.get().map(|e| view! {
             <div class="gap-top"><ErrorAlert message=e /></div>
@@ -248,40 +261,101 @@ fn RecoveryWarning(
                 prop:disabled=busy
                 on:click=move |_| on_create.run(())
             >
-                {move || if busy.get() { "Creating…" } else { "Create vault" }}
+                {move || if busy.get() { "Setting up…" } else { "I wrote it down" }}
             </button>
         </div>
     }
 }
 
-/// The first-run screen: choose the master password. No account,
-/// no username — this password plus the device's Secret Key is
-/// the whole credential. Kept brief, the way other vaults do it:
-/// labeled fields and a live requirements checklist; the no-recovery
-/// warning appears as its own step after the password is entered.
+/// The first step of setup: choose a password, confirm it, and agree
+/// to the disclaimer. `on_valid` fires once all of it checks out.
 #[component]
-pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
-    let password = RwSignal::new(String::new());
-    let confirm = RwSignal::new(String::new());
+fn SetupForm(
+    password: RwSignal<String>,
+    confirm: RwSignal<String>,
+    on_valid: Callback<()>,
+    on_disclaimer: Callback<()>,
+) -> impl IntoView {
     let (show, set_show) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
-    let (busy, set_busy) = signal(false);
-    let (warn, set_warn) = signal(false);
+    let (agreed, set_agreed) = signal(false);
 
     let submit = move |ev: leptos::ev::SubmitEvent| {
         ev.prevent_default();
         let pw = password.get();
         if let Some(gap) = password_gap(&pw) {
-            set_error.set(Some(format!("Password still needs: {gap}.")));
-            return;
+            set_error.set(Some(format!("Your password still needs: {gap}.")));
+        } else if !agreed.get() {
+            set_error.set(Some("Please tick the box to continue.".to_string()));
+        } else if pw != confirm.get() {
+            set_error.set(Some(
+                "The two passwords don't match. Please try again.".to_string(),
+            ));
+        } else {
+            set_error.set(None);
+            on_valid.run(());
         }
-        if pw != confirm.get() {
-            set_error.set(Some("The two passwords don't match.".to_string()));
-            return;
-        }
-        set_error.set(None);
-        set_warn.set(true);
     };
+
+    view! {
+        <BrandMark />
+        <h2 class="title">"Welcome to Stern"</h2>
+        <p class="subtitle">"Create a password to protect everything you save."</p>
+        <form class="form" on:submit=submit>
+            <PasswordField
+                value=password
+                show=show
+                label="Your password"
+                placeholder="Create a password"
+                autofocus=true
+            />
+            <Requirements password=password />
+            <PasswordField
+                value=confirm
+                show=show
+                label="Type it again"
+                placeholder="Same password"
+            />
+            <ShowToggle show=show set_show=set_show />
+            <label class="check agree">
+                <input
+                    type="checkbox"
+                    prop:checked=agreed
+                    on:change=move |ev| set_agreed.set(event_target_checked(&ev))
+                />
+                <span>
+                    "I understand that Stern is used at my own risk. "
+                    <button
+                        type="button"
+                        class="link-btn"
+                        on:click=move |_| on_disclaimer.run(())
+                    >
+                        "Read the disclaimer"
+                    </button>
+                </span>
+            </label>
+            {move || error.get().map(|e| view! { <ErrorAlert message=e /> })}
+            <button type="submit" class="btn btn-primary btn-block">
+                "Continue"
+            </button>
+        </form>
+    }
+}
+
+/// The first-run screen: choose the master password. No account,
+/// no username — this password plus the device's Secret Key is
+/// the whole credential. The no-recovery warning appears as its own
+/// step after a valid password is entered.
+#[component]
+pub fn SetupView(
+    set_auth: WriteSignal<Option<AuthPhase>>,
+    on_disclaimer: Callback<()>,
+) -> impl IntoView {
+    let password = RwSignal::new(String::new());
+    let confirm = RwSignal::new(String::new());
+    let (error, set_error) = signal(Option::<String>::None);
+    let (busy, set_busy) = signal(false);
+    let (warn, set_warn) = signal(false);
 
     let create = Callback::new(move |()| {
         if busy.get() {
@@ -293,7 +367,7 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
             match invoke_password_command("create_vault", &pw).await {
                 Ok(phase) => set_auth.set(Some(phase)),
                 Err(e) => {
-                    set_error.set(Some(e));
+                    set_error.set(Some(friendly_error(&e).message));
                     set_busy.set(false);
                 }
             }
@@ -303,6 +377,7 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
         set_warn.set(false);
         set_error.set(None);
     });
+    let next = Callback::new(move |()| set_warn.set(true));
 
     view! {
         <div class="stage">
@@ -314,32 +389,12 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
                         }.into_any()
                     } else {
                         view! {
-                            <BrandMark />
-                            <h2 class="title">"Set up your vault"</h2>
-                            <p class="subtitle">
-                                "Choose a master password. It never leaves this device."
-                            </p>
-                            <form class="form" on:submit=submit>
-                                <PasswordField
-                                    value=password
-                                    show=show
-                                    label="Master password"
-                                    placeholder="Create a strong password"
-                                    autofocus=true
-                                />
-                                <Requirements password=password />
-                                <PasswordField
-                                    value=confirm
-                                    show=show
-                                    label="Confirm password"
-                                    placeholder="Type it again"
-                                />
-                                <ShowToggle show=show set_show=set_show />
-                                {move || error.get().map(|e| view! { <ErrorAlert message=e /> })}
-                                <button type="submit" class="btn btn-primary btn-block">
-                                    "Continue"
-                                </button>
-                            </form>
+                            <SetupForm
+                                password=password
+                                confirm=confirm
+                                on_valid=next
+                                on_disclaimer=on_disclaimer
+                            />
                         }.into_any()
                     }
                 }}
@@ -351,7 +406,10 @@ pub fn SetupView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
 /// The every-launch screen: the vault exists and is locked, and
 /// the app stays here until the master password opens it.
 #[component]
-pub fn LoginView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
+pub fn LoginView(
+    set_auth: WriteSignal<Option<AuthPhase>>,
+    on_disclaimer: Callback<()>,
+) -> impl IntoView {
     let password = RwSignal::new(String::new());
     let (show, set_show) = signal(false);
     let (error, set_error) = signal(Option::<String>::None);
@@ -372,7 +430,7 @@ pub fn LoginView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
             match invoke_password_command("unlock_vault", &pw).await {
                 Ok(phase) => set_auth.set(Some(phase)),
                 Err(e) => {
-                    set_error.set(Some(e));
+                    set_error.set(Some(friendly_error(&e).message));
                     password.set(String::new());
                     set_busy.set(false);
                 }
@@ -385,15 +443,13 @@ pub fn LoginView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
             <div class="card">
                 <BrandMark />
                 <h2 class="title">"Welcome back"</h2>
-                <p class="subtitle">
-                    "Enter your master password to unlock your vault."
-                </p>
+                <p class="subtitle">"Enter your password to open Stern."</p>
                 <form class="form" on:submit=submit>
                     <PasswordField
                         value=password
                         show=show
-                        label="Master password"
-                        placeholder="Master password"
+                        label="Your password"
+                        placeholder="Your password"
                         autofocus=true
                     />
                     <ShowToggle show=show set_show=set_show />
@@ -404,9 +460,10 @@ pub fn LoginView(set_auth: WriteSignal<Option<AuthPhase>>) -> impl IntoView {
                         prop:disabled=busy
                     >
                         <Icon kind=IconKind::Unlock class="icon-sm" />
-                        {move || if busy.get() { "Unlocking…" } else { "Unlock" }}
+                        {move || if busy.get() { "Opening…" } else { "Open" }}
                     </button>
                 </form>
+                <DisclaimerLink on_disclaimer=on_disclaimer />
             </div>
         </div>
     }

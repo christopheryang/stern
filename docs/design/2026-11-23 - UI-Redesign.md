@@ -2,8 +2,10 @@
 
 Design of the 2026-11-23 frontend redesign. The decision to move styling
 into a stylesheet is recorded in
-[ADR-0009](../adr/0009-Stylesheet-Design-System.md). No backend, IPC, or
-security behavior changed.
+[ADR-0009](../adr/0009-Stylesheet-Design-System.md); the plain-language
+copy, Help page, and disclaimer in
+[ADR-0011](../adr/0011-Plain-Language-Help-And-Disclaimer.md). No backend,
+IPC, or security behavior changed.
 
 ## Goals
 
@@ -36,31 +38,43 @@ remaining inline style is the download progress bar's computed width.
 
 ## Screens
 
-- **Top bar** — the Stern logo on the left; once unlocked, a "Vault
-  unlocked" status pill, a **Lock** button, and a Settings icon button.
-  In Settings the right side is a single **Back to chat** button.
-- **Setup** — brand mark, "Set up your vault", a live requirements
+- **Top bar** — the Stern logo on the left; once unlocked, an
+  "Unlocked" pill, a **Lock** button, a Help icon, and a Settings icon.
+  Before unlocking only Help shows. On Settings, Help, or the
+  Disclaimer the right side is a single **Back** button; the main view
+  stays mounted underneath, so nothing typed there is lost.
+- **Setup** — brand mark, "Welcome to Stern", a live requirements
   checklist (five rules that tick green as the password satisfies them),
-  confirm field, show-password toggle. After a valid password, a second
-  step shows the no-recovery warning before the vault is created. The
+  a confirm field, a show-password toggle, and a checkbox agreeing to the
+  disclaimer (with a link to read it). After the form is valid, a
+  "Don't lose your password" step comes before the vault is created. The
   checklist and the submit-time check share one rule table
   (`password_rules`), so they cannot disagree.
-- **Login** — brand mark, "Welcome back", password field, Unlock.
-- **Gates** — model-required, model-status error, and vault-status error
-  are centered cards with an icon badge and one action.
-- **Chat** — an empty state (mark, greeting, three starter chips that
-  send ordinary messages: *Save a password*, *Find a secret*, *List
-  everything*); then avatars, name labels, gradient user bubbles, glass
-  assistant bubbles, pill-shaped option buttons on the newest assistant
-  message only, a typing indicator while a reply is pending, and
-  auto-scroll to the newest message.
+- **Login** — brand mark, "Welcome back", a password field, **Open**, and
+  a small Disclaimer link.
+- **Gates** — "Choose a size to get started" and one shared "Something
+  went wrong" card (used for both the vault and the helper status
+  checks) are centered cards with an icon badge and one action.
+- **Chat** — an empty state (mark, "How can I help?", two starter chips
+  that send ordinary messages: *Save a password*, *Show my passwords*);
+  then avatars, name labels, gradient user bubbles, glass assistant
+  bubbles, pill-shaped option buttons on the newest assistant message
+  only, a typing indicator while a reply is pending, and auto-scroll to
+  the newest message. Errors in chat are one plain sentence.
 - **Composer** — a pill input with a round send button. When the newest
   assistant message asks for a secret the pill turns amber and shows a
-  **Secret** tag; the peek-mask behavior itself (each character visible
+  **Private** tag; the peek-mask behavior itself (each character visible
   for 2 seconds, then `*`) is unchanged.
-- **Settings** — one section card for the AI model picker. Rows show
-  name, version/size, description, an **Active** tag, and Download / Use
-  this model / Update / Remove; a gradient progress bar shows downloads.
+- **Settings** — one "Helper size" card with a one-line explanation. Rows
+  show the tier (Small, Medium, Large), its download size, a short
+  description, an **Active** tag, and Download / Use this / Update /
+  Remove; a percentage and a gradient bar show downloads. A failed
+  download shows one plain sentence with the technical text as small
+  print.
+- **Help and Disclaimer** — Help is a list of collapsible questions
+  (the first open) built from `docs/Help.md`; the Disclaimer is a plain
+  document built from `docs/Disclaimer.md`. Both are embedded at compile
+  time, so the docs and the app cannot disagree.
 - **Short windows** — below 560 px of height (the app's minimum is
   400 px) the empty state, cards, and composer tighten so nothing is
   clipped. Tall cards scroll rather than overflow.
@@ -90,6 +104,17 @@ To regenerate the platform icons after editing the icon SVG: render it
 to a 1024 × 1024 PNG and run `cargo tauri icon <png>` from
 `desktop/stern-tauri/` (then delete the `android/`, `ios/`, and
 `Square*` outputs, which the desktop build does not use).
+
+## Plain-language copy
+
+The rules the copy follows (ADR-0011): one short sentence per label; say
+"password", not "master password"; say "helper" and "size", not "AI
+model"; never name a technology or a model; put anything longer in Help.
+Raw errors are mapped by `friendly_error`
+(`desktop/stern-ui/src/components/friendly.rs`) — known cases (wrong
+password, lockout, locked, download) get a tailored sentence, anything
+else gets "Something went wrong. Please try again." — and the original
+text is kept as small print where it helps whoever supports the user.
 
 ## Verification
 

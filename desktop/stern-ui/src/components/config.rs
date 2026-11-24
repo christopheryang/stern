@@ -18,7 +18,6 @@ pub fn ConfigView() -> impl IntoView {
             <div class="page-inner">
                 <div class="page-head">
                     <h2 class="title">"Settings"</h2>
-                    <p class="subtitle">"Everything here stays on this device."</p>
                 </div>
                 <ModelSetup />
             </div>

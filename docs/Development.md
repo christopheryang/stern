@@ -40,12 +40,19 @@ it is useful for layout work only.
 
 1. Fresh state: delete the app data dir (`com.stern.app` — macOS:
    `~/Library/Application Support/com.stern.app/`).
-2. `just dev` — the setup screen creates the vault (master password).
-   Quit and relaunch: the login screen now asks for it before anything
+2. `just dev` — the setup screen creates the vault: the checklist
+   ticks as you type, Continue is refused until the disclaimer box is
+   ticked, and a "Don't lose your password" step follows. Quit and
+   relaunch: the login screen now asks for the password before anything
    else.
 3. Store an entry in chat (step 4); lock (the top bar's Lock button) and
    unlock; ask for the entry and confirm it decrypts. Copy a secret
    and confirm the clipboard auto-clears.
+   Open Help (the question mark) and the Disclaimer from the setup
+   screen, the login screen, and the chat: Back must return to where
+   you were, with anything typed still there. Break the network and
+   try a download: the message should be one plain sentence, with the
+   technical text as small print beneath it.
    Check both color schemes (switch the OS appearance) and a short
    window (resize to the 400 px minimum height): nothing should clip
    or overflow, and the setup screen's requirements checklist should

@@ -2,8 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 //! App layout: a single chat view under a slim top bar — the Stern
-//! logo, a vault status pill, and Lock / Settings buttons. There is
-//! no sidebar. All styling lives in `styles/stern.css`.
+//! logo, an "Unlocked" pill, and Lock / Help / Settings buttons.
+//! There is no sidebar. All styling lives in `styles/stern.css`.
+//!
+//! Besides the main view there are three pages (see [`Page`]):
+//! Settings (unlocked only), and Help and the Disclaimer, which are
+//! static text and open from anywhere — including the setup screen,
+//! so the Disclaimer can be read before agreeing to it. The main
+//! view stays mounted (just hidden) while a page is open, so
+//! nothing typed there is lost.
 //!
 //! Two gates stand in front of the chat, in this order:
 //!
@@ -21,6 +28,8 @@
 use crate::components::auth::{AuthPhase, LoginView, SetupView};
 use crate::components::chat::ChatView;
 use crate::components::config::ConfigView;
+use crate::components::friendly::friendly_error;
+use crate::components::help::{DisclaimerView, HelpView};
 use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -125,22 +134,30 @@ fn spawn_refresh(
     });
 }
 
+/// Which page the main area shows.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    /// The vault screens, the chat, or the model gate.
+    Main,
+    Settings,
+    Help,
+    Disclaimer,
+}
+
 /// The gate shown when no model is ready: Stern ships without one,
 /// so the first run routes the user to Settings to pick one.
 #[component]
-fn ModelRequiredGate(set_in_config: WriteSignal<bool>) -> impl IntoView {
+fn ModelRequiredGate(set_page: WriteSignal<Page>) -> impl IntoView {
     view! {
         <div class="stage">
             <div class="card">
                 <div class="badge-icon"><Icon kind=IconKind::Chip /></div>
-                <h2 class="title">"Choose an AI model size to get started"</h2>
+                <h2 class="title">"Choose a size to get started"</h2>
                 <p class="subtitle">
-                    "Stern ships without an AI model. Pick a size in Settings \
-                    (Small, Medium, or Large) and it downloads to this device \
-                    only — then you can chat."
+                    "Stern needs to download a helper. You only do this once."
                 </p>
                 <div class="btn-row">
-                    <button class="btn btn-primary" on:click=move |_| set_in_config.set(true)>
+                    <button class="btn btn-primary" on:click=move |_| set_page.set(Page::Settings)>
                         <Icon kind=IconKind::Download class="icon-sm" />
                         "Choose a size"
                     </button>
@@ -150,31 +167,22 @@ fn ModelRequiredGate(set_in_config: WriteSignal<bool>) -> impl IntoView {
     }
 }
 
-/// The gate shown when the model-status check itself failed: the
-/// error and a retry, instead of a "Loading…" that never ends.
+/// A "something went wrong" card with a retry button: shown when a
+/// status check fails, instead of a "Loading…" that never ends.
 #[component]
-fn StatusErrorGate(
-    error: String,
-    set_model_ready: WriteSignal<Option<bool>>,
-    set_status_error: WriteSignal<Option<String>>,
-    cancelled: Arc<AtomicBool>,
-) -> impl IntoView {
+fn ErrorGate(error: String, on_retry: Callback<()>) -> impl IntoView {
+    let friendly = friendly_error(&error);
     view! {
         <div class="stage">
             <div class="card">
                 <div class="badge-icon badge-icon--danger"><Icon kind=IconKind::Alert /></div>
-                <h2 class="title">"Couldn't check whether a model is ready"</h2>
-                <p class="subtitle">{error}</p>
+                <h2 class="title">"Something went wrong"</h2>
+                <p class="subtitle">{friendly.message}</p>
+                {friendly.detail.map(|text| view! { <p class="fine-print">{text}</p> })}
                 <div class="btn-row">
-                    <button
-                        class="btn btn-primary"
-                        on:click=move |_| {
-                            set_status_error.set(None);
-                            spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
-                        }
-                    >
+                    <button class="btn btn-primary" on:click=move |_| on_retry.run(())>
                         <Icon kind=IconKind::Refresh class="icon-sm" />
-                        "Retry"
+                        "Try again"
                     </button>
                 </div>
             </div>
@@ -182,158 +190,177 @@ fn StatusErrorGate(
     }
 }
 
-/// The gate shown when the vault-status check itself failed:
-/// the error and a retry, instead of a "Loading…" that never ends.
-#[component]
-fn VaultStatusErrorGate(
-    error: String,
-    set_auth: WriteSignal<Option<AuthPhase>>,
-    set_auth_error: WriteSignal<Option<String>>,
-    cancelled: Arc<AtomicBool>,
-) -> impl IntoView {
-    view! {
-        <div class="stage">
-            <div class="card">
-                <div class="badge-icon badge-icon--danger"><Icon kind=IconKind::Alert /></div>
-                <h2 class="title">"Couldn't check the vault"</h2>
-                <p class="subtitle">{error}</p>
-                <div class="btn-row">
-                    <button
-                        class="btn btn-primary"
-                        on:click=move |_| {
-                            set_auth_error.set(None);
-                            spawn_vault_refresh(set_auth, set_auth_error, cancelled.clone());
-                        }
-                    >
-                        <Icon kind=IconKind::Refresh class="icon-sm" />
-                        "Retry"
-                    </button>
-                </div>
-            </div>
-        </div>
-    }
-}
-
-/// What the main area shows once the vault is unlocked: the
-/// configuration view, the chat, or the model-required gate.
-#[allow(clippy::too_many_arguments)]
+/// What the main pane shows once the vault is unlocked: the chat,
+/// or the model-required gate.
 fn unlocked_main(
-    in_config: bool,
     model_ready: Option<bool>,
     status_error: Option<String>,
-    set_in_config: WriteSignal<bool>,
+    set_page: WriteSignal<Page>,
     set_model_ready: WriteSignal<Option<bool>>,
     set_status_error: WriteSignal<Option<String>>,
     cancelled: Arc<AtomicBool>,
 ) -> AnyView {
-    if in_config {
-        view! { <ConfigView /> }.into_any()
-    } else if model_ready == Some(true) {
+    if model_ready == Some(true) {
         view! { <ChatView /> }.into_any()
     } else if model_ready == Some(false) {
-        view! { <ModelRequiredGate set_in_config=set_in_config /> }.into_any()
+        view! { <ModelRequiredGate set_page=set_page /> }.into_any()
     } else if let Some(error) = status_error {
-        view! {
-            <StatusErrorGate
-                error=error
-                set_model_ready=set_model_ready
-                set_status_error=set_status_error
-                cancelled=cancelled
-            />
-        }
-        .into_any()
+        let retry = Callback::new(move |()| {
+            set_status_error.set(None);
+            spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+        });
+        view! { <ErrorGate error=error on_retry=retry /> }.into_any()
     } else {
         view! { <Loading /> }.into_any()
     }
 }
 
-/// The header's right-hand side: nothing before authentication,
-/// a back button in Settings, and Lock + the gear in the chat.
-#[allow(clippy::too_many_arguments)]
-fn header_actions(
+/// What the top bar's right-hand side needs to know.
+#[derive(Clone)]
+struct HeaderState {
     auth: Option<AuthPhase>,
-    in_config: bool,
+    page: Page,
     locking: bool,
     lock_error: Option<String>,
-    set_in_config: WriteSignal<bool>,
-    set_auth: WriteSignal<Option<AuthPhase>>,
-    set_model_ready: WriteSignal<Option<bool>>,
-    set_status_error: WriteSignal<Option<String>>,
-    set_locking: WriteSignal<bool>,
-    set_lock_error: WriteSignal<Option<String>>,
-    cancelled: Arc<AtomicBool>,
-) -> AnyView {
-    if auth != Some(AuthPhase::Unlocked) {
-        // No header actions before authentication: Settings (and
-        // its model downloads) wait for an unlocked vault.
-        return ().into_any();
-    }
-    if in_config {
-        view! {
+}
+
+/// The signals the top bar's buttons write to.
+#[derive(Clone, Copy)]
+struct HeaderSetters {
+    page: WriteSignal<Page>,
+    auth: WriteSignal<Option<AuthPhase>>,
+    model_ready: WriteSignal<Option<bool>>,
+    status_error: WriteSignal<Option<String>>,
+    locking: WriteSignal<bool>,
+    lock_error: WriteSignal<Option<String>>,
+}
+
+/// The top bar's right-hand side: Help alone before authentication,
+/// a Back button on any page, and Lock / Help / Settings on the main
+/// view once unlocked.
+fn header_actions(state: HeaderState, set: HeaderSetters, cancelled: Arc<AtomicBool>) -> AnyView {
+    if state.page != Page::Main {
+        return view! {
             <button
                 class="btn btn-sm"
                 on:click=move |_| {
-                    set_in_config.set(false);
-                    // The user may have just downloaded or
-                    // selected a model — re-check the gate.
-                    spawn_refresh(set_model_ready, set_status_error, cancelled.clone());
+                    set.page.set(Page::Main);
+                    // The user may have just downloaded or selected
+                    // a size — re-check the gate.
+                    spawn_refresh(set.model_ready, set.status_error, cancelled.clone());
                 }
             >
                 <Icon kind=IconKind::ArrowLeft class="icon-sm" />
-                "Back to chat"
+                "Back"
             </button>
         }
-        .into_any()
-    } else {
-        view! {
-            <div class="topbar-actions">
-                {lock_error.map(|error| view! { <span class="inline-error">{error}</span> })}
-                <span class="pill">
-                    <span class="pill-dot"></span>
-                    "Vault unlocked"
-                </span>
-                <button
-                    class="btn btn-sm"
-                    prop:disabled=locking
-                    on:click=move |_| {
-                        if locking {
-                            return;
-                        }
-                        set_locking.set(true);
-                        set_lock_error.set(None);
-                        spawn_local(async move {
-                            match crate::components::auth::lock_vault().await {
-                                Ok(()) => set_auth.set(Some(AuthPhase::Login)),
-                                Err(error) => {
-                                    set_lock_error.set(Some(format!(
-                                        "Couldn't lock the vault: {error}"
-                                    )));
-                                    set_locking.set(false);
-                                }
-                            }
-                        });
+        .into_any();
+    }
+    let help_button = view! {
+        <button
+            class="btn-icon"
+            aria-label="Help"
+            title="Help"
+            on:click=move |_| set.page.set(Page::Help)
+        >
+            <Icon kind=IconKind::Help />
+        </button>
+    };
+    if state.auth != Some(AuthPhase::Unlocked) {
+        // Settings (and its downloads) wait for an unlocked vault.
+        return help_button.into_any();
+    }
+    let locking = state.locking;
+    view! {
+        <div class="topbar-actions">
+            {state.lock_error.map(|error| view! { <span class="inline-error">{error}</span> })}
+            <span class="pill">
+                <span class="pill-dot"></span>
+                "Unlocked"
+            </span>
+            <button
+                class="btn btn-sm"
+                prop:disabled=locking
+                on:click=move |_| {
+                    if locking {
+                        return;
                     }
-                >
-                    <Icon kind=IconKind::Lock class="icon-sm" />
-                    "Lock"
-                </button>
-                <button
-                    class="btn-icon"
-                    aria-label="Settings"
-                    title="Settings"
-                    on:click=move |_| set_in_config.set(true)
-                >
-                    <Icon kind=IconKind::Settings />
-                </button>
-            </div>
+                    set.locking.set(true);
+                    set.lock_error.set(None);
+                    spawn_local(async move {
+                        if crate::components::auth::lock_vault().await.is_ok() {
+                            set.auth.set(Some(AuthPhase::Login));
+                        } else {
+                            set.lock_error
+                                .set(Some("Couldn't lock Stern. Please try again.".to_string()));
+                            set.locking.set(false);
+                        }
+                    });
+                }
+            >
+                <Icon kind=IconKind::Lock class="icon-sm" />
+                "Lock"
+            </button>
+            {help_button}
+            <button
+                class="btn-icon"
+                aria-label="Settings"
+                title="Settings"
+                on:click=move |_| set.page.set(Page::Settings)
+            >
+                <Icon kind=IconKind::Settings />
+            </button>
+        </div>
+    }
+    .into_any()
+}
+
+/// The main pane: the vault screens, then the chat or model gate.
+#[allow(clippy::too_many_arguments)]
+fn main_pane(
+    auth: Option<AuthPhase>,
+    auth_error: Option<String>,
+    model_ready: Option<bool>,
+    status_error: Option<String>,
+    set_page: WriteSignal<Page>,
+    set_auth: WriteSignal<Option<AuthPhase>>,
+    set_auth_error: WriteSignal<Option<String>>,
+    set_model_ready: WriteSignal<Option<bool>>,
+    set_status_error: WriteSignal<Option<String>>,
+    cancelled: Arc<AtomicBool>,
+) -> AnyView {
+    let on_disclaimer = Callback::new(move |()| set_page.set(Page::Disclaimer));
+    match auth {
+        Some(AuthPhase::Setup) => {
+            view! { <SetupView set_auth=set_auth on_disclaimer=on_disclaimer /> }.into_any()
         }
-        .into_any()
+        Some(AuthPhase::Login) => {
+            view! { <LoginView set_auth=set_auth on_disclaimer=on_disclaimer /> }.into_any()
+        }
+        Some(AuthPhase::Unlocked) => unlocked_main(
+            model_ready,
+            status_error,
+            set_page,
+            set_model_ready,
+            set_status_error,
+            cancelled,
+        ),
+        None => auth_error.map_or_else(
+            || view! { <Loading /> }.into_any(),
+            |error| {
+                let retry = Callback::new(move |()| {
+                    set_auth_error.set(None);
+                    spawn_vault_refresh(set_auth, set_auth_error, cancelled.clone());
+                });
+                view! { <ErrorGate error=error on_retry=retry /> }.into_any()
+            },
+        ),
     }
 }
 
 #[component]
 pub fn AppShell() -> impl IntoView {
-    let (in_config, set_in_config) = signal(false);
+    let (page, set_page) = signal(Page::Main);
     // The outermost gate: the vault. None = still checking. Until
     // this is Some(Unlocked), neither chat nor Settings (and so no
     // model download) is reachable — vault setup comes first.
@@ -365,60 +392,61 @@ pub fn AppShell() -> impl IntoView {
     // One clone per view closure below: each `move` closure takes
     // its own handle to the same flag.
     let cancelled_header = cancelled.clone();
-    let cancelled_main = cancelled.clone();
-    let cancelled_auth = cancelled;
+    let cancelled_main = cancelled;
+
+    let setters = HeaderSetters {
+        page: set_page,
+        auth: set_auth,
+        model_ready: set_model_ready,
+        status_error: set_status_error,
+        locking: set_locking,
+        lock_error: set_lock_error,
+    };
+    // The pages beside the main view. Settings only counts once the
+    // vault is unlocked, however it was reached.
+    let side_page = move || match page.get() {
+        Page::Settings if auth.get() == Some(AuthPhase::Unlocked) => {
+            view! { <ConfigView /> }.into_any()
+        }
+        Page::Help => {
+            let to_disclaimer = Callback::new(move |()| set_page.set(Page::Disclaimer));
+            view! { <HelpView on_disclaimer=to_disclaimer /> }.into_any()
+        }
+        Page::Disclaimer => view! { <DisclaimerView /> }.into_any(),
+        _ => ().into_any(),
+    };
 
     view! {
         <div class="app">
             <header class="topbar">
                 <BrandLogo />
                 {move || header_actions(
-                    auth.get(),
-                    in_config.get(),
-                    locking.get(),
-                    lock_error.get(),
-                    set_in_config,
-                    set_auth,
-                    set_model_ready,
-                    set_status_error,
-                    set_locking,
-                    set_lock_error,
+                    HeaderState {
+                        auth: auth.get(),
+                        page: page.get(),
+                        locking: locking.get(),
+                        lock_error: lock_error.get(),
+                    },
+                    setters,
                     cancelled_header.clone(),
                 )}
             </header>
             <main class="main">
-                {move || -> AnyView {
-                    match auth.get() {
-                        Some(AuthPhase::Setup) => {
-                            view! { <SetupView set_auth=set_auth /> }.into_any()
-                        }
-                        Some(AuthPhase::Login) => {
-                            view! { <LoginView set_auth=set_auth /> }.into_any()
-                        }
-                        Some(AuthPhase::Unlocked) => unlocked_main(
-                            in_config.get(),
-                            model_ready.get(),
-                            status_error.get(),
-                            set_in_config,
-                            set_model_ready,
-                            set_status_error,
-                            cancelled_main.clone(),
-                        ),
-                        None => auth_error.get().map_or_else(
-                            || view! { <Loading /> }.into_any(),
-                            |error| {
-                                view! {
-                                    <VaultStatusErrorGate
-                                        error=error
-                                        set_auth=set_auth
-                                        set_auth_error=set_auth_error
-                                        cancelled=cancelled_auth.clone()
-                                    />
-                                }.into_any()
-                            },
-                        ),
-                    }
-                }}
+                <div class="pane" class:is-hidden=move || page.get() != Page::Main>
+                    {move || main_pane(
+                        auth.get(),
+                        auth_error.get(),
+                        model_ready.get(),
+                        status_error.get(),
+                        set_page,
+                        set_auth,
+                        set_auth_error,
+                        set_model_ready,
+                        set_status_error,
+                        cancelled_main.clone(),
+                    )}
+                </div>
+                {side_page}
             </main>
         </div>
     }
