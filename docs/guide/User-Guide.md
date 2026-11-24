@@ -145,7 +145,10 @@ the first time.
 
 The gear opens Settings. **Look** is the light and dark choice. **AI
 model** lets you download the other model, switch between them with
-**Use this**, or free up space with **Remove**. Before you sign in, the
+**Use this**, or free up space with **Remove**. Remove asks you to
+confirm, then deletes the model from your computer; the other model, and
+everything you saved, is not touched. Removing the last model also
+deletes the files Stern downloaded to run it. Before you sign in, the
 model list is shown but cannot be changed; unlock your vault to change it.
 **Locking** has one choice, **Ask before locking**, which is on to begin
 with. See [Lock Stern and open it again](#7-lock-stern-and-open-it-again).

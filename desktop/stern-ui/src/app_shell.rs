@@ -33,7 +33,7 @@ use crate::components::help::{DisclaimerView, HelpView};
 use crate::components::model_setup::ModelSetup;
 use crate::components::prefs::{self, ConfirmLockSignal};
 use crate::components::theme;
-use crate::components::ui::{BrandLogo, Icon, IconKind, Loading};
+use crate::components::ui::{BrandLogo, ConfirmDialog, Icon, IconKind, Loading};
 use leptos::prelude::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -271,69 +271,6 @@ fn focus_password_box() {
         .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok());
     if let Some(input) = input {
         drop(input.focus());
-    }
-}
-
-/// The "Lock Stern?" dialog. Cancel is the default action, so a stray
-/// Enter never locks the vault; Escape cancels too.
-#[component]
-fn ConfirmLockDialog(on_cancel: Callback<()>, on_lock: Callback<()>) -> impl IntoView {
-    let cancel_ref = NodeRef::<leptos::html::Button>::new();
-    let lock_ref = NodeRef::<leptos::html::Button>::new();
-    Effect::new(move |_| {
-        if let Some(button) = cancel_ref.get() {
-            drop(button.focus());
-        }
-    });
-    let on_keydown = move |ev: leptos::ev::KeyboardEvent| match ev.key().as_str() {
-        "Escape" => on_cancel.run(()),
-        // Keep Tab inside the dialog, which has just the two buttons.
-        "Tab" => {
-            ev.prevent_default();
-            let target = if ev.shift_key() { lock_ref } else { cancel_ref };
-            let other = if ev.shift_key() { cancel_ref } else { lock_ref };
-            let on_cancel_button = web_sys::window()
-                .and_then(|w| w.document())
-                .and_then(|d| d.active_element())
-                .zip(cancel_ref.get())
-                .is_some_and(|(active, cancel)| active == **cancel);
-            let next = if on_cancel_button == ev.shift_key() {
-                target
-            } else {
-                other
-            };
-            if let Some(button) = next.get() {
-                drop(button.focus());
-            }
-        }
-        _ => {}
-    };
-    view! {
-        <div class="modal-backdrop" on:click=move |_| on_cancel.run(())>
-            <div
-                class="modal"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="lock-dialog-title"
-                aria-describedby="lock-dialog-text"
-                on:click=move |ev| ev.stop_propagation()
-                on:keydown=on_keydown
-            >
-                <h2 id="lock-dialog-title" class="modal-title">"Lock Stern?"</h2>
-                <p id="lock-dialog-text" class="modal-text">
-                    "You will need your password to open it again."
-                </p>
-                <div class="modal-actions">
-                    <button class="btn" node_ref=cancel_ref on:click=move |_| on_cancel.run(())>
-                        "Cancel"
-                    </button>
-                    <button class="btn btn-primary" node_ref=lock_ref on:click=move |_| on_lock.run(())>
-                        <Icon kind=IconKind::Lock class="icon-sm" />
-                        "Lock"
-                    </button>
-                </div>
-            </div>
-        </div>
     }
 }
 
@@ -587,9 +524,13 @@ pub fn AppShell() -> impl IntoView {
                 {side_page}
             </main>
             {move || confirming.get().then(|| view! {
-                <ConfirmLockDialog
+                <ConfirmDialog
+                    title="Lock Stern?"
+                    text="You will need your password to open it again."
+                    confirm_label="Lock"
+                    confirm_icon=IconKind::Lock
                     on_cancel=Callback::new(move |()| set_confirming.set(false))
-                    on_lock=Callback::new(move |()| perform_lock(setters))
+                    on_confirm=Callback::new(move |()| perform_lock(setters))
                 />
             })}
         </div>

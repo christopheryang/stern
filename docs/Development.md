@@ -71,7 +71,9 @@ it is useful for layout work only.
    immediately; a bare "store" runs the guided conversation, notes first — secret fields use the
    peek-mask input and never appear in the transcript).
 5. First-run screen and Settings (gear) → AI model picker (Small / Large, each with pros and cons; Small is Recommended): Download → progress → installed.
-   Remove → the picker shows it gone and chat still answers via rules.
+   Remove → a "Remove <model>?" dialog (Cancel keeps it) → on Remove the picker shows it
+   gone, its folder is gone from `models/`, and chat still answers via rules. Removing the
+   last model also deletes `models/runtime/`.
 6. Model update drill: bump the catalog `version` string in
    `core/stern-core/src/ai/model_manager.rs` locally, restart — the
    picker offers an update; downloading swaps versions and prunes the

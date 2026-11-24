@@ -12,7 +12,7 @@ All state lives under the OS app-data directory for `com.stern.app`
 | Path | What it is |
 | --- | --- |
 | `stern.db` | The vault database (ciphertext only while locked) |
-| `models/` | Downloaded AI models and tokenizers, one `<model-id>/<version>/` per install, plus the ONNX Runtime under `runtime/` |
+| `models/` | Downloaded AI models and tokenizers, one `<model-id>/<version>/` per install, plus the ONNX Runtime under `runtime/` (deleted with the last model) |
 | `models/installed.json` | Model manifest: what is installed, and which model is active |
 
 ## Healthy looks like

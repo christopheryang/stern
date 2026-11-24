@@ -1182,12 +1182,17 @@ impl ModelManager {
 
     /// Remove one installed model (all its versions) and its manifest
     /// record. If it was the active model, no model is active afterwards.
+    /// When it was the last model, the downloaded ONNX Runtime goes too:
+    /// it is fetched with the first model, so it is fetched again with
+    /// the next, and nothing is left behind in the app data folder.
     pub fn remove_model(&self, model_id: &str) -> Result<(), VaultError> {
         // Validate before touching the filesystem: `model_id` comes from
         // the UI/IPC layer, and joining an unchecked id (e.g. one with
         // `..` or a path separator) would let `remove_dir_all` escape
         // the models directory.
         self.validate_stored_model_id(model_id)?;
+        // Same order as `ensure_runtime`: runtime lock, then manifest lock.
+        let _runtime_guard = self.lock_runtime();
         let _guard = self.lock_manifest();
         let model_dir = self.models_dir.join(model_id);
         if model_dir.exists() {
@@ -1198,6 +1203,10 @@ impl ModelManager {
         manifest.models.retain(|m| m.model_id != model_id);
         if manifest.active_model_id.as_deref() == Some(model_id) {
             manifest.active_model_id = None;
+        }
+        if manifest.models.is_empty() {
+            self.remove_runtime_files()?;
+            manifest.runtime = None;
         }
         if manifest.models.is_empty()
             && manifest.active_model_id.is_none()
@@ -1210,6 +1219,19 @@ impl ModelManager {
             }
         } else {
             self.write_manifest(&manifest)?;
+        }
+        Ok(())
+    }
+}
+
+impl ModelManager {
+    /// Delete every downloaded runtime version. The caller holds the
+    /// runtime and manifest locks.
+    fn remove_runtime_files(&self) -> Result<(), VaultError> {
+        let runtime_dir = self.models_dir.join("runtime");
+        if runtime_dir.exists() {
+            fs::remove_dir_all(&runtime_dir)
+                .map_err(|e| VaultError::Model(format!("remove runtime: {e}")))?;
         }
         Ok(())
     }
@@ -1411,6 +1433,52 @@ mod tests {
             &dir.path().join("absent.dylib"),
         )
         .is_err());
+    }
+
+    #[test]
+    fn removing_the_last_model_removes_the_runtime_but_not_while_another_remains() {
+        let dir = tempfile::tempdir().unwrap();
+        let manager = ModelManager::new(dir.path().join("models"));
+        let descriptor = current_runtime().unwrap();
+        let lib_dir = manager.runtime_version_dir(descriptor.version);
+        fs::create_dir_all(&lib_dir).unwrap();
+        fs::write(lib_dir.join(descriptor.lib_file_name), b"library").unwrap();
+        for id in ["model-a", "model-b"] {
+            let model_dir = manager.models_dir().join(id).join("1.0.0");
+            fs::create_dir_all(&model_dir).unwrap();
+            fs::write(model_dir.join("model.onnx"), b"weights").unwrap();
+        }
+        let model = |id: &str| InstalledModel {
+            model_id: id.to_string(),
+            version: "1.0.0".to_string(),
+            file_name: "model.onnx".to_string(),
+            sha256: "ab".repeat(32),
+            size_bytes: 7,
+            installed_at: "2026-11-24T00:00:00+00:00".to_string(),
+        };
+        manager
+            .write_manifest(&ModelManifest {
+                models: vec![model("model-a"), model("model-b")],
+                active_model_id: Some("model-a".to_string()),
+                runtime: Some(InstalledRuntime {
+                    version: descriptor.version.to_string(),
+                    lib_file_name: descriptor.lib_file_name.to_string(),
+                    sha256: "ab".repeat(32),
+                    size_bytes: 7,
+                    installed_at: "2026-11-24T00:00:00+00:00".to_string(),
+                }),
+            })
+            .unwrap();
+
+        manager.remove_model("model-a").unwrap();
+        assert!(!manager.models_dir().join("model-a").exists());
+        assert!(lib_dir.exists(), "another model still needs the runtime");
+
+        manager.remove_model("model-b").unwrap();
+        assert!(!manager.models_dir().join("model-b").exists());
+        assert!(!manager.models_dir().join("runtime").exists());
+        assert!(!manager.manifest_path().exists());
+        assert_eq!(manager.runtime_path(), None);
     }
 
     #[test]

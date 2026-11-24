@@ -14,6 +14,7 @@
 //                                 separated by "|" (see below)
 //   ?page=settings|help           open that page after load
 //   ?theme=light|dark             set the theme (default: light)
+//   ?remove=1                     tap Remove on a model (with page=settings)
 //   ?lock=1                       tap the lock button (opens the dialog)
 //   ?fill=<password>              type it into both setup fields
 //
@@ -53,10 +54,13 @@
     latest_version: "1", size_bytes: 483000000, is_active: false,
     runtime_installed: false, is_downloading: false, downloaded_bytes: 0, total_bytes: 0,
   };
+  const removed = new Set();
   const models = () => {
     if (modelMode === "ready") {
       return [
-        { ...small, state: "installed", installed_version: "1", is_active: true, runtime_installed: true },
+        removed.has("s")
+          ? { ...small, runtime_installed: true }
+          : { ...small, state: "installed", installed_version: "1", is_active: true, runtime_installed: true },
         { ...large, runtime_installed: true },
       ];
     }
@@ -113,6 +117,10 @@
           return { is_initialized: phase !== "setup", is_unlocked: phase === "unlocked", entry_count: 1 };
         }
         if (cmd === "model_status") return models();
+        if (cmd === "remove_model") {
+          removed.add(plain(args).modelId);
+          return models();
+        }
         if (cmd === "load_note") return notes.find((n) => n.id === plain(args).id) || Promise.reject("note not found");
         if (cmd === "save_note") {
           const { id, title, text } = plain(args);
@@ -179,6 +187,10 @@
     if (pageName) {
       const label = { settings: "Settings" }[pageName] || "Help";
       (await until(() => document.querySelector(`button[aria-label="${label}"]`)))?.click();
+    }
+    // ?remove=1 taps Remove on the first model (Settings must be open).
+    if (q.get("remove") === "1") {
+      (await until(() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Remove")))?.click();
     }
     // ?lock=1 taps the lock button, which opens the "Lock Stern?" dialog.
     if (q.get("lock") === "1") {
