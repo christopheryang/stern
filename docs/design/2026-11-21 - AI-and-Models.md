@@ -35,11 +35,15 @@ Picking the first model is the first-run setup step.
 
 ## The model
 
-- **Catalog (ADR-0007):** the user picks among four pinned models —
-  SmolLM-135M int8 (~136 MB), SmolLM2-135M-Instruct q4f16 (~118 MB),
-  SmolLM2-360M-Instruct q4f16 (~273 MB), Qwen2.5-0.5B-Instruct q4f16
-  (~483 MB). Each entry carries a plain-language description of its
-  size/quality trade-off, shown in the picker.
+- **Catalog (ADR-0007, ADR-0010):** the user picks a size — **Small**
+  (SmolLM2-135M-Instruct q4f16, ~118 MB), **Medium**
+  (SmolLM2-360M-Instruct q4f16, ~273 MB), or **Large**
+  (Qwen2.5-0.5B-Instruct q4f16, ~483 MB). The UI shows only the tier
+  name, its approximate size, and a plain-language description of the
+  speed/quality trade-off; the underlying model is never named. The
+  catalog's `display_name` *is* the tier. The base SmolLM-135M model
+  was retired; a device that still has it installed has it removed at
+  startup.
 - **Runtime:** ONNX Runtime via the `ort` crate, built with
   `load-dynamic` — the runtime is **not linked into the binary**
   (ADR-0008). `AiModel` dlopens the downloaded library once per

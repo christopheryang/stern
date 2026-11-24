@@ -68,6 +68,9 @@ pub fn run() {
             // selects or downloads a model.
             let model_manager = Arc::new(ModelManager::new(app_dir.join("models")));
             let chat_handler = Arc::new(ChatHandler::new(None));
+            // A model this build no longer offers is cleaned up before
+            // the active model is loaded, so it can never be loaded.
+            let _removed = model_manager.remove_retired_models();
             {
                 let model_manager = model_manager.clone();
                 let chat_handler = chat_handler.clone();

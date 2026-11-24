@@ -197,17 +197,9 @@ fn ModelRow(
     on_remove: Callback<String>,
 ) -> impl IntoView {
     let id = status.model_id.clone();
-    let meta_line = match status.installed_version.as_deref() {
-        Some(version) => format!("v{version} · ~{} MB", megabytes(status.size_bytes)),
-        None => format!("~{} MB", megabytes(status.size_bytes)),
-    };
-    let update_note = (status.state == "update_available").then(|| {
-        format!(
-            "Update available: v{} → v{}",
-            status.installed_version.clone().unwrap_or_default(),
-            status.latest_version
-        )
-    });
+    let meta_line = format!("~{} MB", megabytes(status.size_bytes));
+    let update_note = (status.state == "update_available")
+        .then(|| "An improved version is available.".to_string());
 
     let id_download = id.clone();
     let id_select = id.clone();
@@ -273,7 +265,7 @@ fn ModelRow(
                                     let id = id_select.clone();
                                     view! {
                                         <button class="btn btn-sm btn-primary" on:click=move |_| on_select.run(id.clone())>
-                                            "Use this model"
+                                            "Use this size"
                                         </button>
                                     }
                                 })}
@@ -298,6 +290,27 @@ fn ModelRow(
                     </div>
                 }
             })}
+        </div>
+    }
+}
+
+/// The picker's heading and explanation. Sizes are described in
+/// plain language; the underlying models are never named (ADR-0010).
+#[component]
+fn SectionHead() -> impl IntoView {
+    view! {
+        <div class="section-head">
+            <div class="section-title">
+                <Icon kind=IconKind::Chip />
+                "AI model size"
+            </div>
+            <p class="section-text">
+                "Stern needs an AI model to chat. Choose a size and download it — \
+                bigger understands more phrasings but is slower and takes more \
+                space. The first download also fetches the ONNX Runtime (~21 MB), \
+                and everything is stored only on this device. You can switch or \
+                remove it at any time."
+            </p>
         </div>
     }
 }
@@ -397,18 +410,7 @@ pub fn ModelSetup() -> impl IntoView {
                     .collect::<Vec<_>>();
                 view! {
                     <section class="section">
-                        <div class="section-head">
-                            <div class="section-title">
-                                <Icon kind=IconKind::Chip />
-                                "AI model"
-                            </div>
-                            <p class="section-text">
-                                "Stern needs an AI model to chat. Pick one and download it — the \
-                                first download also fetches the ONNX Runtime (~21 MB), and \
-                                everything is stored only on this device. You can switch or \
-                                remove models at any time."
-                            </p>
-                        </div>
+                        <SectionHead />
                         {rows}
                     </section>
                 }

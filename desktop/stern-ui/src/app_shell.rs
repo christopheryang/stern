@@ -133,15 +133,16 @@ fn ModelRequiredGate(set_in_config: WriteSignal<bool>) -> impl IntoView {
         <div class="stage">
             <div class="card">
                 <div class="badge-icon"><Icon kind=IconKind::Chip /></div>
-                <h2 class="title">"Choose an AI model to get started"</h2>
+                <h2 class="title">"Choose an AI model size to get started"</h2>
                 <p class="subtitle">
-                    "Stern ships without an AI model. Pick one in Settings \
-                    and it downloads to this device only — then you can chat."
+                    "Stern ships without an AI model. Pick a size in Settings \
+                    (Small, Medium, or Large) and it downloads to this device \
+                    only — then you can chat."
                 </p>
                 <div class="btn-row">
                     <button class="btn btn-primary" on:click=move |_| set_in_config.set(true)>
                         <Icon kind=IconKind::Download class="icon-sm" />
-                        "Choose a model"
+                        "Choose a size"
                     </button>
                 </div>
             </div>

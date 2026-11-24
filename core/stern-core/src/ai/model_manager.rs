@@ -63,10 +63,13 @@ pub const TOKENIZER_FILE_NAME: &str = "tokenizer.json";
 pub struct ModelDescriptor {
     /// Stable model identifier (directory name, manifest key).
     pub id: &'static str,
-    /// Human-readable name shown in the UI.
+    /// The size tier shown in the UI ("Small", "Medium", "Large").
+    /// Deliberately not the underlying model's name: users choose a
+    /// size, not a model (ADR-0010).
     pub display_name: &'static str,
-    /// Plain-language guidance shown next to the model in the picker:
-    /// what it is good at and what it costs (size, speed).
+    /// Plain-language guidance shown next to the tier in the picker:
+    /// what it is good at and what it costs (size, speed). Never names
+    /// the underlying model.
     pub description: &'static str,
     /// Catalog version of this model build (dotted numeric, e.g. "1.0.0").
     pub version: &'static str,
@@ -92,36 +95,25 @@ pub struct ModelDescriptor {
     pub size_bytes: u64,
 }
 
-/// The model selected automatically when the user has not chosen one.
-pub const DEFAULT_MODEL_ID: &str = "smollm-135m";
+/// The model selected automatically when the user has not chosen one:
+/// the Small tier.
+pub const DEFAULT_MODEL_ID: &str = "smollm2-135m-instruct";
 
-/// Every model this build of Stern offers.
+/// Every model this build of Stern offers, smallest first. The UI
+/// shows each as a size tier (`display_name`), never by model name.
 ///
 /// One entry per model id: bump `version` (and the URL/hash) to offer an
 /// upgrade to existing installs. All SHA-256 values were taken from the
-/// files' Hugging Face pages.
+/// files' Hugging Face pages. A model dropped from this list is removed
+/// from devices that still have it at startup
+/// ([`ModelManager::remove_retired_models`]).
 pub static MODEL_CATALOG: &[ModelDescriptor] = &[
+    // Small: SmolLM2-135M-Instruct.
     ModelDescriptor {
         id: DEFAULT_MODEL_ID,
-        display_name: "SmolLM-135M",
-        description: "The original Stern model. Smallest family, fast responses; \
-                      best for simple, direct commands.",
-        version: "1.0.0",
-        file_name: "model_int8.onnx",
-        download_url:
-            "https://huggingface.co/HuggingFaceTB/SmolLM-135M/resolve/main/onnx/model_int8.onnx",
-        sha256: "9fc89b8ea13d2e8ee3edcc19e728af1eb556ae4945824998a61d9cbbb8029df2",
-        size_bytes: 135_804_132, // measured from the published file
-        tokenizer_url: "https://huggingface.co/HuggingFaceTB/SmolLM-135M/resolve/main/tokenizer.json",
-        tokenizer_sha256: "9ca9acddb6525a194ec8ac7a87f24fbba7232a9a15ffa1af0c1224fcd888e47c",
-        tokenizer_size_bytes: 2_104_556,
-        prompt_style: PromptStyle::FewShot,
-    },
-    ModelDescriptor {
-        id: "smollm2-135m-instruct",
-        display_name: "SmolLM2-135M-Instruct",
-        description: "Newer 135M generation with better instruction following, \
-                      in a slightly smaller download.",
+        display_name: "Small",
+        description: "Fastest and lightest, with the smallest download. Best for \
+                      simple, direct commands.",
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/main/onnx/model_q4f16.onnx",
@@ -132,11 +124,12 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         tokenizer_size_bytes: 2_104_556,
         prompt_style: PromptStyle::ChatMl,
     },
+    // Medium: SmolLM2-360M-Instruct.
     ModelDescriptor {
         id: "smollm2-360m-instruct",
-        display_name: "SmolLM2-360M-Instruct",
-        description: "Recommended for most users. Noticeably better at varied \
-                      phrasing, still fast on CPU.",
+        display_name: "Medium",
+        description: "Recommended for most people. Handles varied phrasing \
+                      noticeably better, and is still fast.",
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct/resolve/main/onnx/model_q4f16.onnx",
@@ -147,11 +140,13 @@ pub static MODEL_CATALOG: &[ModelDescriptor] = &[
         tokenizer_size_bytes: 2_104_556,
         prompt_style: PromptStyle::ChatMl,
     },
+    // Large: Qwen2.5-0.5B-Instruct.
     ModelDescriptor {
         id: "qwen2.5-0.5b-instruct",
-        display_name: "Qwen2.5-0.5B-Instruct",
-        description: "The most capable model in this list, with the longest \
-                      context. Biggest download and the slowest on CPU.",
+        display_name: "Large",
+        description: "The most capable, with the widest understanding of how \
+                      you phrase things. The biggest download and the slowest \
+                      to respond.",
         version: "1.0.0",
         file_name: "model_q4f16.onnx",
         download_url: "https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct/resolve/main/onnx/model_q4f16.onnx",
@@ -434,6 +429,21 @@ impl ModelManager {
             .models
             .into_iter()
             .find(|m| m.model_id == model_id)
+    }
+
+    /// Remove every installed model that this build's catalog no longer
+    /// offers, returning the ids removed. A retired model would
+    /// otherwise sit on disk (and stay active) with no way to manage it
+    /// from the picker. Removal failures are skipped, not fatal: the
+    /// model simply stays until the next launch.
+    pub fn remove_retired_models(&self) -> Vec<String> {
+        self.manifest()
+            .models
+            .into_iter()
+            .map(|m| m.model_id)
+            .filter(|id| catalog_model(id).is_none())
+            .filter(|id| self.remove_model(id).is_ok())
+            .collect()
     }
 
     /// The active model's install record, if one is selected and present.

@@ -54,12 +54,12 @@ it is useful for layout work only.
    "save my GitHub password" (a named store files immediately; a bare
    "store" runs the guided conversation — secret fields use the
    peek-mask input and never appear in the transcript).
-5. Settings (gear) → model picker: Download → progress → installed.
+5. Settings (gear) → model size picker (Small / Medium / Large): Download → progress → installed.
    Remove → the picker shows it gone and chat still answers via rules.
 6. Model update drill: bump the catalog `version` string in
    `core/stern-core/src/ai/model_manager.rs` locally, restart — the
    picker offers an update; downloading swaps versions and prunes the
-   old directory under `models/smollm-135m/`.
+   old directory under `models/<model-id>/`.
 
 ## Testing
 

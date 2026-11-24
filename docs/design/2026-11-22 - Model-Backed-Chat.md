@@ -108,7 +108,10 @@ what makes the "what's my password for ...?" phrasing parse at all.
   greetings against the rule classifier; Qwen2.5-0.5B-Instruct 7
   with 3 deferrals and no misfires, at ~3 s per parse against ~1 s
   for the 135M models. Every message ends up handled correctly
-  across the model + guard + rules combination.
+  across the model + guard + rules combination. (These figures were
+  measured on the catalog as it stood then; SmolLM-135M has since been
+  retired and the tiers are Small = SmolLM2-135M-Instruct, Medium =
+  SmolLM2-360M-Instruct, Large = Qwen2.5-0.5B-Instruct — ADR-0010.)
 
 ## UI (slice 4, landed)
 

@@ -6,7 +6,8 @@
 use sha2::{Digest, Sha256};
 use std::io::Cursor;
 use stern_core::ai::model_manager::{
-    version_is_newer, ModelDescriptor, ModelManager, ModelState, PromptStyle,
+    catalog_model, version_is_newer, ModelDescriptor, ModelManager, ModelState, PromptStyle,
+    DEFAULT_MODEL_ID, MODEL_CATALOG,
 };
 
 fn fixture_bytes() -> Vec<u8> {
@@ -327,4 +328,45 @@ fn remove_model_rejects_path_traversal_and_unknown_ids() {
             "remove_model({bad:?}) must fail"
         );
     }
+}
+
+#[test]
+fn catalog_offers_three_size_tiers_without_model_names() {
+    let names: Vec<&str> = MODEL_CATALOG.iter().map(|m| m.display_name).collect();
+    assert_eq!(names, ["Small", "Medium", "Large"]);
+    for model in MODEL_CATALOG {
+        let shown = format!("{} {}", model.display_name, model.description).to_lowercase();
+        for forbidden in ["smollm", "qwen", "135m", "360m", "0.5b"] {
+            assert!(
+                !shown.contains(forbidden),
+                "tier {} leaks the model name via {forbidden:?}",
+                model.display_name
+            );
+        }
+    }
+    // Sizes grow with the tier, and the default is the smallest.
+    let sizes: Vec<u64> = MODEL_CATALOG.iter().map(|m| m.size_bytes).collect();
+    assert!(sizes.windows(2).all(|pair| pair[0] < pair[1]));
+    assert_eq!(MODEL_CATALOG[0].id, DEFAULT_MODEL_ID);
+    assert!(catalog_model("smollm-135m").is_none());
+}
+
+#[test]
+fn retired_models_are_removed_and_current_ones_kept() {
+    let (_dir, manager) = manager();
+    let bytes = fixture_bytes();
+
+    // "test-model" is not in the shipped catalog, so it counts as retired.
+    let retired = descriptor_for(&bytes, "1.0.0");
+    install(&manager, &retired, &bytes);
+    assert!(manager.active_model_path().is_some());
+
+    let removed = manager.remove_retired_models();
+    assert_eq!(removed, ["test-model"]);
+    assert!(manager.installed_models().is_empty());
+    assert!(manager.active_model().is_none());
+    assert!(!manager.models_dir().join("test-model").exists());
+
+    // Nothing retired: a second pass is a no-op.
+    assert!(manager.remove_retired_models().is_empty());
 }

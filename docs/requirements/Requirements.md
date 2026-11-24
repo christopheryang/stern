@@ -46,10 +46,11 @@ and an ADR disagree, the ADR wins.
 - **Never bundled.** Models are downloaded after install, only when
   the user explicitly starts a download
   ([ADR-0006](../adr/0006-Post-Install-Model-Download.md)).
-- **User's choice.** The user picks from the catalog, may install
-  several models, selects which one is active, and can update or
-  remove any of them
-  ([ADR-0007](../adr/0007-User-Selectable-Models.md)).
+- **User's choice, by size.** The user picks a size — Small, Medium,
+  or Large — never a model name; may install several sizes, selects
+  which one is active, and can update or remove any of them
+  ([ADR-0007](../adr/0007-User-Selectable-Models.md),
+  [ADR-0010](../adr/0010-Model-Size-Tiers.md)).
 - **Pinned integrity.** Every download is verified against a SHA-256
   pinned in the compiled-in catalog before use. No remote config and
   no unpinned downloads.
