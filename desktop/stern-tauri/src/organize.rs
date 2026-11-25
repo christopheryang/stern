@@ -32,7 +32,7 @@ pub struct Reply {
 }
 
 impl Reply {
-    fn say(message: impl Into<String>) -> Self {
+    pub fn say(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
             options: Vec::new(),
@@ -137,6 +137,7 @@ const fn kind_label(kind: EntryKind) -> &'static str {
 
 fn tree_items(state: &AppState, entries: &[EncryptedEntry]) -> Result<Vec<TreeItem>, VaultError> {
     let filed = state.repository.entry_folders()?;
+    let binary = state.repository.binary_file_ids()?;
     Ok(entries
         .iter()
         .map(|entry| TreeItem {
@@ -147,13 +148,14 @@ fn tree_items(state: &AppState, entries: &[EncryptedEntry]) -> Result<Vec<TreeIt
                 .iter()
                 .find(|(id, _)| *id == entry.id)
                 .map(|(_, folder)| folder.clone()),
+            older_file: binary.contains(&entry.id),
         })
         .collect())
 }
 
 /// The entries whose name is `query` (ignoring case); when none is, those
 /// that contain it. A blank query matches nothing.
-fn matching_entries<'a>(entries: &'a [EncryptedEntry], query: &str) -> Vec<&'a EncryptedEntry> {
+pub fn matching_entries<'a>(entries: &'a [EncryptedEntry], query: &str) -> Vec<&'a EncryptedEntry> {
     let needle = query.trim().to_lowercase();
     if needle.is_empty() {
         return Vec::new();
@@ -402,7 +404,12 @@ pub fn list_entries(state: &AppState, category: Option<&str>) -> Result<Reply, V
                     .map(|id| path_label(&nodes, id))
                     .filter(|path| !path.is_empty())
                     .map_or_else(String::new, |path| format!(" — in {path}"));
-                format!("• {} ({}){place}", item.name, item.kind)
+                let kind = if item.older_file {
+                    format!("{}, older file", item.kind)
+                } else {
+                    item.kind.to_string()
+                };
+                format!("• {} ({kind}){place}", item.name)
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -426,19 +433,12 @@ pub fn confirm_delete(state: &AppState, name: &str) -> Result<Reply, VaultError>
         .chat_handler
         .set_pending_delete(&entry.id, &entry.name);
     Ok(Reply {
-        message: format!("Delete \"{}\"? This can't be undone.", entry.name),
+        message: format!(
+            "Delete \"{}\"? You can bring it back from the trash for 30 days.",
+            entry.name
+        ),
         options: vec![DELETE_YES.to_string(), DELETE_NO.to_string()],
     })
-}
-
-/// Delete an entry the user confirmed.
-pub fn delete_entry(state: &AppState, entry_id: &str, name: &str) -> Result<Reply, VaultError> {
-    unlocked_kek(state)?;
-    Ok(Reply::say(if state.repository.delete_entry(entry_id)? {
-        format!("Deleted \"{name}\".")
-    } else {
-        format!("\"{name}\" was already gone.")
-    }))
 }
 
 /// Delete a folder. What was inside it is kept and moves up a level.

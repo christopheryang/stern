@@ -163,6 +163,12 @@ fn unlock_vault_inner(state: &AppState, password: &str) -> Result<VaultStatus, V
         session.unlock(kek_bytes, verify);
     }
 
+    // Clear out what has sat in the trash too long. A failure here is
+    // logged and must never keep the user out of their vault.
+    if let Err(e) = crate::trash::purge_expired(state) {
+        tracing::warn!("could not purge the trash: {e}");
+    }
+
     let entry_count = state.repository.count_entries()?;
     Ok(VaultStatus {
         is_initialized: true,
@@ -303,6 +309,10 @@ fn execute_chat_response(
             ref action @ (stern_core::ai::chat::Action::ListEntries { .. }
             | stern_core::ai::chat::Action::ConfirmDelete { .. }
             | stern_core::ai::chat::Action::DeleteEntry { .. }
+            | stern_core::ai::chat::Action::Restore { .. }
+            | stern_core::ai::chat::Action::ShowTrash
+            | stern_core::ai::chat::Action::ConfirmEmptyTrash
+            | stern_core::ai::chat::Action::EmptyTrash
             | stern_core::ai::chat::Action::CreateFolder { .. }
             | stern_core::ai::chat::Action::MoveEntry { .. }
             | stern_core::ai::chat::Action::ShowFolders { .. }
@@ -336,7 +346,11 @@ fn handle_organize(state: &AppState, action: &stern_core::ai::chat::Action) -> C
     let outcome = match action {
         Action::ListEntries { category } => organize::list_entries(state, category.as_deref()),
         Action::ConfirmDelete { name } => organize::confirm_delete(state, name),
-        Action::DeleteEntry { entry_id, name } => organize::delete_entry(state, entry_id, name),
+        Action::DeleteEntry { entry_id, name } => crate::trash::trash_entry(state, entry_id, name),
+        Action::Restore { name } => crate::trash::restore(state, name),
+        Action::ShowTrash => crate::trash::show_trash(state),
+        Action::ConfirmEmptyTrash => crate::trash::confirm_empty(state),
+        Action::EmptyTrash => crate::trash::empty(state),
         Action::CreateFolder { name, parent } => {
             organize::create_folder(state, name, parent.as_deref())
         }
@@ -472,6 +486,10 @@ fn action_to_string(action: &stern_core::ai::chat::Action) -> String {
         stern_core::ai::chat::Action::ListEntries { .. } => "list".to_string(),
         stern_core::ai::chat::Action::ConfirmDelete { .. } => "delete".to_string(),
         stern_core::ai::chat::Action::DeleteEntry { .. } => "delete_entry".to_string(),
+        stern_core::ai::chat::Action::Restore { .. } => "restore".to_string(),
+        stern_core::ai::chat::Action::ShowTrash => "show_trash".to_string(),
+        stern_core::ai::chat::Action::ConfirmEmptyTrash => "confirm_empty_trash".to_string(),
+        stern_core::ai::chat::Action::EmptyTrash => "empty_trash".to_string(),
         stern_core::ai::chat::Action::CreateFolder { .. } => "create_folder".to_string(),
         stern_core::ai::chat::Action::MoveEntry { .. } => "move_entry".to_string(),
         stern_core::ai::chat::Action::ShowFolders { .. } => "show_folders".to_string(),
@@ -535,6 +553,8 @@ fn handle_store_entry(
         kind: entry_kind,
         tags: vec![],
         fields: entry_fields,
+        summary: String::new(),
+        keywords: vec![],
     };
 
     let payload_json =

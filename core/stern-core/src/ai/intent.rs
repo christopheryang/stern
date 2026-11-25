@@ -60,6 +60,15 @@ pub enum Intent {
     DeleteFolder {
         name: String,
     },
+    /// Bring a deleted entry back from the trash. An empty `name` means the
+    /// one deleted most recently ("undo").
+    Restore {
+        name: String,
+    },
+    /// Show what is in the trash.
+    ShowTrash,
+    /// Delete everything in the trash for good.
+    EmptyTrash,
     ExportVault,
     ImportVault,
     CreateVault,
@@ -153,9 +162,12 @@ pub fn classify_intent(text: &str) -> Intent {
         .map(|word| word.trim_end_matches(['?', '!', '.', ',']))
         .collect();
 
-    // Folder requests are exact words and cannot be mistaken for small
-    // talk or a help question, so they are read first.
+    // Folder and trash requests are exact words and cannot be mistaken for
+    // small talk or a help question, so they are read first.
     if let Some(intent) = classify_folder_intent(text) {
+        return intent;
+    }
+    if let Some(intent) = classify_trash_intent(text) {
         return intent;
     }
 
@@ -1365,4 +1377,53 @@ fn parse_show_folders(words: &[&str], lw: &[String]) -> Option<Intent> {
     Some(Intent::ShowFolders {
         folder: Some(target),
     })
+}
+
+/// Trash requests: undo a delete, restore by name, show or empty the trash.
+/// `None` when the text is not about the trash.
+#[must_use]
+pub fn classify_trash_intent(text: &str) -> Option<Intent> {
+    let all: Vec<&str> = text.split_whitespace().collect();
+    let words = strip_lead_words(&all);
+    let lw = lowered(words);
+    let first = lw.first()?.as_str();
+    let mentions_trash = lw
+        .iter()
+        .any(|w| matches!(w.as_str(), "trash" | "bin" | "recycle"));
+
+    if first == "undo" {
+        return Some(Intent::Restore {
+            name: String::new(),
+        });
+    }
+    if mentions_trash {
+        if matches!(first, "empty" | "clear" | "purge") {
+            return Some(Intent::EmptyTrash);
+        }
+        if matches!(
+            first,
+            "show" | "list" | "open" | "view" | "see" | "what" | "what's"
+        ) {
+            return Some(Intent::ShowTrash);
+        }
+    }
+    let brings_back = first == "bring" && lw.get(1).is_some_and(|w| w == "back");
+    if matches!(first, "restore" | "recover" | "undelete") || brings_back {
+        // "restore from backup" and "restore my vault" are imports.
+        let about_backup = lw
+            .iter()
+            .any(|w| matches!(w.as_str(), "backup" | "backups" | "vault" | "export"));
+        if about_backup {
+            return None;
+        }
+        let skip = if brings_back { 2 } else { 1 };
+        let name = entry_reference(words.get(skip..).unwrap_or_default());
+        let name = name
+            .trim_end_matches("from the trash")
+            .trim_end_matches("from trash")
+            .trim()
+            .to_string();
+        return Some(Intent::Restore { name });
+    }
+    None
 }

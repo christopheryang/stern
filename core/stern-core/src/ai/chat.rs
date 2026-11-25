@@ -2,7 +2,9 @@ use crate::ai::conversation::{
     has_own_screen, is_placeholder_name, is_sensitive_field, kind_word, Conversation,
     Step as ConversationStep,
 };
-use crate::ai::intent::{classify_folder_intent, classify_intent, Chatter, Intent};
+use crate::ai::intent::{
+    classify_folder_intent, classify_intent, classify_trash_intent, Chatter, Intent,
+};
 use crate::ai::model::AiModel;
 use std::sync::{Arc, Mutex, RwLock};
 use zeroize::Zeroizing;
@@ -21,6 +23,9 @@ struct PendingDelete {
     entry_id: String,
     name: String,
 }
+
+/// The entry id a pending confirmation uses to mean "empty the trash".
+pub const EMPTY_TRASH_MARKER: &str = "\u{0}empty-trash";
 
 /// The two answers offered with a delete confirmation.
 pub const DELETE_YES: &str = "Yes, delete it";
@@ -469,13 +474,15 @@ impl ChatHandler {
             guard.take()
         }?;
         if parse_yes_no(user_input)? {
-            Some(Self::vault_action(
-                String::new(),
+            let action = if delete.entry_id == EMPTY_TRASH_MARKER {
+                Action::EmptyTrash
+            } else {
                 Action::DeleteEntry {
                     entry_id: delete.entry_id,
                     name: delete.name,
-                },
-            ))
+                }
+            };
+            Some(Self::vault_action(String::new(), action))
         } else {
             Some(plain_response(&format!(
                 "Okay, \"{}\" is kept.",
@@ -552,6 +559,9 @@ impl ChatHandler {
                     | Intent::ShowFolders { .. }
                     | Intent::Rename { .. }
                     | Intent::DeleteFolder { .. }
+                    | Intent::Restore { .. }
+                    | Intent::ShowTrash
+                    | Intent::EmptyTrash
                     | Intent::ExportVault
                     | Intent::ImportVault
             );
@@ -607,8 +617,8 @@ impl ChatHandler {
     /// The reply that shows the file picker for a document.
     fn file_picker_response() -> ChatResponse {
         ChatResponse {
-            message: "Choose a file from this computer to keep in your vault. \
-                The limit is 10 MB."
+            message: "Choose a plain text file from this computer to keep in your vault, \
+                like .txt, .md, .html or .csv. The limit is 1 MB."
                 .to_string(),
             action: Some(Action::OpenFilePicker),
             user_message_display: None,
@@ -667,6 +677,9 @@ impl ChatHandler {
         // rules read reliably and a small model does not know at all.
         if let Some(folder_intent) = classify_folder_intent(user_input) {
             return folder_intent;
+        }
+        if let Some(trash_intent) = classify_trash_intent(user_input) {
+            return trash_intent;
         }
         match self.model_intent(user_input) {
             // A greeting, help or "unknown" answer is cheap to
@@ -845,6 +858,9 @@ impl ChatHandler {
             Intent::DeleteFolder { name } => {
                 Self::vault_action(String::new(), Action::DeleteFolder { name })
             }
+            Intent::Restore { name } => Self::vault_action(String::new(), Action::Restore { name }),
+            Intent::ShowTrash => Self::vault_action(String::new(), Action::ShowTrash),
+            Intent::EmptyTrash => Self::vault_action(String::new(), Action::ConfirmEmptyTrash),
             Intent::ExportVault => ChatResponse {
                 message: "Opening secure export dialog...".to_string(),
                 action: Some(Action::ExportVault),
@@ -966,7 +982,8 @@ stays on this computer. Here is what you can ask me:\n\n\
 \u{1f50d} Find it again -- \"find my shopping list\"\n\
 \u{1f4cb} See what you have -- \"show my secrets\" (names only, never the secrets themselves)\n\
 \u{1f4c1} Organise -- \"create folder Taxes\", \"move Lease to Home\", \"show my folders\"\n\
-\u{270f}\u{fe0f} Tidy up -- \"rename Netflix to Netflix Family\", \"delete my old Netflix entry\"\n\n\
+\u{270f}\u{fe0f} Tidy up -- \"rename Netflix to Netflix Family\", \"delete my old Netflix entry\"\n\
+\u{21a9}\u{fe0f} Changed your mind -- \"undo\" brings back what you deleted in the last 30 days\n\n\
 Tip: for notes you want to keep forever, a plain text file (.txt) is best. Any \
 computer can open it, with no special app.";
 
@@ -1071,6 +1088,17 @@ pub enum Action {
     DeleteFolder {
         name: String,
     },
+    /// Bring an entry back from the trash (the most recent when `name` is
+    /// empty).
+    Restore {
+        name: String,
+    },
+    /// Show what is in the trash.
+    ShowTrash,
+    /// Ask before emptying the trash.
+    ConfirmEmptyTrash,
+    /// Delete everything in the trash for good, after the user said yes.
+    EmptyTrash,
     /// Delete this entry, after the user said yes.
     DeleteEntry {
         entry_id: String,
@@ -1165,6 +1193,10 @@ impl std::fmt::Debug for Action {
                 .field("entry_id", entry_id)
                 .field("name", name)
                 .finish(),
+            Self::Restore { name } => f.debug_struct("Restore").field("name", name).finish(),
+            Self::ShowTrash => f.write_str("ShowTrash"),
+            Self::ConfirmEmptyTrash => f.write_str("ConfirmEmptyTrash"),
+            Self::EmptyTrash => f.write_str("EmptyTrash"),
             Self::OpenNoteEditor => f.write_str("OpenNoteEditor"),
             Self::OpenFilePicker => f.write_str("OpenFilePicker"),
             Self::ExportVault => f.write_str("ExportVault"),

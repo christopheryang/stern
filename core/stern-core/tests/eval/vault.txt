@@ -1,0 +1,62 @@
+# The synthetic vault the search evaluation runs against. Nothing here is real.
+# id | name | kind | days_ago | folder | text | hidden value (never to be shown or indexed)
+e01 | Chase Sapphire | note | 60 | Money/Cards | Visa credit card from Chase. Annual fee due in March. Rewards points for travel and dining. | 4417-8821-0093-5512
+e02 | Amex Gold | note | 7 | Money/Cards | American Express credit card, used for groceries and restaurants. Statement closes on the 20th. | 3782-822463-10005
+e03 | Checking account | note | 120 | Money/Banking | Wells Fargo checking account. Routing number is on the paper statement. Online banking login uses email. |
+e04 | Savings goals | note | 200 | Money | Emergency fund target is six months of expenses. Vacation fund for Japan next spring. |
+e05 | 2024 tax return | document | 240 | Money/Taxes | Federal tax return summary for 2024. Refund of 1,240 dollars arrived in April. Accountant is Priya at Larkspur Tax. |
+e06 | Tax receipts | note | 90 | Money/Taxes | Receipts to keep for deductions: home office desk, laptop, donations to the food bank. |
+e07 | Car insurance | note | 150 | Home/Insurance | Geico auto policy renews in August. Policy covers the Honda Civic. Claims phone number is on the card in the glovebox. |
+e08 | Home insurance | note | 150 | Home/Insurance | Renter's insurance with Lemonade. Covers laptop and bike. Renews every January. |
+e09 | Lease | document | 300 | Home | Apartment lease agreement for Maple Street. Rent is 2,100 dollars due on the first. Landlord is Mr. Okafor. Lease ends in June. |
+e10 | Router info | note | 45 | Home/Tech | Home wifi network name is BlueHeron. Router admin page is at 192.168.1.1. Router is in the hallway closet. | mangosteen-99
+e11 | Netflix | login | 400 | Accounts | Streaming service. Family plan shared with Sam. | hunter2-nflx
+e12 | GitHub | login | 30 | Accounts | Code hosting. Two factor uses the authenticator app. | ghp_exampletoken123
+e13 | Gmail | login | 500 | Accounts | Personal email account. Recovery phone is the old Pixel. |
+e14 | Spotify | login | 365 | Accounts | Music streaming. Duo plan with Sam. |
+e15 | Misc 3 | note | 25 | | Passport renewal appointment on the 14th at the post office. Bring two photos and the old passport. Fee is 130 dollars. |
+e16 | Travel plans Japan | note | 20 | Travel | Flights to Tokyo in April. Hotel in Shinjuku booked for six nights. Need rail pass and travel insurance. |
+e17 | Packing list | note | 18 | Travel | Adapter, sunscreen, rain jacket, chargers, passport copy, medication. |
+e18 | Global Entry | note | 380 | Travel | Trusted traveler program. Interview was at the airport. Renewal is in five years. | 987654321-gtn
+e19 | Meeting notes - Monday | note | 6 | Work/Meetings | Weekly sync with the platform team. Decided to move the launch to Thursday. Action: Dana to update the roadmap. |
+e20 | Meeting notes - Budget | note | 55 | Work/Meetings | Budget review with finance. Cloud spend is over by ten percent. Action: Lee to audit unused instances. |
+e21 | Meeting notes - Hiring | note | 33 | Work/Meetings | Interview debrief for the backend engineer role. Strong on databases, weaker on system design. Panel recommends an offer. |
+e22 | Performance review | note | 100 | Work | Self review draft. Highlights: shipped the billing migration, mentored two interns. Goal: lead a larger project. |
+e23 | Salary history | note | 330 | Work | Offer letter details and raises by year. Bonus target is ten percent. |
+e24 | Onboarding checklist | note | 280 | Work | VPN setup, badge photo, benefits enrollment before day thirty, laptop encryption. |
+e25 | Dentist | note | 75 | Health | Dr. Alvarez cleaning every six months. Last visit in September. Insurance is Delta Dental. |
+e26 | Prescription | note | 40 | Health | Allergy medication refill every ninety days. Pharmacy on Elm Street. |
+e27 | Vaccination record | document | 500 | Health | Immunization history including flu shot and tetanus booster. Keep for school forms. |
+e28 | Gym membership | note | 210 | Health | Monthly membership at Iron Works. Cancel requires thirty days written notice. | 55-2918-gym
+e29 | Pasta recipe | note | 15 | Recipes | Carbonara with eggs, pecorino, and guanciale. No cream. |
+e30 | Sourdough | note | 90 | Recipes | Starter feeding schedule and a loaf recipe. Bake at 450 degrees with a lid. |
+e31 | Thanksgiving menu | note | 2 | Recipes | Turkey, stuffing, cranberry sauce, pumpkin pie. Guests arrive at three. |
+e32 | Book list | note | 120 | Personal | To read: Dune, The Overstory, Braiding Sweetgrass. |
+e33 | Gift ideas | note | 10 | Personal | Mom: gardening gloves. Dad: a good flashlight. Sam: concert tickets. |
+e34 | Birthday dates | note | 400 | Personal | Mom in March, Dad in July, Sam in October. |
+e35 | Car maintenance | note | 65 | Home/Car | Oil change every five thousand miles. Tires rotated in October. Next inspection in May. |
+e36 | License plate | note | 600 | Home/Car | Registration renewal date. Registration is due each December. | 7ABC123-plate
+e37 | Mortgage preapproval | document | 180 | Money | Preapproval letter from the credit union. Rate quoted at six and a quarter percent. Valid for ninety days. |
+e38 | Student loan | note | 250 | Money | Servicer is Nelnet. Autopay on the fifth. Balance is down to eleven thousand dollars. | 4400-77-loan
+e39 | Crypto wallet | note | 140 | Money | Hardware wallet kept in the safe. Backup phrase stored on paper, never online. | orbit-tunnel-velvet-pioneer
+e40 | Storage unit | note | 220 | Home | Unit 214 at Public Storage. Gate code changes yearly. Boxes labeled by room. | 8841-gate
+e41 | Neighbor contacts | note | 130 | Home | Block party organizer Joan. Plumber is Ray's Plumbing. Locksmith is open late. |
+e42 | Garden plan | note | 50 | Home | Tomatoes and basil in raised beds. Plant after the last frost. Compost bin by the fence. |
+e43 | WiFi guest | note | 45 | Home/Tech | Guest network is BlueHeron-Guest. Share the QR code with visitors. | papaya-2024
+e44 | Printer setup | note | 300 | Home/Tech | HP printer on the home network. Driver installed on the laptop. Toner is model 910. |
+e45 | Backup plan | note | 70 | Home/Tech | Photos backed up to an external drive monthly. Keep one copy off site at Mom's house. |
+e46 | Project Atlas | note | 12 | Work/Projects | Design doc for the Atlas service. Uses Postgres and a message queue. Launch review next week. |
+e47 | On-call runbook | document | 95 | Work/Projects | Pager rotation, escalation contacts, and steps for restarting the ingest service. |
+e48 | Interview prep | note | 28 | Work | Practice questions on system design and behavioral stories. Study the STAR format. |
+e49 | Conference talk | note | 40 | Work | Proposal for a talk about incident response. Abstract due in January. Slides outline drafted. |
+e50 | Therapy notes | note | 8 | Health | Session takeaways about stress and sleep. Next appointment on Tuesday. |
+e51 | Wedding budget | note | 160 | Personal | Venue deposit paid. Photographer quote in hand. Flowers still to book. |
+e52 | Moving checklist | note | 310 | Home | Change address with the bank, forward mail, cancel old internet, book movers. |
+e53 | Internet provider | note | 310 | Home/Tech | Fiber plan with Fibrelink at 500 megabits. Account number is on the bill. Support line open until nine. | 77-00-91-isp
+e54 | Phone plan | note | 200 | Home/Tech | Family plan with four lines. Upgrade eligible in March. Autopay discount applied. |
+e55 | Pet vet | note | 85 | Home | Dog Biscuit sees Dr. Nguyen. Rabies booster due in June. Heartworm pills monthly. |
+e56 | Library card | note | 450 | Personal | Card for the digital library app. Holds expire after seven days. | 2200-9981-lib
+e57 | Reading notes - Dune | note | 14 | Personal | Themes of ecology and power. Favorite character is Stilgar. |
+e58 | Side project ideas | note | 5 | Work/Projects | A tool to track receipts, a recipe scaler, and a habit tracker. |
+e59 | Charity donations | note | 100 | Money/Taxes | Donations to the food bank and the library. Receipts emailed. Total 600 dollars. |
+e60 | Anniversary trip | note | 3 | Travel | Weekend in Portland. Reservation at the Alder restaurant on Saturday. Hotel near the river. |

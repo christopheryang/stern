@@ -1061,7 +1061,8 @@ fn saving_a_document_shows_the_file_picker_and_saves_nothing() {
             reply.action,
             reply.message
         );
-        assert!(reply.message.contains("10 MB"), "{}", reply.message);
+        assert!(reply.message.contains("1 MB"), "{}", reply.message);
+        assert!(reply.message.contains("plain text"), "{}", reply.message);
         assert!(!reply.message.contains("Saved"), "{}", reply.message);
     }
 }
@@ -1547,4 +1548,77 @@ fn find_with_a_bare_name_is_a_lookup() {
             other => panic!("{text:?}: expected a lookup, got {other:?}"),
         }
     }
+}
+
+// ---- trash wording ----
+
+#[test]
+fn undo_and_restore_phrasings() {
+    assert_eq!(
+        classify_intent("undo"),
+        Intent::Restore {
+            name: String::new()
+        }
+    );
+    assert_eq!(
+        classify_intent("please undo that"),
+        Intent::Restore {
+            name: String::new()
+        }
+    );
+    assert_eq!(
+        classify_intent("restore Netflix"),
+        Intent::Restore {
+            name: "Netflix".into()
+        }
+    );
+    assert_eq!(
+        classify_intent("bring back my lease from the trash"),
+        Intent::Restore {
+            name: "lease".into()
+        }
+    );
+    assert_eq!(
+        classify_intent("recover the shopping list"),
+        Intent::Restore {
+            name: "shopping list".into()
+        }
+    );
+}
+
+#[test]
+fn restoring_a_backup_is_still_an_import() {
+    assert_eq!(classify_intent("restore from backup"), Intent::ImportVault);
+    assert_eq!(classify_intent("restore my vault"), Intent::ImportVault);
+    assert_eq!(classify_intent("import a backup"), Intent::ImportVault);
+}
+
+#[test]
+fn show_and_empty_the_trash() {
+    for text in ["show the trash", "what's in the trash", "open the bin"] {
+        assert_eq!(classify_intent(text), Intent::ShowTrash, "{text:?}");
+    }
+    for text in ["empty the trash", "clear the trash", "please empty the bin"] {
+        assert_eq!(classify_intent(text), Intent::EmptyTrash, "{text:?}");
+    }
+}
+
+#[test]
+fn emptying_the_trash_asks_first_and_only_a_yes_does_it() {
+    use stern_core::ai::chat::EMPTY_TRASH_MARKER;
+    let h = handler();
+    let ask = h.process_message("empty the trash");
+    assert!(matches!(ask.action, Some(Action::ConfirmEmptyTrash)));
+    h.set_pending_delete(EMPTY_TRASH_MARKER, "the trash");
+    assert!(matches!(
+        h.process_message("yes").action,
+        Some(Action::EmptyTrash)
+    ));
+    h.set_pending_delete(EMPTY_TRASH_MARKER, "the trash");
+    assert!(h.process_message("no").action.is_none());
+    h.set_pending_delete(EMPTY_TRASH_MARKER, "the trash");
+    assert!(!matches!(
+        h.process_message("hello").action,
+        Some(Action::EmptyTrash)
+    ));
 }

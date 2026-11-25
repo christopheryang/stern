@@ -156,6 +156,8 @@ pub struct TreeItem {
     pub name: String,
     pub kind: &'static str,
     pub folder: Option<String>,
+    /// A stored file that is not text, kept from an earlier version.
+    pub older_file: bool,
 }
 
 /// What a folder reference in a request points at.
@@ -300,7 +302,12 @@ pub fn render_folder(nodes: &[FolderNode], items: &[TreeItem], id: &str) -> Stri
 }
 
 fn item_line(item: &TreeItem, depth: usize) -> String {
-    format!("{}• {} ({})", "    ".repeat(depth), item.name, item.kind)
+    let kind = if item.older_file {
+        format!("{}, older file", item.kind)
+    } else {
+        item.kind.to_string()
+    };
+    format!("{}• {} ({kind})", "    ".repeat(depth), item.name)
 }
 
 fn draw_level<'a>(

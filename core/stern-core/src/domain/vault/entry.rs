@@ -29,6 +29,13 @@ pub struct EntryPayload {
     pub kind: EntryKind,
     pub tags: Vec<String>,
     pub fields: Vec<Field>,
+    /// A one-line "what it's about", written by the user. Entries saved by
+    /// earlier versions have none.
+    #[serde(default)]
+    pub summary: String,
+    /// A few words the entry can be found by.
+    #[serde(default)]
+    pub keywords: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +60,10 @@ pub struct DecryptedEntry {
 impl Drop for EntryPayload {
     fn drop(&mut self) {
         self.name.zeroize();
+        self.summary.zeroize();
+        for keyword in &mut self.keywords {
+            keyword.zeroize();
+        }
         for field in &mut self.fields {
             field.value.zeroize();
         }

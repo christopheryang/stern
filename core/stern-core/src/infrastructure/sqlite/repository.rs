@@ -63,6 +63,36 @@ fn insert_entry_row(conn: &Connection, entry: &EncryptedEntry) -> Result<(), Vau
     Ok(())
 }
 
+/// Add `column` to `table` unless it is already there.
+///
+/// Names and the definition are this file's own constants, never user text.
+fn add_column_if_missing(
+    conn: &Connection,
+    table: &'static str,
+    column: &'static str,
+    definition: &'static str,
+) -> Result<(), VaultError> {
+    let present = conn
+        .prepare(&format!("PRAGMA table_info({table})"))
+        .and_then(|mut stmt| {
+            let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
+            for name in names {
+                if name? == column {
+                    return Ok(true);
+                }
+            }
+            Ok(false)
+        })
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+    if !present {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+        ))
+        .map_err(|e| VaultError::Database(e.to_string()))?;
+    }
+    Ok(())
+}
+
 fn into_rusqlite(e: VaultError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(e))
 }
@@ -121,26 +151,16 @@ impl SqliteRepository {
         )
         .map_err(|e| VaultError::Database(e.to_string()))?;
 
-        // Migration: vaults made before folders have no `folder_id` on
-        // their entries. Every existing entry stays outside any folder.
-        let has_folder_col = conn
-            .prepare("PRAGMA table_info(entries)")
-            .and_then(|mut stmt| {
-                let names = stmt.query_map([], |row| row.get::<_, String>(1))?;
-                for name in names {
-                    if name? == "folder_id" {
-                        return Ok(true);
-                    }
-                }
-                Ok(false)
-            })
-            .map_err(|e| VaultError::Database(e.to_string()))?;
-        if !has_folder_col {
-            conn.execute_batch(
-                "ALTER TABLE entries ADD COLUMN folder_id TEXT REFERENCES folders(id) ON DELETE SET NULL",
-            )
-            .map_err(|e| VaultError::Database(e.to_string()))?;
-        }
+        // Migrations: columns added after the first release. Each is added
+        // only when missing, so opening a vault twice is harmless, and every
+        // existing entry keeps its place: outside any folder, not trashed.
+        add_column_if_missing(
+            &conn,
+            "entries",
+            "folder_id",
+            "TEXT REFERENCES folders(id) ON DELETE SET NULL",
+        )?;
+        add_column_if_missing(&conn, "entries", "trashed_at", "TEXT")?;
 
         // Migration: rename legacy 'encrypted_index' column to 'secret_key' if it exists.
         let has_old_col: bool = conn
@@ -458,6 +478,63 @@ impl SqliteRepository {
         })
     }
 
+    /// Put an entry in the trash, stamped with `at` (RFC 3339). False when
+    /// there is no such entry, or it is already in the trash.
+    pub fn trash_entry(&self, entry_id: &str, at: &str) -> Result<bool, VaultError> {
+        self.execute(|conn| {
+            let changed = conn.execute(
+                "UPDATE entries SET trashed_at = ?2 WHERE id = ?1 AND trashed_at IS NULL",
+                rusqlite::params![entry_id, at],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// Take an entry out of the trash. False when it is not in it.
+    pub fn restore_entry(&self, entry_id: &str) -> Result<bool, VaultError> {
+        self.execute(|conn| {
+            let changed = conn.execute(
+                "UPDATE entries SET trashed_at = NULL WHERE id = ?1 AND trashed_at IS NOT NULL",
+                rusqlite::params![entry_id],
+            )?;
+            Ok(changed > 0)
+        })
+    }
+
+    /// When each trashed entry was put there, as (entry id, RFC 3339 time).
+    pub fn trashed_stamps(&self) -> Result<Vec<(String, String)>, VaultError> {
+        self.execute(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT id, trashed_at FROM entries WHERE trashed_at IS NOT NULL")?;
+            let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+            rows.collect()
+        })
+    }
+
+    /// Mark a stored file as binary, as an earlier version would have stored
+    /// it. Only for tests of how older vaults are handled.
+    #[doc(hidden)]
+    pub fn mark_file_binary_for_test(&self, entry_id: &str) -> Result<(), VaultError> {
+        self.execute(|conn| {
+            conn.execute(
+                "UPDATE blobs SET is_text = 0, mime_type = 'application/pdf' WHERE entry_id = ?1",
+                rusqlite::params![entry_id],
+            )?;
+            Ok(())
+        })
+    }
+
+    /// The ids of entries that hold a stored file that is not text. Files
+    /// from earlier versions may be binary; new ones never are. Read from
+    /// the blob's plain flag, so nothing is decrypted.
+    pub fn binary_file_ids(&self) -> Result<Vec<String>, VaultError> {
+        self.execute(|conn| {
+            let mut stmt = conn.prepare("SELECT entry_id FROM blobs WHERE is_text = 0")?;
+            let rows = stmt.query_map([], |row| row.get(0))?;
+            rows.collect()
+        })
+    }
+
     /// The encrypted blob stored for an entry, if it has one.
     pub fn get_blob(&self, entry_id: &str) -> Result<Option<EncryptedBlob>, VaultError> {
         self.execute(|conn| {
@@ -491,13 +568,25 @@ impl SqliteRepository {
         self.execute(|conn| insert_entry_row(conn, entry).map_err(into_rusqlite))
     }
 
-    #[allow(clippy::indexing_slicing)]
+    /// Every entry that is not in the trash, by name.
     pub fn list_all_entries(&self) -> Result<Vec<EncryptedEntry>, VaultError> {
+        self.query_entries("trashed_at IS NULL")
+    }
+
+    /// Every entry in the trash, by name.
+    pub fn list_trashed_entries(&self) -> Result<Vec<EncryptedEntry>, VaultError> {
+        self.query_entries("trashed_at IS NOT NULL")
+    }
+
+    /// Entries matching a fixed condition. `condition` is always one of
+    /// this file's own constants, never user text.
+    #[allow(clippy::indexing_slicing)]
+    fn query_entries(&self, condition: &'static str) -> Result<Vec<EncryptedEntry>, VaultError> {
         self.execute(|conn| {
-            let mut stmt = conn.prepare(
+            let mut stmt = conn.prepare(&format!(
                 "SELECT id, kind, name, tags, dek_wrapped, nonce, ciphertext, version, created_at, updated_at
-                 FROM entries ORDER BY name",
-            )?;
+                 FROM entries WHERE {condition} ORDER BY name"
+            ))?;
 
             let rows = stmt.query_map([], |row| {
                 let id: String = row.get(0)?;
@@ -548,8 +637,11 @@ impl SqliteRepository {
 
     pub fn count_entries(&self) -> Result<usize, VaultError> {
         self.execute(|conn| {
-            let count: i64 =
-                conn.query_row("SELECT COUNT(*) FROM entries", [], |row| row.get(0))?;
+            let count: i64 = conn.query_row(
+                "SELECT COUNT(*) FROM entries WHERE trashed_at IS NULL",
+                [],
+                |row| row.get(0),
+            )?;
             Ok(usize::try_from(count).unwrap_or(usize::MAX))
         })
     }

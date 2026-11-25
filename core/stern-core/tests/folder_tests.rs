@@ -127,6 +127,7 @@ fn item(id: &str, name: &str, kind: &'static str, folder: Option<&str>) -> TreeI
         name: name.into(),
         kind,
         folder: folder.map(Into::into),
+        older_file: false,
     }
 }
 
@@ -317,4 +318,34 @@ fn an_old_vault_gains_folders_without_losing_entries() {
     assert_eq!(repo.count_entries().unwrap(), 1);
     repo.insert_folder(&folder("a", None)).unwrap();
     assert!(repo.set_entry_folder("old", Some("a")).unwrap());
+}
+
+#[test]
+fn an_older_binary_file_is_marked_in_the_tree() {
+    let nodes = vec![node("a", None, "Home")];
+    let mut scan = item("1", "scan", "document", Some("a"));
+    scan.older_file = true;
+    let tree = render_tree(&nodes, &[scan]);
+    assert!(tree.contains("scan (document, older file)"), "{tree}");
+}
+
+#[test]
+fn only_files_that_are_not_text_are_listed_as_binary() {
+    use stern_core::infrastructure::sqlite::repository::EncryptedBlob;
+    let (repo, _p) = temp_repo();
+    for (id, is_text) in [("t", true), ("b", false)] {
+        repo.insert_file(
+            &entry(id, id),
+            &EncryptedBlob {
+                dek_wrapped: vec![1; 40],
+                nonce: [2; 24],
+                ciphertext: vec![3],
+                byte_len: 1,
+                mime_type: "x".into(),
+                is_text,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(repo.binary_file_ids().unwrap(), vec!["b".to_string()]);
 }

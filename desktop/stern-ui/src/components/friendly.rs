@@ -35,7 +35,19 @@ fn file_message(tidy_lower: &str) -> Option<&'static str> {
     const FILE_MESSAGES: &[(&str, &str)] = &[
         (
             "that file is too big",
-            "That file is too big. The limit is 10 MB.",
+            "That file is too big. The limit is 1 MB.",
+        ),
+        (
+            "plain text files only",
+            "Stern keeps plain text files only, like .txt, .md, .html, .csv or .json.",
+        ),
+        (
+            "isn't plain text stern can read",
+            "That file isn't plain text Stern can read. Save it as a UTF-8 text file and try again.",
+        ),
+        (
+            "older format (utf-16)",
+            "That text file is in an older format (UTF-16). Save it as a UTF-8 text file and try again.",
         ),
         ("couldn't open that file", "Couldn't open that file."),
         ("couldn't read that file", "Couldn't read that file."),

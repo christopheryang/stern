@@ -118,6 +118,8 @@ fn entry_payload_serde_roundtrip() {
                 hidden: true,
             },
         ],
+        summary: String::new(),
+        keywords: vec![],
     };
     let json = serde_json::to_string(&payload).expect("serialize EntryPayload");
     let back: EntryPayload = serde_json::from_str(&json).expect("deserialize EntryPayload");
@@ -574,4 +576,64 @@ fn ids_are_valid_uuid_format() {
     let id = EntryId::new();
     assert_eq!(id.0.len(), 36, "UUID v4 should be 36 chars: {}", id.0);
     assert_eq!(id.0.chars().filter(|c| *c == '-').count(), 4);
+}
+
+// ---- entry metadata: summary and keywords ----
+
+use stern_core::domain::vault::metadata::{
+    clean_keywords, clean_summary, suggest_keywords, MAX_KEYWORDS, MAX_SUMMARY_CHARS,
+};
+
+#[test]
+fn a_summary_is_tidied_and_cut_to_length() {
+    assert_eq!(clean_summary("  my   card\n details  "), "my card details");
+    let long = "é".repeat(MAX_SUMMARY_CHARS + 50);
+    assert_eq!(clean_summary(&long).chars().count(), MAX_SUMMARY_CHARS);
+    assert_eq!(clean_summary("   "), "");
+}
+
+#[test]
+fn keywords_are_lowercased_split_and_deduplicated() {
+    let words = clean_keywords(&["Credit Card, VISA;travel", " visa ", ""]);
+    assert_eq!(words, vec!["credit card", "visa", "travel"]);
+}
+
+#[test]
+fn there_are_never_more_than_the_maximum_keywords() {
+    let many: Vec<String> = (0..30).map(|i| format!("word{i}")).collect();
+    assert_eq!(clean_keywords(&many).len(), MAX_KEYWORDS);
+}
+
+#[test]
+fn suggested_keywords_are_the_common_plain_words() {
+    let text = "Chase credit card statement. The credit card ends in 4417, \
+                the card expires next year. Statement due monthly.";
+    let words = suggest_keywords(text);
+    assert_eq!(words.first().map(String::as_str), Some("card"));
+    assert!(words.contains(&"credit".to_string()));
+    assert!(words.contains(&"statement".to_string()));
+    // Short words, stopwords and numbers are not suggested.
+    assert!(!words.iter().any(|w| w == "the" || w == "4417" || w == "in"));
+}
+
+#[test]
+fn suggested_keywords_never_include_what_follows_a_secret_cue() {
+    let words = suggest_keywords("router password hunterswordfish and the wifi network guestnet");
+    assert!(!words.contains(&"hunterswordfish".to_string()), "{words:?}");
+    assert!(!words.contains(&"password".to_string()));
+    assert!(words.contains(&"router".to_string()));
+    // Nothing with digits in it, so tokens and keys are left out.
+    let mixed = suggest_keywords("token ghp1a2b3c4d5e6f and the project alphabeta");
+    assert!(
+        mixed.iter().all(|w| w.chars().all(char::is_alphabetic)),
+        "{mixed:?}"
+    );
+}
+
+#[test]
+fn an_older_payload_without_metadata_still_reads() {
+    let json = r#"{"name":"old","kind":"Note","tags":[],"fields":[]}"#;
+    let payload: EntryPayload = serde_json::from_str(json).unwrap();
+    assert_eq!(payload.summary, "");
+    assert!(payload.keywords.is_empty());
 }

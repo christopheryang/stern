@@ -1,0 +1,90 @@
+# Questions the assistant should be able to answer, with the entries it should return.
+# category | question | expected
+#   expected: entry ids separated by commas (any one of them in the top three is a pass),
+#             "@days:A-B" (the top three must all be entries saved A to B days ago),
+#             or "-" (nothing should come back)
+name | what is the chase sapphire card? | e01
+name | find Netflix | e11
+name | show me the lease | e09
+name | open my router info | e10
+name | find the printer setup | e44
+name | where is my dentist note | e25
+name | what's in project atlas | e46
+name | find gym membership | e28
+name | show the pasta recipe | e29
+name | find my gmail | e13
+name | find github | e12
+name | open the on-call runbook | e47
+name | show thanksgiving menu | e31
+name | what is the storage unit note | e40
+name | show the car insurance | e07
+name | chase sapphire | e01
+topic | I stored something about my credit card a couple of months ago, can you find it? | e01
+topic | tell me about my credit cards | e01,e02
+topic | what's the wifi info | e10,e43
+topic | where did I put the router password | e10
+topic | my passport appointment | e15
+topic | when does my car insurance renew | e07
+topic | how do I cancel the gym | e28
+topic | notes about the budget meeting | e20
+topic | the interview debrief for the backend role | e21
+topic | what did we decide about the launch | e19
+topic | refund from the tax return | e05
+topic | who is my landlord | e09
+topic | my tax deductions receipts | e06,e59
+topic | the allergy medication | e26
+topic | which pharmacy do I use | e26
+topic | hotel for Japan | e16
+topic | what's my plan for tokyo | e16
+topic | my student loan servicer | e38
+topic | backup phrase for the wallet | e39
+topic | bake sourdough temperature | e30
+topic | gate code for the storage | e40
+topic | my phone upgrade date | e54
+topic | the vet for my dog | e55
+topic | mortgage rate quote | e37
+topic | how to restart the ingest service | e47
+topic | my dental insurance | e25
+topic | what did the finance review say about cloud spend | e20
+topic | flowers for the wedding | e51
+topic | vaccination history for school | e27
+topic | router admin page address | e10
+topic | my library holds | e56
+topic | the guest network | e43
+topic | photos backup drive | e45
+topic | rent amount | e09
+topic | anything on thanksgiving | e31
+topic | what should I get dad | e33
+topic | when is moms birthday | e34
+topic | my car's oil change | e35
+topic | the registration renewal | e36
+topic | the offer letter | e23
+topic | what's the bonus target | e23
+topic | the conference abstract deadline | e49
+topic | the internet provider support hours | e53
+topic | who is my plumber | e41
+topic | the garden compost | e42
+topic | the moving checklist | e52
+topic | my sleep and stress notes | e50
+time | anything I saved in the last week | @days:0-7
+time | things from the past month | @days:0-30
+time | what did I save a couple of months ago | @days:45-90
+time | stuff from last year | @days:365-730
+time | the budget notes from a couple of months ago | e20
+time | my meeting notes from last week | e19
+time | credit card from last week | e02
+time | the recipe I saved in the last couple weeks | e29,e31
+folder | what's in the Taxes folder | e05,e06,e59
+folder | what's in Cards | e01,e02
+folder | show me everything under Work/Meetings | e19,e20,e21
+folder | what's in the Recipes folder | e29,e30,e31
+folder | what's in Travel | e16,e17,e18,e60
+folder | show the Insurance folder | e07,e08
+none | my boat registration | -
+none | the airline miles account | -
+none | notes about my skydiving trip | -
+none | find the divorce papers | -
+none | what's my pilot license number | -
+none | the dragon recipe | -
+none | anything about quantum physics | -
+none | my lottery ticket | -

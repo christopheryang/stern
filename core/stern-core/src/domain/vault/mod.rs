@@ -6,5 +6,6 @@ pub mod file;
 pub mod folder;
 pub mod index;
 pub mod kdf_params;
+pub mod metadata;
 pub mod secret_key;
 pub mod vault_meta;

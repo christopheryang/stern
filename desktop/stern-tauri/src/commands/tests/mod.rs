@@ -562,7 +562,7 @@ fn chat_edit_opens_the_named_note_in_the_editor() {
     let (state, _path) = make_test_app_state();
     create_vault_inner(&state, "correct horse battery").unwrap();
     unlock_test_session(&state);
-    let note = crate::notes::save(&state, None, "Shopping list", "eggs").unwrap();
+    let note = crate::notes::save(&state, None, "Shopping list", "eggs", None).unwrap();
 
     let reply = chat(&state, "edit my shopping list");
     assert_eq!(
@@ -578,8 +578,8 @@ fn chat_edit_says_so_when_two_notes_match() {
     let (state, _path) = make_test_app_state();
     create_vault_inner(&state, "correct horse battery").unwrap();
     unlock_test_session(&state);
-    crate::notes::save(&state, None, "Trip plan", "a").unwrap();
-    crate::notes::save(&state, None, "Trip packing", "b").unwrap();
+    crate::notes::save(&state, None, "Trip plan", "a", None).unwrap();
+    crate::notes::save(&state, None, "Trip packing", "b", None).unwrap();
 
     let reply = chat(&state, "edit my trip");
     assert!(reply.action.is_none(), "action: {:?}", reply.action);
@@ -617,15 +617,21 @@ fn chat_unlocks_a_locked_vault_and_replays_the_question() {
 fn a_note_saved_in_the_editor_round_trips_with_its_text_in_full() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    let created = crate::notes::save(&state, None, "Groceries", "eggs\nmilk").unwrap();
+    let created = crate::notes::save(&state, None, "Groceries", "eggs\nmilk", None).unwrap();
     assert_eq!(created.title, "Groceries");
     assert_eq!(created.text, "eggs\nmilk");
 
     let loaded = crate::notes::load(&state, &created.id).unwrap();
     assert_eq!(loaded.text, "eggs\nmilk");
 
-    let edited =
-        crate::notes::save(&state, Some(&created.id), "Groceries", "eggs, milk, bread").unwrap();
+    let edited = crate::notes::save(
+        &state,
+        Some(&created.id),
+        "Groceries",
+        "eggs, milk, bread",
+        None,
+    )
+    .unwrap();
     assert_eq!(edited.id, created.id);
     assert_eq!(edited.version, created.version + 1);
     assert_eq!(
@@ -642,7 +648,7 @@ fn a_note_saved_in_the_editor_round_trips_with_its_text_in_full() {
 fn a_note_needs_a_title() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    let err = crate::notes::save(&state, None, "   ", "body").unwrap_err();
+    let err = crate::notes::save(&state, None, "   ", "body", None).unwrap_err();
     assert!(err.to_string().contains("needs a title"), "{err}");
     assert!(crate::notes::list(&state).unwrap().is_empty());
 }
@@ -673,9 +679,9 @@ fn a_note_saved_by_chat_is_listed_in_the_editor() {
 fn an_edited_note_cannot_be_swapped_back_to_an_older_version() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    let first = crate::notes::save(&state, None, "Plan", "v1").unwrap();
+    let first = crate::notes::save(&state, None, "Plan", "v1", None).unwrap();
     let old_ciphertext = state.repository.list_all_entries().unwrap()[0].clone();
-    crate::notes::save(&state, Some(&first.id), "Plan", "v2").unwrap();
+    crate::notes::save(&state, Some(&first.id), "Plan", "v2", None).unwrap();
 
     // Put the first version's row back. Its AAD was bound to version 1, and
     // the row now says version 2, so it must not open.
@@ -745,6 +751,8 @@ fn insert_rich_note(state: &AppState) -> String {
                 hidden: true,
             },
         ],
+        summary: String::new(),
+        keywords: vec![],
     };
     let id = "note-rich".to_string();
     let json = serde_json::to_vec(&payload).unwrap();
@@ -778,7 +786,14 @@ fn saving_a_note_keeps_its_tags_and_other_fields() {
     unlock_test_session(&state);
     let id = insert_rich_note(&state);
 
-    crate::notes::save(&state, Some(&id), "Trip to Rome", "pack socks and a hat").unwrap();
+    crate::notes::save(
+        &state,
+        Some(&id),
+        "Trip to Rome",
+        "pack socks and a hat",
+        None,
+    )
+    .unwrap();
 
     let entry = state
         .repository
@@ -820,8 +835,8 @@ fn saving_a_note_keeps_its_tags_and_other_fields() {
 fn a_save_from_an_out_of_date_copy_is_refused() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    let first = crate::notes::save(&state, None, "Plan", "v1").unwrap();
-    crate::notes::save(&state, Some(&first.id), "Plan", "v2").unwrap();
+    let first = crate::notes::save(&state, None, "Plan", "v1", None).unwrap();
+    crate::notes::save(&state, Some(&first.id), "Plan", "v2", None).unwrap();
 
     // The repository itself refuses a write that names a stale version.
     let payload = StoredPayload {
@@ -844,7 +859,7 @@ fn a_save_from_an_out_of_date_copy_is_refused() {
 fn an_entry_version_that_does_not_fit_is_an_error_not_a_clamp() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    let note = crate::notes::save(&state, None, "Plan", "v1").unwrap();
+    let note = crate::notes::save(&state, None, "Plan", "v1", None).unwrap();
     let payload = StoredPayload {
         dek_wrapped: &[0u8; 40],
         nonce: &[0u8; 24],
@@ -865,9 +880,9 @@ fn an_entry_version_that_does_not_fit_is_an_error_not_a_clamp() {
 fn listing_notes_orders_by_time_and_does_not_open_their_text() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    let older = crate::notes::save(&state, None, "Older", "a").unwrap();
+    let older = crate::notes::save(&state, None, "Older", "a", None).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(5));
-    let newer = crate::notes::save(&state, None, "Newer", "b").unwrap();
+    let newer = crate::notes::save(&state, None, "Newer", "b", None).unwrap();
 
     let listed = crate::notes::list(&state).unwrap();
     let ids: Vec<&str> = listed.iter().map(|n| n.id.as_str()).collect();
@@ -903,7 +918,7 @@ fn listing_notes_orders_by_time_and_does_not_open_their_text() {
 fn finding_notes_with_a_blank_query_matches_nothing() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
-    crate::notes::save(&state, None, "Plan", "a").unwrap();
+    crate::notes::save(&state, None, "Plan", "a", None).unwrap();
     assert!(crate::notes::find(&state, "").unwrap().is_empty());
     assert!(crate::notes::find(&state, "   ").unwrap().is_empty());
     assert_eq!(crate::notes::find(&state, "plan").unwrap().len(), 1);
@@ -918,21 +933,76 @@ fn locking_cancels_a_download_that_started_before_it() {
 }
 
 #[test]
-fn a_file_is_stored_and_comes_back_byte_for_byte() {
+fn a_text_file_is_stored_and_comes_back_byte_for_byte() {
     let (state, _path) = make_test_app_state();
     unlock_test_session(&state);
     let dir = tempfile::tempdir().unwrap();
-    let src = dir.path().join("scan.pdf");
-    let bytes: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
-    std::fs::write(&src, &bytes).unwrap();
+    let src = dir.path().join("notes.csv");
+    let text = "name,card\nChase,héllo\n".repeat(200);
+    std::fs::write(&src, &text).unwrap();
 
     let id = crate::files::add_file(&state, &src).unwrap().id;
     let back = crate::files::read_stored(&state, &id).unwrap();
-    assert_eq!(back.as_slice(), bytes.as_slice());
+    assert_eq!(back.as_slice(), text.as_bytes());
 
-    let out = dir.path().join("restored.pdf");
+    let out = dir.path().join("restored.csv");
     crate::files::write_retrieved(&out, &back).unwrap();
-    assert_eq!(std::fs::read(&out).unwrap(), bytes);
+    assert_eq!(std::fs::read(&out).unwrap(), text.as_bytes());
+}
+
+#[test]
+fn a_byte_order_mark_is_not_stored() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("a.txt");
+    let mut bytes = vec![0xEF, 0xBB, 0xBF];
+    bytes.extend_from_slice(b"hello");
+    std::fs::write(&src, &bytes).unwrap();
+    let stored = crate::files::add_file(&state, &src).unwrap();
+    assert_eq!(stored.size_bytes, 5);
+    let back = crate::files::read_stored(&state, &stored.id).unwrap();
+    assert_eq!(back.as_slice(), b"hello");
+}
+
+#[test]
+fn files_that_are_not_plain_text_are_refused_and_nothing_is_stored() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let write = |name: &str, bytes: &[u8]| {
+        let path = dir.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    };
+    // A PDF, even when its bytes happen to be valid UTF-8, is refused by name.
+    let pdf = write("lease.pdf", b"just text");
+    let err = crate::files::add_file(&state, &pdf).unwrap_err();
+    assert!(err.to_string().contains("plain text files only"), "{err}");
+    // Binary content under a friendly name.
+    let png = write("notes.txt", &[0x89, b'P', b'N', b'G', 0, 1, 2]);
+    let err = crate::files::add_file(&state, &png).unwrap_err();
+    assert!(err.to_string().contains("isn't plain text"), "{err}");
+    // UTF-16 text.
+    let utf16 = write("w.txt", &[0xFF, 0xFE, b'h', 0, b'i', 0]);
+    let err = crate::files::add_file(&state, &utf16).unwrap_err();
+    assert!(err.to_string().contains("UTF-16"), "{err}");
+    assert_eq!(state.repository.count_entries().unwrap(), 0);
+}
+
+#[test]
+fn the_limit_is_one_mebibyte_to_the_byte() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let exact = dir.path().join("exact.txt");
+    std::fs::write(&exact, vec![b'a'; 1024 * 1024]).unwrap();
+    assert!(crate::files::add_file(&state, &exact).is_ok());
+    let over = dir.path().join("over.txt");
+    std::fs::write(&over, vec![b'a'; 1024 * 1024 + 1]).unwrap();
+    let err = crate::files::add_file(&state, &over).unwrap_err();
+    assert!(err.to_string().contains("1 MB"), "{err}");
+    assert_eq!(state.repository.count_entries().unwrap(), 1);
 }
 
 #[test]
@@ -1213,4 +1283,365 @@ fn asking_what_a_listed_note_is_shows_the_note() {
     let shown = chat(&state, "what is the trip?");
     assert!(shown.message.contains("pack socks"), "{}", shown.message);
     assert!(!shown.message.contains("No secret found"));
+}
+
+#[test]
+fn an_older_binary_file_stays_listed_readable_and_deletable() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    // Store a real file, then mark it binary the way an earlier build would
+    // have stored a PDF.
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("scan.txt");
+    std::fs::write(&src, "pretend this is a scan").unwrap();
+    let stored = crate::files::add_file(&state, &src).unwrap();
+    state
+        .repository
+        .mark_file_binary_for_test(&stored.id)
+        .unwrap();
+
+    let list = chat(&state, "show my secrets");
+    assert!(
+        list.message.contains("scan.txt (document, older file)"),
+        "{}",
+        list.message
+    );
+    // Still readable.
+    assert!(crate::files::read_stored(&state, &stored.id).is_ok());
+    let renamed = chat(&state, "rename scan.txt to lease scan");
+    assert!(renamed.message.contains("Renamed"), "{}", renamed.message);
+    chat(&state, "delete lease scan");
+    chat(&state, "Yes, delete it");
+    assert_eq!(state.repository.count_entries().unwrap(), 0);
+}
+
+fn note_about<'a>(summary: &'a str, keywords: &'a str) -> crate::notes::About<'a> {
+    crate::notes::About { summary, keywords }
+}
+
+#[test]
+fn a_note_keeps_the_summary_and_keywords_it_was_given() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let about = note_about("  my   Chase   card  ", "Credit Card, visa");
+    let saved =
+        crate::notes::save(&state, None, "Chase", "card ends in 4417", Some(&about)).unwrap();
+    assert_eq!(saved.summary, "my Chase card");
+    assert_eq!(saved.keywords, "credit card, visa");
+    let again = crate::notes::load(&state, &saved.id).unwrap();
+    assert_eq!(again.summary, "my Chase card");
+}
+
+#[test]
+fn empty_keywords_are_filled_from_the_text() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let about = note_about("", "");
+    let saved = crate::notes::save(
+        &state,
+        None,
+        "Trip",
+        "passport renewal appointment, passport photo needed",
+        Some(&about),
+    )
+    .unwrap();
+    assert!(saved.keywords.contains("passport"), "{}", saved.keywords);
+    // A note saved with no description at all gets them too.
+    let plain = crate::notes::save(&state, None, "Rome", "colosseum tickets", None).unwrap();
+    assert!(plain.keywords.contains("colosseum"), "{}", plain.keywords);
+}
+
+#[test]
+fn saving_without_a_description_leaves_the_stored_one_alone() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let about = note_about("my card", "visa");
+    let first = crate::notes::save(&state, None, "Chase", "v1", Some(&about)).unwrap();
+    let edited = crate::notes::save(&state, Some(&first.id), "Chase", "v2", None).unwrap();
+    assert_eq!(edited.summary, "my card");
+    assert_eq!(edited.keywords, "visa");
+    assert_eq!(edited.text, "v2");
+    // And sending an empty summary clears it.
+    let cleared = note_about("", "visa");
+    let cleared =
+        crate::notes::save(&state, Some(&first.id), "Chase", "v2", Some(&cleared)).unwrap();
+    assert_eq!(cleared.summary, "");
+}
+
+#[test]
+fn a_stored_text_file_gets_keywords_from_its_text_and_no_secret_words() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("lease.txt");
+    std::fs::write(
+        &src,
+        "apartment lease agreement. apartment rent due monthly. wifi password mangosteen99",
+    )
+    .unwrap();
+    let id = crate::files::add_file(&state, &src).unwrap().id;
+    let entry = state
+        .repository
+        .list_all_entries()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id == id)
+        .unwrap();
+    let kek = *state.session.lock().unwrap().kek().unwrap();
+    let wrapped = <[u8; 40]>::try_from(entry.dek_wrapped.as_slice()).unwrap();
+    let dek = state.crypto.unwrap_dek(&wrapped, &kek).unwrap();
+    let plain = state
+        .crypto
+        .decrypt_entry(
+            &dek,
+            &entry.nonce,
+            &entry.ciphertext,
+            &stern_core::domain::vault::aad::entry_aad(&entry.id, entry.version),
+        )
+        .unwrap();
+    let payload: EntryPayload = serde_json::from_slice(&plain).unwrap();
+    assert!(
+        payload.keywords.contains(&"apartment".to_string()),
+        "{:?}",
+        payload.keywords
+    );
+    assert!(
+        !payload.keywords.iter().any(|w| w.contains("mangosteen")),
+        "{:?}",
+        payload.keywords
+    );
+}
+
+// ---- trash ----
+
+fn two_notes() -> (AppState, tempfile::TempPath) {
+    let (state, path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    crate::notes::save(&state, None, "Chase card", "visa ending 4417", None).unwrap();
+    crate::notes::save(&state, None, "Shopping", "eggs and milk", None).unwrap();
+    (state, path)
+}
+
+#[test]
+fn deleting_puts_the_entry_in_the_trash_and_out_of_sight() {
+    let (state, _path) = two_notes();
+    chat(&state, "delete Chase card");
+    let done = chat(&state, "Yes, delete it");
+    assert!(done.message.contains("Deleted"), "{}", done.message);
+    assert!(done.message.contains("undo"), "{}", done.message);
+
+    // Not listed, not found, not counted, not exported.
+    assert!(!chat(&state, "show my secrets").message.contains("Chase"));
+    assert!(chat(&state, "find Chase card")
+        .message
+        .contains("No secret found"));
+    assert_eq!(state.repository.count_entries().unwrap(), 1);
+    assert!(crate::notes::list(&state)
+        .unwrap()
+        .iter()
+        .all(|n| n.title != "Chase card"));
+    // But it is still stored, ready to come back.
+    assert_eq!(state.repository.list_trashed_entries().unwrap().len(), 1);
+    let shown = chat(&state, "show the trash");
+    assert!(shown.message.contains("Chase card"), "{}", shown.message);
+    assert!(shown.message.contains("today"), "{}", shown.message);
+    assert!(!shown.message.contains("4417"));
+}
+
+#[test]
+fn undo_brings_back_the_last_deleted_entry_with_its_text() {
+    let (state, _path) = two_notes();
+    chat(&state, "delete Chase card");
+    chat(&state, "Yes, delete it");
+    chat(&state, "delete Shopping");
+    chat(&state, "Yes, delete it");
+
+    let back = chat(&state, "undo");
+    assert!(
+        back.message.contains("Brought \"Shopping\""),
+        "{}",
+        back.message
+    );
+    let by_name = chat(&state, "restore Chase card");
+    assert!(
+        by_name.message.contains("Brought \"Chase card\""),
+        "{}",
+        by_name.message
+    );
+    let found = crate::notes::find(&state, "chase").unwrap();
+    let note = crate::notes::load(&state, &found[0].id).unwrap();
+    assert_eq!(note.text, "visa ending 4417");
+    assert_eq!(state.repository.count_entries().unwrap(), 2);
+    assert!(chat(&state, "undo")
+        .message
+        .contains("nothing to bring back"));
+}
+
+#[test]
+fn a_restored_entry_keeps_its_folder() {
+    let (state, _path) = two_notes();
+    chat(&state, "create folder Money");
+    chat(&state, "move Chase card to Money");
+    chat(&state, "delete Chase card");
+    chat(&state, "Yes, delete it");
+    chat(&state, "undo");
+    let tree = chat(&state, "show my folders");
+    assert!(tree.message.contains("Chase card"), "{}", tree.message);
+    assert_eq!(state.repository.entry_folders().unwrap().len(), 1);
+}
+
+#[test]
+fn emptying_the_trash_asks_then_removes_for_good() {
+    let (state, _path) = two_notes();
+    assert!(chat(&state, "empty the trash")
+        .message
+        .contains("already empty"));
+    chat(&state, "delete Shopping");
+    chat(&state, "Yes, delete it");
+    let ask = chat(&state, "empty the trash");
+    assert!(ask.message.contains("for good"), "{}", ask.message);
+    assert_eq!(ask.options.len(), 2);
+    assert_eq!(state.repository.list_trashed_entries().unwrap().len(), 1);
+
+    let kept = chat(&state, "No, keep it");
+    assert!(kept.message.contains("kept"), "{}", kept.message);
+    assert_eq!(state.repository.list_trashed_entries().unwrap().len(), 1);
+
+    chat(&state, "empty the trash");
+    let gone = chat(&state, "Yes, delete it");
+    assert!(gone.message.contains("for good"), "{}", gone.message);
+    assert!(state.repository.list_trashed_entries().unwrap().is_empty());
+    assert!(chat(&state, "undo")
+        .message
+        .contains("nothing to bring back"));
+}
+
+#[test]
+fn the_purge_removes_only_old_entries_and_their_stored_files() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("lease.txt");
+    std::fs::write(&src, "apartment lease").unwrap();
+    let old_file = crate::files::add_file(&state, &src).unwrap().id;
+    let recent = crate::notes::save(&state, None, "Recent", "x", None)
+        .unwrap()
+        .id;
+    let kept = crate::notes::save(&state, None, "Kept", "y", None)
+        .unwrap()
+        .id;
+
+    let now = chrono::Utc::now();
+    let stamp = |days: i64| (now - chrono::Duration::days(days)).to_rfc3339();
+    assert!(state.repository.trash_entry(&old_file, &stamp(31)).unwrap());
+    assert!(state.repository.trash_entry(&recent, &stamp(29)).unwrap());
+
+    assert_eq!(crate::trash::purge_expired_at(&state, now).unwrap(), 1);
+    // The old file and its stored bytes are gone.
+    assert!(state.repository.get_blob(&old_file).unwrap().is_none());
+    let left: Vec<String> = state
+        .repository
+        .list_trashed_entries()
+        .unwrap()
+        .into_iter()
+        .map(|e| e.id)
+        .collect();
+    assert_eq!(left, vec![recent.clone()]);
+    // An entry that was never trashed is untouched.
+    assert!(state
+        .repository
+        .list_all_entries()
+        .unwrap()
+        .iter()
+        .any(|e| e.id == kept));
+}
+
+#[test]
+fn unlocking_purges_the_expired_trash() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    let id = {
+        unlock_test_session(&state);
+        let id = crate::notes::save(&state, None, "Old", "x", None)
+            .unwrap()
+            .id;
+        let long_ago = (chrono::Utc::now() - chrono::Duration::days(45)).to_rfc3339();
+        state.repository.trash_entry(&id, &long_ago).unwrap();
+        id
+    };
+    state.session.lock().unwrap().lock();
+    unlock_vault_inner(&state, "correct horse battery").unwrap();
+    assert!(state
+        .repository
+        .list_trashed_entries()
+        .unwrap()
+        .iter()
+        .all(|e| e.id != id));
+}
+
+#[test]
+fn the_trash_commands_refuse_a_locked_vault() {
+    let (state, _path) = make_test_app_state();
+    assert!(matches!(
+        crate::trash::show_trash(&state),
+        Err(VaultError::VaultLocked)
+    ));
+    assert!(matches!(
+        crate::trash::restore(&state, ""),
+        Err(VaultError::VaultLocked)
+    ));
+    assert!(matches!(
+        crate::trash::empty(&state),
+        Err(VaultError::VaultLocked)
+    ));
+}
+
+#[test]
+fn an_older_vault_gains_the_trash_column_and_keeps_its_entries() {
+    use stern_core::infrastructure::sqlite::repository::SqliteRepository;
+    let tmp = tempfile::NamedTempFile::new().unwrap();
+    let path = tmp.into_temp_path();
+    {
+        let repo = SqliteRepository::new(&path).unwrap();
+        let now = chrono::Utc::now();
+        repo.insert_entry(&stern_core::domain::vault::entry::EncryptedEntry {
+            id: "e".into(),
+            kind: stern_core::domain::vault::entry::EntryKind::Note,
+            name: "Old".into(),
+            tags: vec![],
+            dek_wrapped: vec![1; 40],
+            nonce: [2; 24],
+            ciphertext: vec![3],
+            version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+        .unwrap();
+    }
+    // Reopening runs the migrations again and must not fail or lose data.
+    let repo = SqliteRepository::new(&path).unwrap();
+    assert_eq!(repo.count_entries().unwrap(), 1);
+    assert!(repo.list_trashed_entries().unwrap().is_empty());
+}
+
+#[test]
+fn deleting_a_stored_file_goes_to_the_trash_not_straight_out() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    let dir = tempfile::tempdir().unwrap();
+    let src = dir.path().join("a.txt");
+    std::fs::write(&src, "keep me").unwrap();
+    let id = crate::files::add_file(&state, &src).unwrap().id;
+    assert!(state
+        .repository
+        .trash_entry(&id, &chrono::Utc::now().to_rfc3339())
+        .unwrap());
+    // Still stored, with its bytes, until the trash is emptied.
+    assert!(state.repository.get_blob(&id).unwrap().is_some());
+    assert_eq!(state.repository.count_entries().unwrap(), 0);
+    crate::trash::empty(&state).unwrap();
+    assert!(state.repository.get_blob(&id).unwrap().is_none());
 }

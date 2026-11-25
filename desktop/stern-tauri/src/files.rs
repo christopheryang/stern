@@ -4,7 +4,7 @@
 //! Stored files: add a file to the vault, and get one back out.
 //!
 //! The shell reads and encrypts the file, so its bytes never cross to
-//! the web frontend. Size is checked before the read (see
+//! the web frontend. Only plain text is accepted (ADR-0017). Size is checked before the read (see
 //! [`read_file_capped`]), and each file gets its own data key, bound to
 //! its entry through the blob AAD.
 
@@ -18,7 +18,10 @@ use stern_core::domain::vault::aad::{blob_aad, entry_aad};
 use stern_core::domain::vault::crypto_constants::DEK_WRAPPED_LEN;
 use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind, EntryPayload};
 use stern_core::domain::vault::errors::VaultError;
-use stern_core::domain::vault::file::{classify, within_limit, MAX_FILE_BYTES};
+use stern_core::domain::vault::file::{
+    check_name, check_text, classify, within_limit, Refusal, MAX_FILE_BYTES,
+};
+use stern_core::domain::vault::metadata::suggest_keywords;
 use stern_core::infrastructure::sqlite::repository::EncryptedBlob;
 use zeroize::Zeroizing;
 
@@ -70,13 +73,19 @@ fn read_file_limited(path: &Path, limit: u64) -> Result<Zeroizing<Vec<u8>>, Vaul
 /// frontend's wording (see the Help page).
 #[must_use]
 pub fn file_too_big_message() -> String {
-    format!("That file is too big. The limit is {MAX_FILE_LIMIT_MB} MB.")
+    Refusal::TooBig.message().to_string()
 }
 
-/// The limit in whole megabytes, for the message above.
-const MAX_FILE_LIMIT_MB: u64 = 10;
+/// A refusal as the error the user sees.
+fn refuse(refusal: Refusal) -> VaultError {
+    VaultError::Io(refusal.message().to_string())
+}
 
-const _: () = assert!(MAX_FILE_LIMIT_MB * 1024 * 1024 == MAX_FILE_BYTES);
+/// The extensions the file picker offers first.
+const TEXT_EXTENSIONS: &[&str] = &[
+    "txt", "md", "html", "htm", "csv", "tsv", "json", "xml", "yaml", "yml", "toml", "ini", "log",
+    "conf", "env",
+];
 
 /// What the user is told about a file that was just stored. No contents.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
@@ -102,14 +111,20 @@ pub fn add_file(state: &AppState, path: &Path) -> Result<StoredFile, VaultError>
         Zeroizing::new(*session.kek()?)
     };
 
-    // Refuse an oversized file before anything is read into memory.
-    let bytes = read_file_capped(path)?;
+    // Refuse by name before the file is even opened, then an oversized
+    // file before anything is read into memory, then by content.
     let name = path
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("file")
         .to_string();
-    let info = classify(&name, &bytes);
+    check_name(&name).map_err(refuse)?;
+    let raw = read_file_capped(path)?;
+    // What is stored is the text without a byte-order mark. `raw` is wiped
+    // when it goes out of scope.
+    let text = check_text(&raw).map_err(refuse)?;
+    let bytes = text.as_bytes();
+    let info = classify(&name, bytes);
 
     let entry_id = uuid::Uuid::new_v4().to_string();
     let version = 1u64;
@@ -119,7 +134,7 @@ pub fn add_file(state: &AppState, path: &Path) -> Result<StoredFile, VaultError>
     let dek = state.crypto.generate_dek();
     let (nonce, ciphertext) = state
         .crypto
-        .encrypt_entry(&dek, &bytes, &blob_aad(&entry_id))?;
+        .encrypt_entry(&dek, bytes, &blob_aad(&entry_id))?;
     let blob = EncryptedBlob {
         dek_wrapped: state.crypto.wrap_dek(&dek, &kek)?.to_vec(),
         nonce,
@@ -137,6 +152,9 @@ pub fn add_file(state: &AppState, path: &Path) -> Result<StoredFile, VaultError>
         kind: EntryKind::Document,
         tags: vec![],
         fields: vec![],
+        summary: String::new(),
+        // Words from the text, so the file can be found by what it says.
+        keywords: suggest_keywords(text),
     };
     let payload_json =
         serde_json::to_vec(&payload).map_err(|e| VaultError::Serialization(e.to_string()))?;
@@ -224,7 +242,14 @@ pub async fn add_file_from_picker(
     state: tauri::State<'_, AppState>,
 ) -> Result<Option<StoredFile>, VaultError> {
     use tauri_plugin_dialog::DialogExt;
-    let Some(picked) = app.dialog().file().blocking_pick_file() else {
+    // The filter only suggests text formats; the content check is the gate.
+    let Some(picked) = app
+        .dialog()
+        .file()
+        .add_filter("Text files", TEXT_EXTENSIONS)
+        .add_filter("All files", &["*"])
+        .blocking_pick_file()
+    else {
         return Ok(None);
     };
     let path = picked
@@ -258,7 +283,8 @@ pub async fn save_file_to_picker(
     write_retrieved(&destination, &bytes).map(|p| Some(p.to_string_lossy().to_string()))
 }
 
-/// Remove a stored file (its entry and its blob).
+/// Move a stored file to the trash, like any other entry. It is removed
+/// for good when the trash is emptied or after 30 days.
 #[tauri::command]
 pub async fn delete_stored_file(
     state: tauri::State<'_, AppState>,
@@ -273,5 +299,7 @@ pub async fn delete_stored_file(
             return Err(VaultError::VaultLocked);
         }
     }
-    state.repository.delete_entry(&entry_id)
+    state
+        .repository
+        .trash_entry(&entry_id, &chrono::Utc::now().to_rfc3339())
 }

@@ -20,6 +20,8 @@ struct NoteDto {
     id: String,
     title: String,
     text: String,
+    summary: String,
+    keywords: String,
 }
 
 #[allow(clippy::future_not_send)]
@@ -54,10 +56,47 @@ async fn load_note(id: &str) -> Result<NoteDto, String> {
 }
 
 #[allow(clippy::future_not_send)]
-async fn save_note(id: Option<String>, title: String, text: String) -> Result<NoteDto, String> {
-    let args = serde_json::json!({ "id": id, "title": title, "text": text });
+async fn save_note(
+    id: Option<String>,
+    title: String,
+    text: String,
+    summary: String,
+    keywords: String,
+) -> Result<NoteDto, String> {
+    let args = serde_json::json!({
+        "id": id, "title": title, "text": text, "summary": summary, "keywords": keywords,
+    });
     let value = invoke("save_note", args).await?;
     serde_json::from_value(value).map_err(|e| e.to_string())
+}
+
+/// The two optional lines that describe a note, so it can be found later
+/// by what it is about.
+#[component]
+fn AboutFields(summary: RwSignal<String>, keywords: RwSignal<String>) -> impl IntoView {
+    view! {
+        <label class="field-label" for="note-summary">"What it's about (optional)"</label>
+        <input
+            id="note-summary"
+            class="input"
+            type="text"
+            maxlength="160"
+            autocomplete="off"
+            placeholder="A few words, to help you find it later"
+            prop:value=move || summary.get()
+            on:input=move |ev| summary.set(event_target_value(&ev))
+        />
+        <label class="field-label" for="note-keywords">"Keywords (optional)"</label>
+        <input
+            id="note-keywords"
+            class="input"
+            type="text"
+            autocomplete="off"
+            placeholder="Separate with commas. Left empty, Stern picks some from your note."
+            prop:value=move || keywords.get()
+            on:input=move |ev| keywords.set(event_target_value(&ev))
+        />
+    }
 }
 
 /// The editor for one note. `note_id` is `None` for a new note.
@@ -68,6 +107,8 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
     let current_id = RwSignal::new(note_id.clone());
     let title = RwSignal::new(String::new());
     let text = RwSignal::new(String::new());
+    let summary = RwSignal::new(String::new());
+    let keywords = RwSignal::new(String::new());
     let status = RwSignal::new(Option::<String>::None);
     let busy = RwSignal::new(note_id.is_some());
     // Set when the editor goes away (the vault locks, the chat resets), so a
@@ -88,6 +129,8 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
                     current_id.set(Some(note.id));
                     title.set(note.title);
                     text.set(note.text);
+                    summary.set(note.summary);
+                    keywords.set(note.keywords);
                 }
                 Err(error) => status.set(Some(friendly_error(&error).message)),
             }
@@ -104,9 +147,11 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
         let id = current_id.get_untracked();
         let title_value = title.get_untracked();
         let text_value = text.get_untracked();
+        let summary_value = summary.get_untracked();
+        let keywords_value = keywords.get_untracked();
         let gone = Arc::clone(&gone);
         leptos::task::spawn_local(async move {
-            let saved = save_note(id, title_value, text_value).await;
+            let saved = save_note(id, title_value, text_value, summary_value, keywords_value).await;
             if gone.load(Ordering::Relaxed) {
                 return;
             }
@@ -139,6 +184,7 @@ pub fn NoteEditor(note_id: Option<String>, on_done: Callback<Option<String>>) ->
                 prop:value=move || text.get()
                 on:input=move |ev| text.set(event_target_value(&ev))
             ></textarea>
+            <AboutFields summary=summary keywords=keywords />
             <div class="notes-actions">
                 <button class="btn btn-primary" prop:disabled=move || busy.get() on:click=save>
                     "Save note"
@@ -223,8 +269,9 @@ pub fn FilePickerCard(on_done: Callback<Option<String>>) -> impl IntoView {
     view! {
         <section class="note-editor file-card" aria-label="Add a document">
             <p class="file-card-text">
-                "Pick a file on this computer. It is locked with your password, \
-                 and the original stays where it is. The limit is 10 MB."
+                "Pick a plain text file on this computer, like .txt, .md, .html or .csv. \
+                 It is locked with your password, and the original stays where it is. \
+                 The limit is 1 MB."
             </p>
             <div class="notes-actions">
                 <button class="btn btn-primary" prop:disabled=move || busy.get() on:click=choose>

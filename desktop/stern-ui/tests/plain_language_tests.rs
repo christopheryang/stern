@@ -208,8 +208,17 @@ fn file_sizes_read_in_plain_units_with_one_decimal() {
 
 #[test]
 fn file_errors_keep_their_own_plain_sentence() {
-    let big = friendly_error("io error: That file is too big. The limit is 10 MB.");
-    assert_eq!(big.message, "That file is too big. The limit is 10 MB.");
+    let big = friendly_error("io error: That file is too big. The limit is 1 MB.");
+    assert_eq!(big.message, "That file is too big. The limit is 1 MB.");
+    for sentence in [
+        "Stern keeps plain text files only, like .txt, .md, .html, .csv or .json.",
+        "That file isn't plain text Stern can read. Save it as a UTF-8 text file and try again.",
+        "That text file is in an older format (UTF-16). Save it as a UTF-8 text file and try again.",
+    ] {
+        let shown = friendly_error(&format!("io error: {sentence}"));
+        assert_eq!(shown.message, sentence);
+        assert!(shown.detail.is_none());
+    }
     assert!(big.detail.is_none());
     // A path never reaches the page, even inside a file error.
     let opened = friendly_error("io error: Couldn't open that file. /Users/sam/secret.txt");

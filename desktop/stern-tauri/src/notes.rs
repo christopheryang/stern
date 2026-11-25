@@ -16,6 +16,7 @@ use stern_core::domain::vault::aad::entry_aad;
 use stern_core::domain::vault::crypto_constants::{DEK_WRAPPED_LEN, KEK_LEN};
 use stern_core::domain::vault::entry::{EncryptedEntry, EntryKind, EntryPayload, Field};
 use stern_core::domain::vault::errors::VaultError;
+use stern_core::domain::vault::metadata::{clean_keywords, clean_summary, suggest_keywords};
 use stern_core::infrastructure::sqlite::repository::StoredPayload;
 use zeroize::Zeroizing;
 
@@ -25,6 +26,10 @@ pub struct NoteDto {
     pub id: String,
     pub title: String,
     pub text: String,
+    /// "What it's about", or empty.
+    pub summary: String,
+    /// Words the note can be found by, comma separated for editing.
+    pub keywords: String,
     pub version: u64,
     pub updated_at: String,
 }
@@ -35,6 +40,32 @@ pub struct NoteSummary {
     pub id: String,
     pub title: String,
     pub updated_at: String,
+}
+
+/// What the editor sends about a note beyond its title and text. `None`
+/// for the whole value means "leave what is stored as it is".
+#[derive(Debug, Clone, Copy)]
+pub struct About<'a> {
+    pub summary: &'a str,
+    /// Comma separated.
+    pub keywords: &'a str,
+}
+
+/// Put the description into a payload: cleaned, and when the person left
+/// the keywords empty, filled from the text so the note can be found.
+fn apply_about(payload: &mut EntryPayload, about: &About<'_>, text: &str) {
+    payload.summary = clean_summary(about.summary);
+    let typed = clean_keywords(&[about.keywords]);
+    payload.keywords = if typed.is_empty() {
+        suggest_keywords(text)
+    } else {
+        typed
+    };
+}
+
+/// Keywords as the editor shows them: one comma separated line.
+fn keywords_line(keywords: &[String]) -> String {
+    keywords.join(", ")
 }
 
 /// Refuse unless the vault is unlocked.
@@ -164,6 +195,8 @@ pub fn load(state: &AppState, id: &str) -> Result<NoteDto, VaultError> {
         id: entry.id.clone(),
         title,
         text,
+        summary: payload.summary.clone(),
+        keywords: keywords_line(&payload.keywords),
         version: entry.version,
         updated_at: entry.updated_at.to_rfc3339(),
     })
@@ -192,6 +225,7 @@ pub fn save(
     id: Option<&str>,
     title: &str,
     text: &str,
+    about: Option<&About<'_>>,
 ) -> Result<NoteDto, VaultError> {
     let title = title.trim();
     if title.is_empty() {
@@ -206,9 +240,15 @@ pub fn save(
                 kind: EntryKind::Note,
                 tags: vec![],
                 fields: vec![],
+                summary: String::new(),
+                keywords: vec![],
             };
             set_field(&mut payload, "title", title);
             set_field(&mut payload, "text", text);
+            match about {
+                Some(about) => apply_about(&mut payload, about, text),
+                None => payload.keywords = suggest_keywords(text),
+            }
             // The plaintext JSON is wiped when it goes out of scope.
             let payload_json = Zeroizing::new(
                 serde_json::to_vec(&payload)
@@ -248,6 +288,9 @@ pub fn save(
             payload.name = title.to_string();
             set_field(&mut payload, "title", title);
             set_field(&mut payload, "text", text);
+            if let Some(about) = about {
+                apply_about(&mut payload, about, text);
+            }
             let payload_json = Zeroizing::new(
                 serde_json::to_vec(&payload)
                     .map_err(|e| VaultError::Serialization(e.to_string()))?,
@@ -311,6 +354,8 @@ mod tests {
                     hidden: false,
                 },
             ],
+            summary: String::new(),
+            keywords: vec![],
         };
         assert_eq!(
             note_fields(&payload),
@@ -338,6 +383,13 @@ pub async fn save_note(
     id: Option<String>,
     title: String,
     text: String,
+    summary: Option<String>,
+    keywords: Option<String>,
 ) -> Result<NoteDto, VaultError> {
-    save(&state, id.as_deref(), &title, &text)
+    // Both or neither: an editor that sends only one is out of date.
+    let about = summary
+        .as_deref()
+        .zip(keywords.as_deref())
+        .map(|(summary, keywords)| About { summary, keywords });
+    save(&state, id.as_deref(), &title, &text, about.as_ref())
 }

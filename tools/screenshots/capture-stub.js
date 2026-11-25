@@ -79,7 +79,7 @@
   const chat = (text) => {
     const t = text.trim().toLowerCase();
     if (t === "save a document" || t === "store a document") {
-      return reply("Choose a file from this computer to keep in your vault. The limit is 10 MB.",
+      return reply("Choose a plain text file from this computer to keep in your vault, like .txt, .md, .html or .csv. The limit is 1 MB.",
         { action: "open_file_picker" });
     }
     if (t === "save a note" || t === "store a note") {
@@ -111,9 +111,10 @@
         "📁 Organise -- \"create folder Taxes\", \"show my folders\"");
     }
     if (t.startsWith("delete")) {
-      return reply("Delete \"Netflix\"? This can't be undone.", { options: ["Yes, delete it", "No, keep it"] });
+      return reply("Delete \"Netflix\"? You can bring it back from the trash for 30 days.", { options: ["Yes, delete it", "No, keep it"] });
     }
-    if (t === "yes, delete it") return reply("Deleted \"Netflix\".");
+    if (t === "undo") return reply("Brought \"Netflix\" back.");
+    if (t === "yes, delete it") return reply("Deleted \"Netflix\". It stays in the trash for 30 days. Say \"undo\" to bring it back.");
     if (t === "no, keep it") return reply("Okay, \"Netflix\" is kept.");
     if (t.startsWith("find my")) {
       return reply(`"Shopping list":\n  title: Shopping list\n  text: eggs, milk and bread`);
@@ -129,7 +130,7 @@
       "- \"save a note\"\n- \"find my shopping list\"\n- \"save a document\"\n- \"help\"");
   };
 
-  const notes = [{ id: "note-0", title: "Shopping list", text: "eggs, milk and bread", version: 1, updated_at: new Date().toISOString() }];
+  const notes = [{ id: "note-0", title: "Shopping list", text: "eggs, milk and bread", summary: "Weekly groceries", keywords: "groceries, shopping", version: 1, updated_at: new Date().toISOString() }];
   // The UI serializes its arguments with serde-wasm-bindgen,
   // which can hand over Maps instead of plain objects.
   const plain = (v) => (v instanceof Map ? Object.fromEntries([...v].map(([k, x]) => [k, plain(x)])) : v);
@@ -147,8 +148,8 @@
         if (cmd === "add_file_from_picker") {
           window.__pickCalls = (window.__pickCalls || 0) + 1;
           if (q.get("pick") === "cancel") return null;
-          if (q.get("pick") === "big") throw "That file is too big. The limit is 10 MB.";
-          return { id: "file-1", name: "lease.pdf", size_bytes: 3460300, is_text: false };
+          if (q.get("pick") === "big") throw "That file is too big. The limit is 1 MB.";
+          return { id: "file-1", name: "lease.txt", size_bytes: 3460, is_text: true };
         }
         if (cmd === "load_note") return notes.find((n) => n.id === plain(args).id) || Promise.reject("note not found");
         if (cmd === "save_note") {
