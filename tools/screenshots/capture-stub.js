@@ -96,6 +96,25 @@
       return reply("What would you like to save?",
         { options: ["note", "document", "username/password", "credit card", "contact info"] });
     }
+    if (t === "show my secrets") {
+      return reply("You have 3 entries (names only, no secrets shown):\n\n" +
+        "📁 Home\n    • Lease (document)\n📁 Streaming\n    📁 Kids\n        • Netflix (login)\n" +
+        "Not in a folder\n    • Shopping list (note)");
+    }
+    if (t === "show my folders") {
+      return reply("Here is how your vault is organised (names only, no secrets shown):\n\n" +
+        "📁 Home\n    • Lease (document)\n📁 Streaming\n    📁 Kids\n        • Netflix (login)");
+    }
+    if (t === "what can you do") {
+      return reply("I keep your notes and documents safe, and everything stays on this computer. " +
+        "Here is what you can ask me:\n\n📝 Save something -- \"save a note\"\n🔍 Find it again -- \"find my shopping list\"\n" +
+        "📁 Organise -- \"create folder Taxes\", \"show my folders\"");
+    }
+    if (t.startsWith("delete")) {
+      return reply("Delete \"Netflix\"? This can't be undone.", { options: ["Yes, delete it", "No, keep it"] });
+    }
+    if (t === "yes, delete it") return reply("Deleted \"Netflix\".");
+    if (t === "no, keep it") return reply("Okay, \"Netflix\" is kept.");
     if (t.startsWith("find my")) {
       return reply(`"Shopping list":\n  title: Shopping list\n  text: eggs, milk and bread`);
     }

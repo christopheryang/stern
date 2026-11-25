@@ -2,7 +2,7 @@ use crate::ai::conversation::{
     has_own_screen, is_placeholder_name, is_sensitive_field, kind_word, Conversation,
     Step as ConversationStep,
 };
-use crate::ai::intent::{classify_folder_intent, classify_intent, Intent};
+use crate::ai::intent::{classify_folder_intent, classify_intent, Chatter, Intent};
 use crate::ai::model::AiModel;
 use std::sync::{Arc, Mutex, RwLock};
 use zeroize::Zeroizing;
@@ -669,23 +669,28 @@ impl ChatHandler {
             return folder_intent;
         }
         match self.model_intent(user_input) {
-            // A greeting or help answer is cheap to double-check:
-            // small models sometimes say "greeting" for a vault
-            // command (measured on SmolLM2-135M: "delete my old
-            // netflix entry" came back as a greeting). If the rules
-            // see a vault action in the same message, trust them.
-            Some(intent @ (Intent::Greeting | Intent::Help)) => match classify_intent(user_input) {
-                fallback @ (Intent::StoreSecret { .. }
-                | Intent::RetrieveSecret { .. }
-                | Intent::ListSecrets { .. }
-                | Intent::DeleteSecret { .. }
-                | Intent::UpdateSecret { .. }
-                | Intent::ExportVault
-                | Intent::ImportVault
-                | Intent::CreateVault
-                | Intent::UnlockVault) => fallback,
-                _ => intent,
-            },
+            // A greeting, help or "unknown" answer is cheap to
+            // double-check: small models sometimes say "greeting" for a
+            // vault command (measured on SmolLM2-135M: "delete my old
+            // netflix entry" came back as a greeting), or give up on a
+            // phrasing the rules understand. If the rules see a vault
+            // action or small talk in the same message, trust them.
+            Some(intent @ (Intent::Greeting | Intent::Help | Intent::Unknown { .. })) => {
+                match classify_intent(user_input) {
+                    fallback @ (Intent::StoreSecret { .. }
+                    | Intent::RetrieveSecret { .. }
+                    | Intent::ListSecrets { .. }
+                    | Intent::DeleteSecret { .. }
+                    | Intent::UpdateSecret { .. }
+                    | Intent::ExportVault
+                    | Intent::ImportVault
+                    | Intent::CreateVault
+                    | Intent::UnlockVault
+                    | Intent::Chatter(_)) => fallback,
+                    Intent::Help if matches!(intent, Intent::Unknown { .. }) => Intent::Help,
+                    _ => intent,
+                }
+            }
             Some(intent) => intent,
             None => classify_intent(user_input),
         }
@@ -868,46 +873,18 @@ impl ChatHandler {
                 options: Vec::new(),
                 input_sensitive: false,
             },
-            Intent::Help => ChatResponse {
-                message:
-                    "I can help you keep your notes and documents safe. Here's what I can do:\n\n\
-                    \u{1f510} Save a note -- \"save a note\"\n\
-                    \u{1f50d} Find something -- \"find my shopping list\"\n\
-                    \u{1f4c4} Save a document -- \"save a document\"\n\
-                    \u{1f511} Save a password -- \"save my GitHub password\"\n\
-                    Tip: for notes you want to keep forever, a plain text file (.txt) is \
-                    best. Any computer can open it, with no special app."
-                        .to_string(),
-                action: None,
-                user_message_display: None,
-                options: Vec::new(),
-                input_sensitive: false,
-            },
-            Intent::Greeting => ChatResponse {
-                message: "I'm doing well, thanks! I'm Stern. I keep your notes and documents \
-                    private, and everything stays on this computer.\n\n\
-                    I can save a note or a document for you, and find it again. Try \"save a \
-                    note\", or ask \"find my shopping list\"."
-                    .to_string(),
-                action: None,
-                user_message_display: None,
-                options: Vec::new(),
-                input_sensitive: false,
-            },
-            Intent::Unknown { ref text } => ChatResponse {
-                message: format!(
-                    "I'm not sure what you mean by \"{text}\".\n\n\
-                    Try something like:\n\
-                    - \"save a note\"\n\
-                    - \"find my shopping list\"\n\
-                    - \"save a document\"\n\
-                    - \"help\""
-                ),
-                action: None,
-                user_message_display: None,
-                options: Vec::new(),
-                input_sensitive: false,
-            },
+            Intent::Help => plain_response(HELP_REPLY),
+            Intent::Greeting => plain_response(GREETING_REPLY),
+            Intent::Chatter(chatter) => plain_response(chatter_reply(chatter)),
+            Intent::Unknown { ref text } => plain_response(&format!(
+                "I'm not sure what you mean by \"{text}\".\n\n\
+                Here are some things I can do:\n\
+                - \"save a note\" or \"save a document\"\n\
+                - \"find my shopping list\"\n\
+                - \"show my secrets\" to see what you have\n\
+                - \"show my folders\" to see how it is organised\n\
+                - \"help\" for everything else"
+            )),
         }
     }
 }
@@ -980,6 +957,41 @@ pub struct ChatResponse {
     /// secret's sensitive field): the UI hides the typing — each
     /// character shows for two seconds, then turns into a mask.
     pub input_sensitive: bool,
+}
+
+/// What Stern says when asked for help or what it can do.
+const HELP_REPLY: &str = "I keep your notes and documents safe, and everything \
+stays on this computer. Here is what you can ask me:\n\n\
+\u{1f4dd} Save something -- \"save a note\", \"save a document\", \"save my GitHub password\"\n\
+\u{1f50d} Find it again -- \"find my shopping list\"\n\
+\u{1f4cb} See what you have -- \"show my secrets\" (names only, never the secrets themselves)\n\
+\u{1f4c1} Organise -- \"create folder Taxes\", \"move Lease to Home\", \"show my folders\"\n\
+\u{270f}\u{fe0f} Tidy up -- \"rename Netflix to Netflix Family\", \"delete my old Netflix entry\"\n\n\
+Tip: for notes you want to keep forever, a plain text file (.txt) is best. Any \
+computer can open it, with no special app.";
+
+/// What Stern says to a greeting.
+const GREETING_REPLY: &str = "Hello! I'm Stern. I keep your notes and documents private, and \
+everything stays on this computer.\n\n\
+I can save a note or a document, find it again, and keep your things in folders. \
+Try \"save a note\", \"show my secrets\", or ask \"what can you do?\"";
+
+/// What Stern says to small talk that is not a greeting.
+const fn chatter_reply(chatter: Chatter) -> &'static str {
+    match chatter {
+        Chatter::Thanks => "You're welcome! Anything else you'd like to save or find?",
+        Chatter::Goodbye => {
+            "Goodbye! Your vault stays locked up safe. Use the padlock if you'd like to lock it now."
+        }
+        Chatter::About => {
+            "I'm Stern, your private vault assistant. I keep notes, documents and passwords \
+            on this computer, encrypted, and I can find, organise and tidy them for you. \
+            Ask \"what can you do?\" for ideas."
+        }
+        Chatter::Acknowledge => {
+            "Okay. Say \"save a note\", \"find <name>\" or \"show my secrets\" whenever you're ready."
+        }
+    }
 }
 
 /// A response carrying only a message.

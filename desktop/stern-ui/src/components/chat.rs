@@ -388,10 +388,12 @@ fn editor_done_callback(
 
 /// Starter prompts shown on the empty chat. Each is sent as an
 /// ordinary message, so it takes the same path as typed text.
-const SUGGESTIONS: [(IconKind, &str, &str); 3] = [
+const SUGGESTIONS: [(IconKind, &str, &str); 5] = [
     (IconKind::Note, "Save a note", "store a note"),
     (IconKind::Note, "Save a document", "store a document"),
     (IconKind::Key, "Save a password", "store a password"),
+    (IconKind::List, "What do I have?", "show my secrets"),
+    (IconKind::Help, "What can you do?", "what can you do"),
 ];
 
 /// The empty state: brand mark, a greeting, and starter prompts.

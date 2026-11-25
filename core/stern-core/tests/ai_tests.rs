@@ -1,7 +1,7 @@
 #![allow(clippy::unwrap_used)]
 
 use stern_core::ai::chat::{Action, ChatHandler, EntryCandidate};
-use stern_core::ai::intent::{classify_intent, Intent};
+use stern_core::ai::intent::{classify_intent, Chatter, Intent};
 
 fn assert_intent(text: &str, expected: Intent) {
     let got = classify_intent(text);
@@ -267,7 +267,7 @@ fn import_vault() {
 
 #[test]
 fn import_restore() {
-    assert_intent("restore from backup", Intent::ExportVault);
+    assert_intent("restore from backup", Intent::ImportVault);
 }
 
 #[test]
@@ -660,12 +660,12 @@ fn greeting_how_are_you() {
 
 #[test]
 fn greeting_thanks_alone_but_not_after_a_command() {
-    assert_intent("thanks", Intent::Greeting);
-    assert_intent("thank you", Intent::Greeting);
+    assert_intent("thanks", Intent::Chatter(Chatter::Thanks));
+    assert_intent("thank you", Intent::Chatter(Chatter::Thanks));
     // "save my password, thanks" is a store, not small talk.
     assert_ne!(
         classify_intent("save my GitHub password is hunter2, thanks"),
-        Intent::Greeting
+        Intent::Chatter(Chatter::Thanks)
     );
 }
 
@@ -981,8 +981,8 @@ fn edit_my_note_asks_to_update_it_by_name() {
 fn chat_suggestions_lead_with_notes_not_passwords() {
     let handler = ChatHandler::new(None);
     let help = handler.process_message("can you help").message;
-    assert!(help.contains("Save a note"), "help: {help}");
-    let note_at = help.find("Save a note").unwrap();
+    assert!(help.contains("save a note"), "help: {help}");
+    let note_at = help.find("save a note").unwrap();
     assert!(
         help.find("password").is_none_or(|p| p > note_at),
         "help: {help}"
@@ -1334,4 +1334,172 @@ fn folder_requests_wait_for_the_vault() {
     let reply = h.process_message("create folder Taxes");
     assert!(reply.input_sensitive, "message: {}", reply.message);
     assert!(reply.action.is_none());
+}
+
+// ---- everyday phrasings and small talk ----
+
+fn finds(text: &str, wanted: &str) {
+    match classify_intent(text) {
+        Intent::RetrieveSecret { name, .. } => {
+            assert!(
+                name.to_lowercase().contains(wanted),
+                "{text:?}: name was {name:?}"
+            );
+        }
+        other => panic!("{text:?}: expected a lookup, got {other:?}"),
+    }
+}
+
+#[test]
+fn everyday_lookup_phrasings_find_the_entry() {
+    finds("I forgot my router password", "router");
+    finds("look up my wifi password", "wifi");
+    finds("fetch my github token", "github");
+    finds("give me my netflix password", "netflix");
+    finds("tell me my gmail password", "gmail");
+    finds("where did I put my lease", "lease");
+    finds("do I have a passport saved", "passport");
+    finds("do you have my tax return", "tax return");
+    finds("could you please look up my lease", "lease");
+}
+
+#[test]
+fn opening_something_finds_it_but_opening_the_vault_does_not() {
+    finds("open my shopping list", "shopping");
+    assert_eq!(classify_intent("open my vault"), Intent::UnlockVault);
+}
+
+#[test]
+fn everyday_save_phrasings_start_a_save() {
+    for text in [
+        "jot down a note",
+        "write down a note",
+        "I want to save a note",
+        "new note",
+        "make a note",
+        "let's save a note",
+    ] {
+        match classify_intent(text) {
+            Intent::StoreSecret { kind, fields, .. } => {
+                assert_eq!(kind, "note", "{text:?}");
+                assert!(fields.is_empty(), "{text:?}");
+            }
+            other => panic!("{text:?}: expected a store, got {other:?}"),
+        }
+    }
+    for text in ["upload a document", "i'd like to store a document"] {
+        match classify_intent(text) {
+            Intent::StoreSecret { kind, .. } => assert_eq!(kind, "document", "{text:?}"),
+            other => panic!("{text:?}: expected a document store, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn everyday_delete_phrasings_name_the_entry() {
+    for (text, wanted) in [
+        ("get rid of my netflix login", "netflix"),
+        ("erase my old note about tax", "tax"),
+        ("trash the lease", "lease"),
+        ("throw away my gmail password", "gmail"),
+    ] {
+        match classify_intent(text) {
+            Intent::DeleteSecret { name } => {
+                assert!(name.to_lowercase().contains(wanted), "{text:?}: {name:?}");
+            }
+            other => panic!("{text:?}: expected a delete, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn asking_what_is_saved_lists_it() {
+    for text in [
+        "what do I have saved",
+        "what's in my vault",
+        "how many secrets do I have",
+        "show me everything",
+    ] {
+        assert_eq!(
+            classify_intent(text),
+            Intent::ListSecrets {
+                category: Some("secret".into())
+            },
+            "{text:?}"
+        );
+    }
+}
+
+#[test]
+fn back_up_means_export_only_for_the_vault() {
+    assert_eq!(classify_intent("back up my vault"), Intent::ExportVault);
+    assert_eq!(classify_intent("import a backup"), Intent::ImportVault);
+}
+
+#[test]
+fn what_can_you_do_is_a_help_question() {
+    for text in [
+        "what can you do",
+        "what do you do?",
+        "What else can you do",
+        "what can I ask",
+    ] {
+        assert_eq!(classify_intent(text), Intent::Help, "{text:?}");
+    }
+}
+
+#[test]
+fn small_talk_gets_a_friendly_answer_not_a_shrug() {
+    let cases = [
+        ("thanks", Chatter::Thanks),
+        ("thank you so much", Chatter::Thanks),
+        ("bye", Chatter::Goodbye),
+        ("see you later", Chatter::Goodbye),
+        ("who are you", Chatter::About),
+        ("what's your name", Chatter::About),
+        ("ok", Chatter::Acknowledge),
+        ("cool", Chatter::Acknowledge),
+    ];
+    let h = ChatHandler::new(None);
+    for (text, chatter) in cases {
+        assert_eq!(classify_intent(text), Intent::Chatter(chatter), "{text:?}");
+        let reply = h.process_message(text);
+        assert!(
+            !reply.message.contains("not sure"),
+            "{text:?}: {}",
+            reply.message
+        );
+        assert!(reply.action.is_none());
+        // Small talk never needs the vault, so it never asks for a password.
+        assert!(!reply.input_sensitive, "{text:?}");
+    }
+}
+
+#[test]
+fn the_help_reply_offers_find_list_and_folders() {
+    let help = ChatHandler::new(None)
+        .process_message("what can you do")
+        .message;
+    for wanted in [
+        "find my",
+        "show my secrets",
+        "create folder",
+        "rename",
+        "delete",
+    ] {
+        assert!(help.contains(wanted), "missing {wanted:?} in: {help}");
+    }
+}
+
+#[test]
+fn rewording_never_changes_a_stored_value() {
+    // Values keep their case and punctuation: only the wording of the
+    // request is normalised.
+    match classify_intent("save my GitHub password is Abc123XyZ") {
+        Intent::StoreSecret { fields, .. } => {
+            let value = &fields.first().unwrap().1;
+            assert!(value.eq_ignore_ascii_case("abc123xyz"));
+        }
+        other => panic!("expected a store, got {other:?}"),
+    }
 }

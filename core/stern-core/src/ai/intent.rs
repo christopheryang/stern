@@ -1,5 +1,16 @@
 use serde::{Deserialize, Serialize};
 
+/// What kind of small talk a message is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Chatter {
+    Thanks,
+    Goodbye,
+    /// Who or what Stern is.
+    About,
+    /// A bare "ok", "cool", "yes".
+    Acknowledge,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Intent {
     StoreSecret {
@@ -55,6 +66,8 @@ pub enum Intent {
     UnlockVault,
     Help,
     Greeting,
+    /// Small talk that is not a greeting: thanks, goodbye, "who are you".
+    Chatter(Chatter),
     Unknown {
         text: String,
     },
@@ -130,6 +143,7 @@ pub fn classify_intent(text: &str) -> Intent {
     } else {
         strip_polite_lead(&raw_lower).to_string()
     };
+    let lower = normalize_phrases(&lower);
     let words: Vec<&str> = lower.split_whitespace().collect();
     // The greeting/help checks compare whole words, so strip the
     // punctuation a sentence leaves on its last word ("you?" is
@@ -145,11 +159,15 @@ pub fn classify_intent(text: &str) -> Intent {
         return intent;
     }
 
+    if let Some(chatter) = detect_chatter(&clean_words, &lower) {
+        return Intent::Chatter(chatter);
+    }
+
     if is_greeting(&clean_words, &lower) {
         return Intent::Greeting;
     }
 
-    if is_help(&clean_words) {
+    if is_help(&clean_words) || is_capability_question(&lower) {
         return Intent::Help;
     }
 
@@ -165,6 +183,14 @@ pub fn classify_intent(text: &str) -> Intent {
     // store request, though both contain words those rules look for.
     if words.first().is_some_and(|w| UPDATE_VERBS.contains(w)) {
         if let Some(intent) = detect_update(&words, &lower) {
+            return intent;
+        }
+    }
+
+    // Likewise a leading delete verb: "delete my old note about tax" is
+    // not a store because it says "note".
+    if words.first().is_some_and(|w| DELETE_VERBS.contains(w)) {
+        if let Some(intent) = detect_delete(&words) {
             return intent;
         }
     }
@@ -193,6 +219,13 @@ pub fn classify_intent(text: &str) -> Intent {
         return intent;
     }
 
+    // "import a backup" is an import, though it says "backup".
+    if words.iter().any(|w| matches!(*w, "import" | "restore")) {
+        if let Some(intent) = detect_import(&words) {
+            return intent;
+        }
+    }
+
     if let Some(intent) = detect_export(&words) {
         return intent;
     }
@@ -204,6 +237,215 @@ pub fn classify_intent(text: &str) -> Intent {
     Intent::Unknown {
         text: text.to_string(),
     }
+}
+
+/// Whole-message phrases that all mean "show me what I have".
+const LIST_PHRASES: &[&str] = &[
+    "what do i have",
+    "what do i have saved",
+    "what have i saved",
+    "what have i stored",
+    "what is in my vault",
+    "what is in the vault",
+    "how many secrets do i have",
+    "how many things do i have saved",
+    "show me everything",
+    "show me what i have",
+    "show me what i have saved",
+    "what is saved",
+    "what is stored",
+];
+
+/// Ways to start a request that mean the same as a plainer verb.
+/// Each rewrite applies only at the very start of the message, so a value
+/// further in ("... is read this") is never touched.
+const LEAD_REWRITES: &[(&str, &str)] = &[
+    ("i forgot my ", "find my "),
+    ("i forgot the ", "find the "),
+    ("i lost my ", "find my "),
+    ("where did i put ", "find "),
+    ("where did i save ", "find "),
+    ("where did i store ", "find "),
+    ("where is my ", "find my "),
+    ("do i have ", "find "),
+    ("do you have ", "find "),
+    ("look up ", "find "),
+    ("look for ", "find "),
+    ("fetch ", "find "),
+    ("give me ", "find "),
+    ("tell me ", "find "),
+    ("read ", "find "),
+    ("get rid of ", "delete "),
+    ("throw away ", "delete "),
+    ("erase ", "delete "),
+    ("trash ", "delete "),
+    ("jot down ", "save "),
+    ("write down ", "save "),
+    ("make a ", "save a "),
+    ("make an ", "save an "),
+    ("upload ", "save "),
+    ("attach ", "save "),
+    ("back up ", "export "),
+    ("i want to ", ""),
+    ("i would like to ", ""),
+    ("i'd like to ", ""),
+    ("i need to ", ""),
+    ("i wanna ", ""),
+    ("let me ", ""),
+    ("let's ", ""),
+];
+
+/// Words left on the end of a lookup that only say "it is stored".
+const LOOKUP_TAILS: &[&str] = &[
+    " saved",
+    " stored",
+    " in my vault",
+    " in the vault",
+    " anywhere",
+];
+
+/// Rewrite everyday phrasings to the plain verbs the rules key on:
+/// "i forgot my router password" becomes "find my router password".
+fn normalize_phrases(lower: &str) -> String {
+    let trimmed = lower.trim().trim_end_matches(['?', '!', '.']).trim();
+    if LIST_PHRASES.contains(&trimmed) {
+        return "list all my secrets".to_string();
+    }
+    // "open my vault" is about the vault, not a lookup.
+    let talks_of_vault = trimmed.split_whitespace().any(|w| w == "vault");
+    let rewritten = LEAD_REWRITES.iter().find_map(|(from, to)| {
+        if *from == "back up " && !talks_of_vault {
+            return None;
+        }
+        trimmed.strip_prefix(from).map(|rest| format!("{to}{rest}"))
+    });
+    let mut text = match rewritten {
+        Some(text) => text,
+        None if !talks_of_vault => {
+            // "open my shopping list" finds it; "open my vault" does not.
+            match trimmed.strip_prefix("open my ") {
+                Some(rest) => format!("find my {rest}"),
+                None => return lower.to_string(),
+            }
+        }
+        None => return lower.to_string(),
+    };
+    // A lead-in can leave a second one behind ("i want to ...").
+    if let Some(next) = text.strip_prefix("i ") {
+        text = next.to_string();
+    }
+    if let Some(rest) = text
+        .strip_prefix("find a ")
+        .or_else(|| text.strip_prefix("find an "))
+    {
+        text = format!("find my {rest}");
+    }
+    if text.starts_with("find ") {
+        for tail in LOOKUP_TAILS {
+            if let Some(stripped) = text.strip_suffix(tail) {
+                text = stripped.to_string();
+                break;
+            }
+        }
+    }
+    text
+}
+
+const BYE_PHRASES: &[&str] = &[
+    "bye",
+    "goodbye",
+    "good bye",
+    "good night",
+    "see you",
+    "see you later",
+    "see ya",
+    "talk later",
+    "talk to you later",
+    "cya",
+    "later",
+    "farewell",
+];
+
+const ABOUT_PHRASES: &[&str] = &[
+    "who are you",
+    "what are you",
+    "what is your name",
+    "what's your name",
+    "what is this app",
+    "what is this",
+    "what is stern",
+    "who made you",
+    "are you there",
+    "are you real",
+    "are you a robot",
+    "are you an ai",
+    "are you ai",
+    "are you listening",
+];
+
+const THANKS_WORDS: &[&str] = &["thanks", "thank", "thx", "ty", "cheers", "appreciate"];
+const ACKNOWLEDGEMENTS: &[&str] = &[
+    "ok",
+    "okay",
+    "cool",
+    "great",
+    "nice",
+    "alright",
+    "sure",
+    "yes",
+    "yep",
+    "yeah",
+    "no",
+    "nope",
+    "got it",
+    "lol",
+    "hmm",
+    "fine",
+    "perfect",
+    "awesome",
+    "good job",
+    "well done",
+];
+
+/// Thanks, goodbyes, "who are you" and a bare "ok". Thanks counts only when
+/// it is (nearly) the whole message: "save my password, thanks" is a store.
+fn detect_chatter(words: &[&str], lower: &str) -> Option<Chatter> {
+    let text = lower.trim().trim_end_matches(['?', '!', '.', ',']);
+    if words.len() <= 4 && words.iter().any(|w| THANKS_WORDS.contains(w)) {
+        return Some(Chatter::Thanks);
+    }
+    if BYE_PHRASES.contains(&text) {
+        return Some(Chatter::Goodbye);
+    }
+    if ABOUT_PHRASES.contains(&text) {
+        return Some(Chatter::About);
+    }
+    ACKNOWLEDGEMENTS
+        .contains(&text)
+        .then_some(Chatter::Acknowledge)
+}
+
+/// Phrases that ask what Stern can do.
+const CAPABILITY_PHRASES: &[&str] = &[
+    "what can you do",
+    "what do you do",
+    "what can i do",
+    "what can i ask",
+    "what can i say",
+    "what are you able to do",
+    "what are you capable of",
+    "what are your features",
+    "what are the commands",
+    "what commands are there",
+    "what else can you do",
+    "what else can i do",
+];
+
+fn is_capability_question(lower: &str) -> bool {
+    let text = lower.trim().trim_end_matches(['?', '!', '.']);
+    CAPABILITY_PHRASES.contains(&text)
+        || text.ends_with(" can you do")
+        || text.starts_with("what can you ")
 }
 
 fn is_greeting(words: &[&str], lower: &str) -> bool {
@@ -218,13 +460,6 @@ fn is_greeting(words: &[&str], lower: &str) -> bool {
         "greetings",
     ];
     if words.iter().any(|w| greetings.contains(w)) {
-        return true;
-    }
-    // Gratitude counts as small talk only when it is (nearly) the
-    // whole message — "save my password, thanks" is a store, not a
-    // greeting.
-    let gratitude = ["thanks", "thank"];
-    if words.len() <= 4 && words.iter().any(|w| gratitude.contains(w)) {
         return true;
     }
     // Small-talk phrases the word list cannot express.
