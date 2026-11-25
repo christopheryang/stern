@@ -359,3 +359,18 @@ fn cap_lines(mut lines: Vec<String>) -> String {
     }
     lines.join("\n")
 }
+
+/// Whether an entry filed under the folder names `path` (from the top)
+/// is in the folder `folder_id` or anywhere below it.
+#[must_use]
+pub fn is_within_path(nodes: &[FolderNode], path: &[String], folder_id: &str) -> bool {
+    let Some(target) = nodes.iter().find(|n| n.id == folder_id) else {
+        return false;
+    };
+    let target_path = path_segments(nodes, &target.id);
+    path.len() >= target_path.len()
+        && path
+            .iter()
+            .zip(&target_path)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}

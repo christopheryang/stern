@@ -40,7 +40,7 @@ impl Reply {
     }
 }
 
-fn unlocked_kek(state: &AppState) -> Result<Zeroizing<[u8; KEK_LEN]>, VaultError> {
+pub fn unlocked_kek(state: &AppState) -> Result<Zeroizing<[u8; KEK_LEN]>, VaultError> {
     let session = state
         .session
         .lock()
@@ -108,7 +108,7 @@ pub fn folder_name_for_test(
 }
 
 /// Every folder with its name in the clear.
-fn folder_nodes(state: &AppState, kek: &[u8; KEK_LEN]) -> Result<Vec<FolderNode>, VaultError> {
+pub fn folder_nodes(state: &AppState, kek: &[u8; KEK_LEN]) -> Result<Vec<FolderNode>, VaultError> {
     state
         .repository
         .list_folders()?

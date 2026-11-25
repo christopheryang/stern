@@ -1,8 +1,10 @@
 pub mod chat;
 pub mod conversation;
+pub mod dates;
 pub mod intent;
 pub mod model;
 pub mod model_manager;
+pub mod query;
 
 pub use chat::{ChatHandler, EntryCandidate};
 pub use model::AiModel;

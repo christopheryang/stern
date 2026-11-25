@@ -1,18 +1,22 @@
 #![allow(clippy::unwrap_used)]
 
-//! The search evaluation: a synthetic vault of 60 entries and 80-odd
-//! questions (see `tests/eval/`), scored against what chat can find today.
+//! The search evaluation: a synthetic vault of 60 entries and 85
+//! questions (see `tests/eval/`), scored against the real query reader and
+//! search.
 //!
 //! The score is a baseline, not a pass mark. It is printed with
 //! `cargo test -p stern-core --test eval_tests -- --nocapture`, and the
 //! floors asserted below only stop it from getting worse. Later phases raise
 //! them as search improves (see the Vault Assistant design).
 
-use stern_core::ai::intent::{classify_intent, Intent};
-use stern_core::domain::vault::folder::{render_folder, resolve, FolderNode, Resolution, TreeItem};
+use chrono::{DateTime, Duration, TimeZone, Utc};
+use stern_core::ai::intent::{classify_folder_intent, Intent};
+use stern_core::domain::vault::folder::FolderNode;
+use stern_core::search::{find, Kind, SearchDoc};
 
 const VAULT: &str = include_str!("eval/vault.txt");
 const QUESTIONS: &str = include_str!("eval/questions.txt");
+const HOLDOUT: &str = include_str!("eval/holdout.txt");
 
 struct Item {
     id: String,
@@ -77,7 +81,15 @@ fn items() -> Vec<Item> {
 }
 
 fn questions() -> Vec<Question> {
-    rows(QUESTIONS)
+    parse_questions(QUESTIONS)
+}
+
+fn holdout() -> Vec<Question> {
+    parse_questions(HOLDOUT)
+}
+
+fn parse_questions(source: &str) -> Vec<Question> {
+    rows(source)
         .map(|cols| {
             assert_eq!(cols.len(), 3, "bad question row: {cols:?}");
             let expected = if cols[2] == "-" {
@@ -118,48 +130,56 @@ fn folder_nodes(items: &[Item]) -> Vec<FolderNode> {
     nodes
 }
 
-/// What chat does today with a question: the intent classifier picks a
-/// lookup, and the lookup matches entry names. A folder question shows the
-/// folder. Everything else finds nothing. Returns entry ids, best first.
-fn search_today(question: &str, items: &[Item], nodes: &[FolderNode]) -> Vec<String> {
-    match classify_intent(question) {
-        Intent::RetrieveSecret { name, .. } => {
-            let needle = name.to_lowercase();
-            items
-                .iter()
-                .filter(|i| i.name.to_lowercase().contains(&needle))
-                .map(|i| i.id.clone())
-                .collect()
-        }
-        Intent::ShowFolders {
-            folder: Some(reference),
-        } => match resolve(nodes, &reference) {
-            Resolution::One(folder_id) => {
-                let tree: Vec<TreeItem> = items
-                    .iter()
-                    .map(|i| TreeItem {
-                        id: i.id.clone(),
-                        name: i.name.clone(),
-                        kind: i.kind,
-                        folder: i
-                            .folder
-                            .as_ref()
-                            .map(|f| format!("/{}", f.replace('/', "/"))),
-                        older_file: false,
-                    })
-                    .collect();
-                // Entries directly inside the folder or any folder below it.
-                let shown = render_folder(nodes, &tree, &folder_id);
-                items
-                    .iter()
-                    .filter(|i| shown.contains(&format!("• {} (", i.name)))
-                    .map(|i| i.id.clone())
-                    .collect()
+/// The clock the questions are asked against: the vault's "days ago" are
+/// counted back from this.
+fn eval_now() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2026, 11, 25, 12, 0, 0).unwrap()
+}
+
+fn docs(items: &[Item]) -> Vec<SearchDoc> {
+    items
+        .iter()
+        .map(|i| {
+            let created = eval_now() - Duration::days(i.days_ago);
+            SearchDoc {
+                id: i.id.clone(),
+                name: i.name.clone(),
+                kind: match i.kind {
+                    "login" => Kind::Login,
+                    "document" => Kind::Document,
+                    _ => Kind::Note,
+                },
+                folder: i
+                    .folder
+                    .as_deref()
+                    .map(|f| f.split('/').map(str::to_string).collect())
+                    .unwrap_or_default(),
+                summary: String::new(),
+                keywords: Vec::new(),
+                text: i.text.clone(),
+                created_at: created,
+                updated_at: created,
             }
-            _ => Vec::new(),
-        },
-        _ => Vec::new(),
-    }
+        })
+        .collect()
+}
+
+/// Search as the app does. Folder questions ("what's in the Taxes folder")
+/// are answered by the folder view, which lists a folder's entries, as the
+/// chat does. Returns entry ids, best first.
+fn search_now(question: &str, docs: &[SearchDoc], nodes: &[FolderNode]) -> Vec<String> {
+    let asked = match classify_folder_intent(question) {
+        Some(Intent::ShowFolders {
+            folder: Some(reference),
+        }) => format!("everything in the {reference} folder"),
+        _ => question.to_string(),
+    };
+    find(docs, nodes, &asked, eval_now())
+        .outcome
+        .hits
+        .into_iter()
+        .map(|h| h.id)
+        .collect()
 }
 
 fn passes(expected: &Expected, found: &[String], items: &[Item]) -> bool {
@@ -240,12 +260,13 @@ fn the_questions_cover_every_kind_of_request() {
 fn baseline_search_score() {
     let items = items();
     let nodes = folder_nodes(&items);
+    let docs = docs(&items);
     let questions = questions();
 
     let mut totals: Vec<(String, usize, usize)> = Vec::new();
     let mut misses: Vec<String> = Vec::new();
     for q in &questions {
-        let found = search_today(&q.text, &items, &nodes);
+        let found = search_now(&q.text, &docs, &nodes);
         let ok = passes(&q.expected, &found, &items);
         match totals.iter_mut().find(|(c, _, _)| *c == q.category) {
             Some(row) => {
@@ -259,7 +280,7 @@ fn baseline_search_score() {
         }
     }
 
-    println!("\nSearch today, top three, {} questions", questions.len());
+    println!("\nSearch, top three, {} questions", questions.len());
     let (mut all, mut all_ok) = (0, 0);
     for (category, count, ok) in &totals {
         println!("  {category:<7} {ok:>2} / {count:<2}");
@@ -286,7 +307,39 @@ fn baseline_search_score() {
     assert!(all_ok >= TOTAL_FLOOR, "overall search got worse: {all_ok}");
 }
 
-/// Measured on 2026-11-25, before any search work: 10 of 16 name questions
-/// and 23 of 85 overall. Raise these as search improves; never lower them.
-const NAME_FLOOR: usize = 10;
-const TOTAL_FLOOR: usize = 23;
+/// Measured on 2026-11-25. Before any search work (name matching only): 10 of
+/// 16 name questions and 23 of 85 overall. After phase 2: 16 of 16 and 85 of
+/// 85, on the questions the search was tuned with. Raise these as search
+/// improves; never lower them.
+const NAME_FLOOR: usize = 16;
+const TOTAL_FLOOR: usize = 85;
+
+/// Questions written after the search was tuned. A search fitted to the main
+/// set scores much worse here, so this is the honest number.
+#[test]
+fn holdout_search_score() {
+    let items = items();
+    let nodes = folder_nodes(&items);
+    let docs = docs(&items);
+    let questions = holdout();
+    let mut ok = 0;
+    let mut misses = Vec::new();
+    for q in &questions {
+        let found = search_now(&q.text, &docs, &nodes);
+        if passes(&q.expected, &found, &items) {
+            ok += 1;
+        } else {
+            misses.push(format!("[{}] {}", q.category, q.text));
+        }
+    }
+    println!("\nHoldout, top three: {ok} / {}", questions.len());
+    for miss in &misses {
+        println!("  miss {miss}");
+    }
+    assert!(ok >= HOLDOUT_FLOOR, "holdout search got worse: {ok}");
+}
+
+/// Measured on 2026-11-25 after phase 2: 34 of 40. The six misses need
+/// synonyms ("landlord" for a lease, "cost" for "spend"), which is what
+/// meaning search adds in phase 3. Raise it then; never lower it.
+const HOLDOUT_FLOOR: usize = 34;

@@ -28,6 +28,7 @@ fn action_to_string_search_entry() {
     let action = CoreAction::SearchEntry {
         query: "foo".into(),
         field: None,
+        fallback: false,
     };
     assert_eq!(action_to_string(&action), "search");
 }
@@ -124,6 +125,7 @@ fn passthrough_response_all_action_variants() {
         CoreAction::SearchEntry {
             query: "q".into(),
             field: None,
+            fallback: false,
         },
         CoreAction::RevealEntry {
             entry_id: "id".into(),
@@ -189,15 +191,19 @@ fn search_entry_answers_the_asked_field() {
     unlock_test_session(&state);
     store_test_entry(&state, "Google", "hunter2");
 
-    let answer = handle_search_entry(&state, "google", Some("password")).unwrap();
+    let answer = crate::find::find_entries(&state, "google", Some("password"), false).unwrap();
     assert!(
         answer.message.contains("hunter2"),
         "message: {}",
         answer.message
     );
 
-    let missing = handle_search_entry(&state, "nope", None).unwrap();
-    assert!(missing.message.contains("No secret found"));
+    let missing = crate::find::find_entries(&state, "nope", None, false).unwrap();
+    assert!(
+        missing.message.contains("couldn't find anything"),
+        "message: {}",
+        missing.message
+    );
 }
 
 #[test]
@@ -207,7 +213,7 @@ fn search_entry_with_two_matches_offers_a_choice_that_reveals() {
     store_test_entry(&state, "Google", "personal-pass");
     store_test_entry(&state, "Google Work", "work-pass");
 
-    let response = handle_search_entry(&state, "google", Some("password")).unwrap();
+    let response = crate::find::find_entries(&state, "google", Some("password"), false).unwrap();
     assert_eq!(response.options.len(), 2);
 
     let picked = state.chat_handler.process_message("b");
@@ -226,7 +232,7 @@ fn search_entry_with_two_matches_offers_a_choice_that_reveals() {
 #[test]
 fn search_entry_while_locked_reports_locked() {
     let (state, _path) = make_test_app_state();
-    let response = handle_search_entry(&state, "google", None).unwrap();
+    let response = crate::find::find_entries(&state, "google", None, false).unwrap();
     assert_eq!(response.action.as_deref(), Some("locked"));
 }
 
@@ -1436,7 +1442,7 @@ fn deleting_puts_the_entry_in_the_trash_and_out_of_sight() {
     assert!(!chat(&state, "show my secrets").message.contains("Chase"));
     assert!(chat(&state, "find Chase card")
         .message
-        .contains("No secret found"));
+        .contains("couldn't find anything"));
     assert_eq!(state.repository.count_entries().unwrap(), 1);
     assert!(crate::notes::list(&state)
         .unwrap()
@@ -1644,4 +1650,107 @@ fn deleting_a_stored_file_goes_to_the_trash_not_straight_out() {
     assert_eq!(state.repository.count_entries().unwrap(), 0);
     crate::trash::empty(&state).unwrap();
     assert!(state.repository.get_blob(&id).unwrap().is_none());
+}
+
+fn saved_note(state: &AppState, title: &str, text: &str, about: Option<(&str, &str)>) -> String {
+    let about = about.map(|(summary, keywords)| note_about(summary, keywords));
+    crate::notes::save(state, None, title, text, about.as_ref())
+        .unwrap()
+        .id
+}
+
+#[test]
+fn a_topic_question_finds_the_note_that_is_about_it() {
+    let (state, _path) = two_notes();
+    saved_note(
+        &state,
+        "Chase Sapphire",
+        "number on the back of the card",
+        Some(("my credit card", "credit card, visa")),
+    );
+    let reply = chat(
+        &state,
+        "I stored something about my credit card a while back, can you find it?",
+    );
+    assert!(
+        reply.message.contains("Chase Sapphire"),
+        "{}",
+        reply.message
+    );
+}
+
+#[test]
+fn a_time_phrase_narrows_the_search_and_says_which_dates_it_used() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    let old = saved_note(&state, "Old card", "visa", Some(("my credit card", "")));
+    saved_note(&state, "New card", "amex", Some(("my credit card", "")));
+    let when = (chrono::Utc::now() - chrono::Duration::days(60)).to_rfc3339();
+    state
+        .repository
+        .backdate_entry_for_test(&old, &when)
+        .unwrap();
+    let reply = chat(
+        &state,
+        "the credit card note I saved a couple of months ago",
+    );
+    assert!(reply.message.contains("Old card"), "{}", reply.message);
+    assert!(!reply.message.contains("New card"), "{}", reply.message);
+    assert!(reply.message.contains("between"), "{}", reply.message);
+}
+
+#[test]
+fn several_matches_come_back_as_choices_without_values() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    saved_note(&state, "Visa", "4417 1234", Some(("my credit card", "")));
+    saved_note(&state, "Amex", "3782 8224", Some(("my credit card", "")));
+    let reply = chat(&state, "find my credit card");
+    assert_eq!(reply.options.len(), 2, "{}", reply.message);
+    assert!(!reply.message.contains("4417"));
+    assert!(!reply.message.contains("3782"));
+}
+
+#[test]
+fn a_hidden_field_is_never_searched_or_shown() {
+    let (state, _path) = make_test_app_state();
+    unlock_test_session(&state);
+    store_test_entry(&state, "Google", "zebra-planted-secret");
+    let reply = chat(&state, "find zebra-planted-secret");
+    assert!(
+        !reply.message.contains("zebra-planted-secret"),
+        "{}",
+        reply.message
+    );
+    assert!(reply.options.is_empty());
+    let named = chat(&state, "find google");
+    assert!(
+        !named.message.contains("zebra-planted-secret"),
+        "{}",
+        named.message
+    );
+}
+
+#[test]
+fn a_message_nothing_understands_is_not_answered_with_a_secret() {
+    let (state, _path) = two_notes();
+    let reply = chat(&state, "what a lovely quarter horse");
+    assert!(
+        !reply.message.contains("4417") && !reply.message.contains("eggs"),
+        "{}",
+        reply.message
+    );
+}
+
+#[test]
+fn a_locked_vault_is_not_searched_by_unknown_text() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    saved_note(&state, "Shopping", "eggs", None);
+    state.session.lock().unwrap().lock();
+    let reply = chat(&state, "eggs");
+    assert!(!reply.message.contains("Shopping"), "{}", reply.message);
 }

@@ -1,0 +1,43 @@
+# Questions written after the search was tuned, never used to tune it.
+# Same format as questions.txt. If the search only does well on questions.txt,
+# it has been fitted to them; this file is the check.
+name | open the garden plan | e42
+name | find speaker notes for the conference talk | e49
+name | show my vaccination record | e27
+name | find the wedding budget | e51
+name | where is the global entry note | e18
+name | show the moving checklist | e52
+topic | which airline did I book for tokyo | e16
+topic | how much is the rent | e09
+topic | what is the name of my wifi | e10,e43
+topic | where do I keep my spare crypto seed | e39
+topic | which landlord do I pay | e09
+topic | how long is the mortgage preapproval valid | e37
+topic | who do I call for a locksmith | e41
+topic | my sourdough starter schedule | e30
+topic | notes about the hiring panel | e21
+topic | how many lines are on my phone plan | e54
+topic | the rabies shot for my dog | e55
+topic | when do I renew the renters policy | e08
+topic | what did I decide about the thursday launch | e19
+topic | what do I need to bring to the post office | e15
+topic | the carbonara recipe | e29
+topic | the cloud cost overrun | e20
+topic | my auto policy | e07
+topic | fiber internet plan | e53
+topic | the dentist who cleans my teeth | e25
+topic | savings for the vacation | e04
+topic | where are the boxes labeled by room | e40
+topic | the tax accountant | e05
+topic | what to pack for the trip | e17
+topic | where is the hardware wallet | e39
+time | the recipe from this week | e29,e31
+time | passport stuff from last month | e15
+time | what I wrote yesterday | -
+time | notes from the last two weeks | @days:0-14
+none | my cat's microchip number | -
+none | the combination to the safe | -
+none | notes on machine learning | -
+none | what is my blood type | -
+none | the pizza dough recipe | -
+none | find the divorce lawyer | -

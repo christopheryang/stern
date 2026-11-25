@@ -290,7 +290,8 @@ fn execute_chat_response(
         Some(stern_core::ai::chat::Action::SearchEntry {
             ref query,
             ref field,
-        }) => handle_search_entry(state, query, field.as_deref()),
+            fallback,
+        }) => crate::find::find_entries(state, query, field.as_deref(), fallback),
         Some(stern_core::ai::chat::Action::RevealEntry {
             ref entry_id,
             ref field,
@@ -590,7 +591,7 @@ fn handle_store_entry(
 }
 
 /// The chat response used when the vault is locked.
-fn locked_chat_response() -> ChatResponse {
+pub fn locked_chat_response() -> ChatResponse {
     ChatResponse {
         message: "Vault is locked. Please unlock it first.".to_string(),
         action: Some("locked".to_string()),
@@ -601,7 +602,7 @@ fn locked_chat_response() -> ChatResponse {
 }
 
 /// A chat response carrying only a message.
-const fn plain_chat_response(message: String) -> ChatResponse {
+pub const fn plain_chat_response(message: String) -> ChatResponse {
     ChatResponse {
         message,
         action: None,
@@ -614,9 +615,9 @@ const fn plain_chat_response(message: String) -> ChatResponse {
 /// All entries plus the session KEK, or `None` when the vault is
 /// locked. The KEK copy travels in a `Zeroizing` so it is wiped
 /// when the caller drops it, not left on the stack or heap.
-type UnlockedVault = Option<(Vec<EncryptedEntry>, Zeroizing<[u8; KEK_LEN]>)>;
+pub type UnlockedVault = Option<(Vec<EncryptedEntry>, Zeroizing<[u8; KEK_LEN]>)>;
 
-fn unlocked_entries(state: &AppState) -> Result<UnlockedVault, VaultError> {
+pub fn unlocked_entries(state: &AppState) -> Result<UnlockedVault, VaultError> {
     let session = state
         .session
         .lock()
@@ -657,7 +658,7 @@ fn decrypt_entry_fields(
 
 /// Answer from one entry: the asked-for field, or every field when
 /// none was asked for.
-fn answer_entry(
+pub fn answer_entry(
     state: &AppState,
     entry: &EncryptedEntry,
     kek: &[u8; KEK_LEN],
@@ -698,7 +699,7 @@ fn answer_entry(
 
 /// A label for a choice list, made unique with a " (2)", " (3)",
 /// ... suffix when the name is already taken.
-fn unique_label(name: &str, taken: &[String]) -> String {
+pub fn unique_label(name: &str, taken: &[String]) -> String {
     if !taken.iter().any(|label| label == name) {
         return name.to_string();
     }
@@ -709,52 +710,6 @@ fn unique_label(name: &str, taken: &[String]) -> String {
             return candidate;
         }
         suffix = suffix.saturating_add(1);
-    }
-}
-
-/// Execute a chat search: match the query against entry names and
-/// answer directly, or offer a lettered choice when several
-/// entries match.
-fn handle_search_entry(
-    state: &AppState,
-    query: &str,
-    field: Option<&str>,
-) -> Result<ChatResponse, VaultError> {
-    let Some((entries, kek)) = unlocked_entries(state)? else {
-        return Ok(locked_chat_response());
-    };
-    let needle = query.to_lowercase();
-    let matches: Vec<&EncryptedEntry> = entries
-        .iter()
-        .filter(|entry| entry.name.to_lowercase().contains(&needle))
-        .collect();
-    match matches.as_slice() {
-        [] => Ok(plain_chat_response(format!(
-            "No secret found for \"{query}\"."
-        ))),
-        [entry] => answer_entry(state, entry, &kek, field),
-        _ => {
-            let mut labels: Vec<String> = Vec::new();
-            let mut candidates: Vec<stern_core::ai::chat::EntryCandidate> = Vec::new();
-            for entry in &matches {
-                let label = unique_label(&entry.name, &labels);
-                labels.push(label.clone());
-                candidates.push(stern_core::ai::chat::EntryCandidate {
-                    id: entry.id.clone(),
-                    label,
-                });
-            }
-            state
-                .chat_handler
-                .set_pending_choice(candidates, field.map(str::to_string));
-            Ok(ChatResponse {
-                message: format!("More than one match for \"{query}\". Which one?"),
-                action: None,
-                user_message_display: None,
-                options: labels,
-                input_sensitive: false,
-            })
-        }
     }
 }
 
@@ -773,7 +728,7 @@ fn handle_reveal_entry(
             "That entry is no longer available.".to_string(),
         ));
     };
-    answer_entry(state, entry, &kek, field)
+    crate::find::open_entry(state, entry, &kek, field)
 }
 
 /// Write `data` into a freshly created export file at `path`.

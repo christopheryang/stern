@@ -3,6 +3,8 @@
 #   expected: entry ids separated by commas (any one of them in the top three is a pass),
 #             "@days:A-B" (the top three must all be entries saved A to B days ago),
 #             or "-" (nothing should come back)
+#   "last year" is the calendar year before this one. The eval clock is 25 Nov 2026,
+#   so last year is 2025: 328 to 693 days back.
 name | what is the chase sapphire card? | e01
 name | find Netflix | e11
 name | show me the lease | e09
@@ -69,7 +71,7 @@ topic | my sleep and stress notes | e50
 time | anything I saved in the last week | @days:0-7
 time | things from the past month | @days:0-30
 time | what did I save a couple of months ago | @days:45-90
-time | stuff from last year | @days:365-730
+time | stuff from last year | @days:328-693
 time | the budget notes from a couple of months ago | e20
 time | my meeting notes from last week | e19
 time | credit card from last week | e02

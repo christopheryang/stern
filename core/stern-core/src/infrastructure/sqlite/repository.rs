@@ -524,6 +524,19 @@ impl SqliteRepository {
         })
     }
 
+    /// Set when an entry was saved, so a test can ask about "a couple of
+    /// months ago" without waiting for it.
+    #[doc(hidden)]
+    pub fn backdate_entry_for_test(&self, entry_id: &str, when: &str) -> Result<(), VaultError> {
+        self.execute(|conn| {
+            conn.execute(
+                "UPDATE entries SET created_at = ?2, updated_at = ?2 WHERE id = ?1",
+                rusqlite::params![entry_id, when],
+            )?;
+            Ok(())
+        })
+    }
+
     /// The ids of entries that hold a stored file that is not text. Files
     /// from earlier versions may be binary; new ones never are. Read from
     /// the blob's plain flag, so nothing is decrypted.

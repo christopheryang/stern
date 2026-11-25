@@ -403,10 +403,12 @@ fn store_response() {
 #[test]
 fn retrieve_response() {
     let resp = handler().process_message("find my password for GitHub");
-    assert!(resp.message.contains("github"), "message: {}", resp.message);
     match resp.action.expect("should have action") {
-        Action::SearchEntry { query, .. } => {
-            assert!(!query.is_empty());
+        Action::SearchEntry {
+            query, fallback, ..
+        } => {
+            assert!(query.to_lowercase().contains("github"), "query: {query}");
+            assert!(!fallback);
         }
         other => panic!("expected SearchEntry, got: {other:?}"),
     }
@@ -526,13 +528,30 @@ fn unlock_vault_response() {
 
 #[test]
 fn unknown_response() {
-    let resp = handler().process_message("asdfghjkl");
+    // A closed vault is never searched, and never asked for a password.
+    let closed = ChatHandler::new(None);
+    closed.set_vault_state(true, false);
+    let resp = closed.process_message("asdfghjkl");
     assert!(
         resp.message.contains("not sure"),
         "message: {}",
         resp.message
     );
     assert!(resp.action.is_none());
+}
+
+#[test]
+fn unknown_text_is_searched_for_when_the_vault_is_open() {
+    let resp = handler().process_message("asdfghjkl");
+    assert!(
+        resp.message.contains("not sure"),
+        "message: {}",
+        resp.message
+    );
+    assert!(matches!(
+        resp.action,
+        Some(Action::SearchEntry { fallback: true, .. })
+    ));
 }
 
 #[test]

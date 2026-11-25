@@ -10,6 +10,7 @@
 
 mod commands;
 mod files;
+mod find;
 mod notes;
 mod organize;
 mod trash;

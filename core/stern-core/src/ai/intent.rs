@@ -69,6 +69,14 @@ pub enum Intent {
     ShowTrash,
     /// Delete everything in the trash for good.
     EmptyTrash,
+    /// Find entries by what the request says: names, topics, time. Built by
+    /// the chat from a lookup or from a message nothing else understood
+    /// (`fallback`, in which case finding nothing is a shrug, not an answer).
+    Find {
+        text: String,
+        field: Option<String>,
+        fallback: bool,
+    },
     ExportVault,
     ImportVault,
     CreateVault,
@@ -555,7 +563,15 @@ fn is_update_context(words: &[&str]) -> bool {
 fn detect_store(words: &[&str], full_text: &str) -> Option<Intent> {
     // "note" is a store word ("note this down"), but not in a lookup:
     // "find my shopping note" is a search.
-    let looks_up = words.first().is_some_and(|w| RETRIEVE_VERBS.contains(w));
+    // The same goes for a note someone is describing: "the note I saved
+    // last spring".
+    let looks_up = words.first().is_some_and(|w| RETRIEVE_VERBS.contains(w))
+        || words.iter().any(|w| {
+            matches!(
+                *w,
+                "saved" | "stored" | "wrote" | "added" | "kept" | "made" | "created"
+            )
+        });
     let has_store_verb = words.iter().any(|w| {
         ["store", "save", "add", "create", "new", "remember", "keep"].contains(w)
             || (*w == "note" && !looks_up)

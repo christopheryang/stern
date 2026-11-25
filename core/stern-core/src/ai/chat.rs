@@ -510,6 +510,36 @@ impl ChatHandler {
             return self.route_vault_request(&intent);
         }
 
+        // A lookup is read from the user's own words, not from the name the
+        // classifier cut out of them, so topics and times count too. A
+        // message nothing understood gets a search before a shrug, but only
+        // when the vault is open: gibberish must never ask for a password.
+        let ready = {
+            let state = self.vault_state();
+            state.exists && state.unlocked
+        };
+        let intent = match intent {
+            Intent::RetrieveSecret { field, .. } => Intent::Find {
+                text: user_input.to_string(),
+                field,
+                fallback: false,
+            },
+            Intent::Unknown { .. }
+                if ready
+                    && !has_store_verb(user_input)
+                    && !crate::ai::query::query_from_text(user_input)
+                        .terms
+                        .is_empty() =>
+            {
+                Intent::Find {
+                    text: user_input.to_string(),
+                    field: None,
+                    fallback: true,
+                }
+            }
+            other => other,
+        };
+
         // The guided conversation starts where a parsed store has
         // nothing to file under: a content-free store request gets
         // the full interview — kind first, unless the request already
@@ -551,6 +581,7 @@ impl ChatHandler {
                 intent,
                 Intent::StoreSecret { .. }
                     | Intent::RetrieveSecret { .. }
+                    | Intent::Find { .. }
                     | Intent::ListSecrets { .. }
                     | Intent::DeleteSecret { .. }
                     | Intent::UpdateSecret { .. }
@@ -599,6 +630,21 @@ impl ChatHandler {
         }
 
         self.finish(intent)
+    }
+
+    /// What Stern says when it does not understand a message and a search
+    /// found nothing either.
+    #[must_use]
+    pub fn not_sure_reply(text: &str) -> String {
+        format!(
+            "I'm not sure what you mean by \"{text}\".\n\n\
+            Here are some things I can do:\n\
+            - \"save a note\" or \"save a document\"\n\
+            - \"find my shopping list\"\n\
+            - \"show my secrets\" to see what you have\n\
+            - \"show my folders\" to see how it is organised\n\
+            - \"help\" for everything else"
+        )
     }
 
     /// A reply that carries an action for the app layer to carry out. The
@@ -782,6 +828,26 @@ impl ChatHandler {
                 action: Some(Action::SearchEntry {
                     query: name.clone(),
                     field: field.clone(),
+                    fallback: false,
+                }),
+                user_message_display: None,
+                options: Vec::new(),
+                input_sensitive: false,
+            },
+            Intent::Find {
+                text,
+                field,
+                fallback,
+            } => ChatResponse {
+                message: if fallback {
+                    Self::not_sure_reply(&text)
+                } else {
+                    "Searching your vault...".to_string()
+                },
+                action: Some(Action::SearchEntry {
+                    query: text,
+                    field,
+                    fallback,
                 }),
                 user_message_display: None,
                 options: Vec::new(),
@@ -892,15 +958,7 @@ impl ChatHandler {
             Intent::Help => plain_response(HELP_REPLY),
             Intent::Greeting => plain_response(GREETING_REPLY),
             Intent::Chatter(chatter) => plain_response(chatter_reply(chatter)),
-            Intent::Unknown { ref text } => plain_response(&format!(
-                "I'm not sure what you mean by \"{text}\".\n\n\
-                Here are some things I can do:\n\
-                - \"save a note\" or \"save a document\"\n\
-                - \"find my shopping list\"\n\
-                - \"show my secrets\" to see what you have\n\
-                - \"show my folders\" to see how it is organised\n\
-                - \"help\" for everything else"
-            )),
+            Intent::Unknown { ref text } => plain_response(&Self::not_sure_reply(text)),
         }
     }
 }
@@ -979,7 +1037,7 @@ pub struct ChatResponse {
 const HELP_REPLY: &str = "I keep your notes and documents safe, and everything \
 stays on this computer. Here is what you can ask me:\n\n\
 \u{1f4dd} Save something -- \"save a note\", \"save a document\", \"save my GitHub password\"\n\
-\u{1f50d} Find it again -- \"find my shopping list\"\n\
+\u{1f50d} Find it again -- \"find my shopping list\", \"the note about my credit card\", \"what I saved last March\"\n\
 \u{1f4cb} See what you have -- \"show my secrets\" (names only, never the secrets themselves)\n\
 \u{1f4c1} Organise -- \"create folder Taxes\", \"move Lease to Home\", \"show my folders\"\n\
 \u{270f}\u{fe0f} Tidy up -- \"rename Netflix to Netflix Family\", \"delete my old Netflix entry\"\n\
@@ -1045,9 +1103,14 @@ pub enum Action {
         fields: Vec<(String, String)>,
     },
     SearchEntry {
+        /// The user's own words. The search reads names, topics and time out
+        /// of them.
         query: String,
         /// The field the user asked for, when they named one.
         field: Option<String>,
+        /// The message was not understood as anything else; if the search
+        /// finds nothing, reply with [`ChatHandler::not_sure_reply`].
+        fallback: bool,
     },
     RevealEntry {
         entry_id: String,
@@ -1139,10 +1202,15 @@ impl std::fmt::Debug for Action {
                 .field("kind", kind)
                 .field("field_keys", &keys(fields))
                 .finish(),
-            Self::SearchEntry { query, field } => f
+            Self::SearchEntry {
+                query,
+                field,
+                fallback,
+            } => f
                 .debug_struct("SearchEntry")
                 .field("query", query)
                 .field("field", field)
+                .field("fallback", fallback)
                 .finish(),
             Self::RevealEntry { entry_id, field } => f
                 .debug_struct("RevealEntry")

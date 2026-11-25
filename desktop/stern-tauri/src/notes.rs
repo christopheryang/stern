@@ -92,7 +92,7 @@ fn unlocked_kek(state: &AppState) -> Result<Zeroizing<[u8; KEK_LEN]>, VaultError
     Ok(Zeroizing::new(*session.kek()?))
 }
 
-fn note_fields(payload: &EntryPayload) -> (String, String) {
+pub fn note_fields(payload: &EntryPayload) -> (String, String) {
     let value = |key: &str| {
         payload
             .fields
@@ -104,7 +104,7 @@ fn note_fields(payload: &EntryPayload) -> (String, String) {
 }
 
 /// Decrypt one note's payload. Not a note, or not decryptable, is an error.
-fn open_note(
+pub fn open_note(
     state: &AppState,
     kek: &[u8; KEK_LEN],
     entry: &EncryptedEntry,
