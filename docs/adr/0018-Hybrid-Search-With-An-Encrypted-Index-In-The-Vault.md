@@ -1,7 +1,8 @@
 # ADR-0018: Hybrid search with an encrypted index kept in the vault
 
-- **Status:** Accepted (not yet built; see the
-  [design](../design/2026-11-25%20-%20Vault-Assistant.md))
+- **Status:** Accepted. The keyword, date and filter half is built
+  (phase 2); the encrypted meaning index is not (phase 3). See the
+  [design](../design/2026-11-25%20-%20Vault-Assistant.md).
 - **Date:** 2026-11-25
 
 ## Context

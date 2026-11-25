@@ -113,8 +113,15 @@ looks it up and shows it.
 
 ![Finding a saved note](User-Guide%20-%20Find%20A%20Note.png)
 
-If more than one thing matches, Stern lists them as buttons so you can
-tap the one you mean.
+You can also describe it: `the note about my credit card`, `something I
+saved a couple of months ago`, or `the dentist note in the Health folder`.
+Stern reads the names, the "what it's about" line, the keywords, the folder
+and the words inside your notes and text files. It never reads a password.
+When you mention a time, Stern says which dates it used, and widens them if
+nothing fits.
+
+If more than one thing matches, Stern lists up to five as buttons, with the
+date and folder, so you can tap the one you mean.
 
 ## 5. Save a document or a password
 

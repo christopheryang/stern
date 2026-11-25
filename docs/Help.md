@@ -30,7 +30,7 @@ Tap "Save a password", or type something like "save my GitHub password". Stern a
 
 ## How do I find something I saved?
 
-Type something like "find my shopping list" or "show my GitHub password". If more than one thing matches, Stern shows them as buttons so you can tap the one you mean. If you ask for something that is not there, Stern tells you it could not find it.
+Type something like "find my shopping list" or "show my GitHub password". You can also say what it is about, or when you saved it: "the note about my credit card", "that thing I saved a couple of months ago", "what I saved last March" or "the dentist note in the Health folder". Stern looks at names, the short "what it's about" line, the keywords, the folder and the words inside your notes and text files. It never looks at a password or other hidden value. If more than one thing matches, Stern shows up to five as buttons, with the date and folder, so you can tap the one you mean. When you give a time, Stern says which dates it used. If nothing fits those dates, it widens them, and tells you. If you ask for something that is not there, Stern tells you it could not find it.
 
 ## How do I see what I have saved?
 

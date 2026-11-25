@@ -375,7 +375,7 @@ Entries are indexed in the background after the first unlock, newest first.
 | Phase | Delivers | Needs | State |
 | --- | --- | --- | --- |
 | 1 | Evaluation set; summary and keyword fields; text-only 1 MiB files; trash and undo | nothing new | **Built** |
-| 2 | Structured query, date parser, filters, name and keyword search, candidate cards | phase 1 | Not started |
+| 2 | Structured query, date parser, filters, name and keyword search, candidate cards | phase 1 | **Built** |
 | 3 | Search helper download, embedder, encrypted index, meaning search | phase 2 | Not started |
 | 4 | Summary drafts; folder suggestions; tidy up; duplicates | phase 3 | Not started |
 | 5 | Optional larger chat model tier to improve query understanding | phase 2 | Not started |
@@ -397,6 +397,34 @@ Entries are indexed in the background after the first unlock, newest first.
   `cargo test -p stern-core --test eval_tests -- --nocapture`.
 - Exports still carry no folders, trash or metadata fields beyond what the
   payload already holds; the payload now includes `summary` and `keywords`.
+
+**Phase 2 as built.** Differences from the plan above:
+
+- Search is pure and lives in the core (`search/`, `ai/query.rs`,
+  `ai/dates.rs`, `domain/vault/query.rs`). The app only gathers what it may
+  read (name, summary, keywords, folder, note text, file text, and fields
+  not marked hidden) and shows the answer. Hidden fields are never put in
+  front of the search, and a test plants one to prove it.
+- Every lookup now goes through the search, as does any message nothing
+  else understood, when the vault is open. A guess from such a message is
+  offered as a tappable candidate, never opened outright, and finding
+  nothing gives the usual "I'm not sure" reply. A locked vault is never
+  searched, so stray text cannot ask for a password.
+- A field request ("my password for google") with one match still answers
+  with that field. One match otherwise shows the note, the start of a file,
+  or a login's fields; several matches show up to five candidates with
+  name, kind, folder, date and summary, never a value.
+- The date parser reads "a couple of months ago", "last March", "in the
+  last 10 days", "since June" and similar, says which dates it used, and
+  widens the range, then drops it, when nothing matches.
+- Scores with no embedder: the tuned evaluation set went from **23 to
+  85 of 85**. A separate held-out set of 40 questions, written after the
+  search was tuned, scores **34 of 40**; the six misses need synonyms
+  ("speaker notes", "crypto seed", "locksmith"), which is what the phase 3
+  embedder is for. The held-out number is the honest one. The floors in
+  `tests/eval_tests.rs` stop the score slipping.
+- A note someone is describing ("the note I saved last spring") is a
+  lookup, not a request to store one.
 
 Each phase ends with the full gate (`just fmt`, `just lint`, wasm clippy,
 `just test`), the documents updated, and a release.

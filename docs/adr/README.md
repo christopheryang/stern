@@ -36,7 +36,7 @@ questions.
 | [0015](0015-Editor-For-Notes-Chat-For-Finding.md) | Notes are written in an editor inside the chat; chat creates and finds them; notes are not masked | Accepted |
 | [0016](0016-Nested-Folders-Without-Showing-Secrets.md) | Entries sit in one nested folder; folder names are encrypted; trees show names and kinds only | Accepted |
 | [0017](0017-Text-Only-Files-With-A-1-MB-Limit.md) | Files are plain text only, at most 1 MiB; no document parsers | Accepted |
-| [0018](0018-Hybrid-Search-With-An-Encrypted-Index-In-The-Vault.md) | Search merges filters, keywords and meaning; vectors are saved encrypted in the vault (planned) | Accepted |
+| [0018](0018-Hybrid-Search-With-An-Encrypted-Index-In-The-Vault.md) | Search merges filters, keywords and meaning; vectors are saved encrypted in the vault (keywords and dates built, meaning planned) | Accepted |
 | [0019](0019-Model-Suggested-Summaries-The-User-Approves.md) | The model may draft a summary, shown as an editable suggestion; amends the no-model-prose rule (planned) | Accepted |
 
 ADRs 0001–0005 record decisions already embodied in the codebase

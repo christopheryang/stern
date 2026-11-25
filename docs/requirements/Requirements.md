@@ -81,20 +81,21 @@ and an ADR disagree, the ADR wins.
   trash is purged on unlock after 30 days, or emptied on request after a
   confirmation.
 
-## Planned: vault assistant
+## Vault assistant
 
-Agreed but not built yet. The design is
-[Vault Assistant](../design/2026-11-25%20-%20Vault-Assistant.md); phase 1
-(above) is done.
+The design is [Vault Assistant](../design/2026-11-25%20-%20Vault-Assistant.md);
+phases 1 and 2 are built, the rest is planned.
 
-- **Find by name, topic and time.** A request can combine a name, a
+- **Find by name, topic and time (built).** A request can combine a name, a
   topic, a kind, a folder and a date range; results are a short list of
-  candidates the user taps, never a revealed secret
+  at most five candidates the user taps, never a revealed secret. Only
+  names, summaries, keywords, folders, note and file text, and fields not
+  marked hidden are searched. Meaning search (synonyms) follows in phase 3
   ([ADR-0018](../adr/0018-Hybrid-Search-With-An-Encrypted-Index-In-The-Vault.md)).
-- **Search data stays in the vault.** Meaning vectors are saved only
+- **Search data stays in the vault (planned).** Meaning vectors are saved only
   encrypted, bound to their entry, and are rebuilt if they fail to
   decrypt. Hidden fields (passwords, card numbers) are never indexed.
-- **Summaries the user approves.** The model may draft a short "what it's
+- **Summaries the user approves (planned).** The model may draft a short "what it's
   about" line, shown as an editable suggestion and stored encrypted. This
   is the only model-written text the app may show
   ([ADR-0019](../adr/0019-Model-Suggested-Summaries-The-User-Approves.md)).
