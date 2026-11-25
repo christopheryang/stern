@@ -46,9 +46,13 @@ Stern's chat is powered by a local text generation model (downloaded after insta
 
 - **Store** — "save a note", "save a document", "save my GitHub password" (notes and documents come first; naming the kind skips the kind question)
 - **Retrieve** — "what's my password for Gmail?"
-- **List** — "show all passwords"
+- **List** — "show my secrets", "show my notes" (names and kinds only, never values)
+- **Folders** — "create folder Taxes", "move Lease to Home", "show my folders" (nested; each entry sits in one folder; folder names are encrypted)
+- **Rename** — "rename Netflix to Netflix Family"
 - **Update** — "change my Netflix password"
-- **Delete** — "remove my WiFi password"
+- **Delete** — "delete my old Netflix entry" (always asks yes or no first)
+
+Everyday wording works too ("I forgot my router password", "jot down a note"), and small talk gets a short fixed reply.
 
 The model runs entirely on-device via ONNX Runtime. A rule-based classifier covers for it — no model yet, a model error, output that doesn't parse — so chat works even before a model is downloaded.
 

@@ -209,9 +209,12 @@ Implemented in `desktop/stern-tauri/src/files.rs`:
   never replaces an existing file.
 - `delete_stored_file(entry_id)` removes the entry and its blob.
 
-**Not yet built:** a chat "save a file" intent, and a frontend control that
-calls these commands. Until the frontend control exists, the commands are
-reachable only through tests. Chat never receives file bytes.
+**Chat and the picker.** "Save a document" opens a file picker card in the
+chat (`open_file_picker`), and the picked file is stored by
+`add_file_from_picker`. Chat never receives file bytes. Listing, deleting
+and renaming a stored file work like any other entry. Retrieving a file
+to disk through the picker is available as a command; a chat control for
+it is still to do.
 
 ## Test Cases
 
@@ -231,8 +234,9 @@ reachable only through tests. Chat never receives file bytes.
 
 ## Caveats / Follow-Ups
 
-- **Frontend and chat are not wired.** The commands exist and are tested,
-  but no button or chat intent calls them yet.
+- **Retrieving a file from chat.** Adding a file is wired to the chat and
+  a picker card. Saving a stored file back to disk is a command only; a
+  chat control for it is not built yet.
 
 - **Size reveals information.** A blob's ciphertext length reveals the
   file's approximate size. Padding to fixed sizes would hide it at a cost

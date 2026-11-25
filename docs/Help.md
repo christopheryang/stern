@@ -18,7 +18,7 @@ Type "edit" followed by the note's name, for example "edit my shopping list". Th
 
 ## How do I save a document?
 
-Tap "Save a document", or type "save a document". Stern asks what the document is called, then asks for its text. Paste the text in, and Stern shows it back to you so you can check it before you confirm. A document is pasted text. You cannot attach a file yet.
+Tap "Save a document", or type "save a document". A box opens with a button to choose a file from your computer. Pick the file and Stern keeps an encrypted copy in your vault under its own name, then tells you its name and size. A file can be up to 10 MB. If it is bigger, Stern says so and nothing is saved. If you change your mind, tap Cancel. Nothing is saved until you pick a file.
 
 ## How do I save a password?
 
@@ -27,6 +27,22 @@ Tap "Save a password", or type something like "save my GitHub password". Stern a
 ## How do I find something I saved?
 
 Type something like "find my shopping list" or "show my GitHub password". If more than one thing matches, Stern shows them as buttons so you can tap the one you mean. If you ask for something that is not there, Stern tells you it could not find it.
+
+## How do I see what I have saved?
+
+Type "show my secrets", or tap "What do I have?". Stern lists the names and kinds of everything in your vault, and shows the folder each one is in. It never shows the contents. To see only one kind, type "show my notes", "show my documents" or "show my passwords".
+
+## How do I keep things in folders?
+
+Type "create folder Taxes" to make a folder. To make one inside another, type "create folder 2024 in Taxes". To put something in a folder, type "move Lease to Home". To take it out again, type "move Lease out of its folder". Each thing sits in one folder at a time. To see how it is all organised, type "show my folders". To see just one folder, type "what's in the Taxes folder". If two folders have the same name, Stern lists them with their full paths, such as "Taxes > 2024", and you can type the whole path. Stern shows only names, never the contents of what you saved.
+
+## How do I rename or delete something?
+
+Type "rename Netflix to Netflix Family" to give something a new name. To rename a folder, say so, for example "rename the Taxes folder to Tax Docs". To delete something, type "delete my old Netflix entry". Stern always asks first, and you tap "Yes, delete it" or "No, keep it". Anything else you type cancels the deletion, so nothing is lost by accident. Deleting a folder does not delete what is inside it: those things move up one level.
+
+## What can I say to Stern?
+
+Plain words work. For example "I forgot my router password", "jot down a note", "get rid of my Netflix login", "what do I have saved", or "back up my vault". If Stern does not understand, it suggests some things to try. You can also ask "what can you do?" at any time, or say thanks or goodbye.
 
 ## What is the safest way to keep something forever?
 

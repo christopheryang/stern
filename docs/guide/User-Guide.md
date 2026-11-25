@@ -15,6 +15,7 @@ questions. This guide walks through it from the first launch.
 3. [Save a note](#3-save-a-note)
 4. [Find something you saved](#4-find-something-you-saved)
 5. [Save a document or a password](#5-save-a-document-or-a-password)
+   and [see, organise and tidy](#5a-see-organise-and-tidy-what-you-saved)
 6. [Settings, light and dark, and Help](#6-settings-light-and-dark-and-help)
 7. [Lock Stern and open it again](#7-lock-stern-and-open-it-again)
 8. [Keeping your information safe](#8-keeping-your-information-safe)
@@ -113,9 +114,11 @@ tap the one you mean.
 
 ## 5. Save a document or a password
 
-- **A document** is longer text you paste in, like a letter or a
-  contract. Tap **Save a document** (or type `save a document`) and Stern
-  asks for a name, then for the text.
+- **A document** is a file from your computer, like a PDF, a scan or a
+  spreadsheet. Tap **Save a document** (or type `save a document`) and a
+  box opens with a button to choose the file. Stern keeps an encrypted
+  copy and tells you its name and size. The limit is 10 MB, and nothing is
+  saved until you pick a file.
 - **A password** is a username and password for a website. Tap **Save a
   password** (or type `save my GitHub password`). Stern asks for the
   website, the username, and then the password, which is private just
@@ -125,8 +128,17 @@ If you type `store` on its own, Stern asks what you would like to save:
 a note, a document, a username and password, a credit card, or contact
 info. You can tap a button or type its letter.
 
-> **Documents are text only.** You can paste text, but you cannot attach
-> a file yet. See [What Stern cannot do yet](#9-what-stern-cannot-do-yet).
+## 5a. See, organise and tidy what you saved
+
+- **See it:** type `show my secrets` (or tap **What do I have?**). Stern
+  shows names and kinds, never contents. Try `show my notes` for one kind.
+- **Folders:** `create folder Taxes`, then `move Lease to Taxes`. Folders
+  can sit inside folders: `create folder 2024 in Taxes`. Type
+  `show my folders` to see the whole tree, or `what's in the Taxes folder`.
+- **Rename:** `rename Netflix to Netflix Family`.
+- **Delete:** `delete my old Netflix entry`. Stern asks you to confirm
+  with **Yes, delete it** or **No, keep it**. Deleting a folder keeps
+  what was inside it.
 
 ## 6. Settings, light and dark, and Help
 
@@ -199,12 +211,11 @@ times, Stern makes you wait five minutes before you can try again.
 ## 9. What Stern cannot do yet
 
 Stern is still growing. Today it can **save** notes, documents and
-passwords, and **find** them again. These are not available yet:
+passwords, **find** them again, **list** and **organise** them into
+folders, and **rename** or **delete** them. These are not available yet:
 
-- Listing everything you have saved
-- Changing or deleting something you saved
-- Attaching a file (a document is pasted text)
 - Choosing where to save an export, or importing one
+- Keeping folders when you export or import
 
 If you ask for one of these, Stern may reply but will not do it. Planned
 work is tracked on the project's
