@@ -1503,3 +1503,48 @@ fn rewording_never_changes_a_stored_value() {
         other => panic!("expected a store, got {other:?}"),
     }
 }
+
+#[test]
+fn questions_about_an_entry_search_for_its_name_alone() {
+    for (text, wanted) in [
+        ("what is the document?", "document"),
+        ("what is document", "document"),
+        ("what's in the document?", "document"),
+        ("what is in Test note 1", "test note 1"),
+        ("what does my shopping list say?", "shopping list"),
+        ("tell me about the document", "document"),
+        ("show me the document", "document"),
+        ("what is my netflix password?", "netflix"),
+        (
+            "what is the username for my chase account?",
+            "chase account",
+        ),
+    ] {
+        match classify_intent(text) {
+            Intent::RetrieveSecret { name, .. } => assert_eq!(name, wanted, "{text:?}"),
+            other => panic!("{text:?}: expected a lookup, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn a_bare_pronoun_question_is_not_a_search() {
+    assert!(matches!(
+        classify_intent("what is it"),
+        Intent::Unknown { .. }
+    ));
+}
+
+#[test]
+fn find_with_a_bare_name_is_a_lookup() {
+    for (text, wanted) in [
+        ("find netflix", "netflix"),
+        ("search trip", "trip"),
+        ("what is the trip?", "trip"),
+    ] {
+        match classify_intent(text) {
+            Intent::RetrieveSecret { name, .. } => assert_eq!(name, wanted, "{text:?}"),
+            other => panic!("{text:?}: expected a lookup, got {other:?}"),
+        }
+    }
+}

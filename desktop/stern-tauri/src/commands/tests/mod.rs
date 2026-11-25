@@ -1202,3 +1202,15 @@ fn the_organising_commands_refuse_a_locked_vault() {
     let reply = handle_organize(&state, &CoreAction::ShowFolders { folder: None });
     assert_eq!(reply.action.as_deref(), Some("locked"));
 }
+
+#[test]
+fn asking_what_a_listed_note_is_shows_the_note() {
+    let (state, _path) = make_test_app_state();
+    create_vault_inner(&state, "correct horse battery").unwrap();
+    unlock_test_session(&state);
+    let id = insert_rich_note(&state);
+    assert!(!id.is_empty());
+    let shown = chat(&state, "what is the trip?");
+    assert!(shown.message.contains("pack socks"), "{}", shown.message);
+    assert!(!shown.message.contains("No secret found"));
+}

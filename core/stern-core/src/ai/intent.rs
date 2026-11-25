@@ -275,6 +275,15 @@ const LEAD_REWRITES: &[(&str, &str)] = &[
     ("give me ", "find "),
     ("tell me ", "find "),
     ("read ", "find "),
+    ("what is inside ", "find "),
+    ("what is in ", "find "),
+    ("what is the ", "find the "),
+    ("what is my ", "find my "),
+    ("what are my ", "find my "),
+    ("what does ", "find "),
+    ("what do my ", "find my "),
+    ("tell me about ", "find "),
+    ("show me ", "show "),
     ("get rid of ", "delete "),
     ("throw away ", "delete "),
     ("erase ", "delete "),
@@ -297,6 +306,11 @@ const LEAD_REWRITES: &[(&str, &str)] = &[
 
 /// Words left on the end of a lookup that only say "it is stored".
 const LOOKUP_TAILS: &[&str] = &[
+    " say",
+    " says",
+    " contain",
+    " contains",
+    " have in it",
     " saved",
     " stored",
     " in my vault",
@@ -318,6 +332,21 @@ fn normalize_phrases(lower: &str) -> String {
             return None;
         }
         trimmed.strip_prefix(from).map(|rest| format!("{to}{rest}"))
+    });
+    let rewritten = rewritten.or_else(|| {
+        // "what is document" with no article or "my": still a lookup, unless
+        // it is a question about the app itself (handled before this).
+        trimmed
+            .strip_prefix("what is ")
+            .filter(|rest| {
+                !rest.is_empty()
+                    && !rest.starts_with("your ")
+                    && !matches!(
+                        *rest,
+                        "it" | "this" | "that" | "this app" | "stern" | "going on"
+                    )
+            })
+            .map(|rest| format!("find {rest}"))
     });
     let mut text = match rewritten {
         Some(text) => text,
@@ -512,11 +541,12 @@ fn is_update_context(words: &[&str]) -> bool {
 }
 
 fn detect_store(words: &[&str], full_text: &str) -> Option<Intent> {
+    // "note" is a store word ("note this down"), but not in a lookup:
+    // "find my shopping note" is a search.
+    let looks_up = words.first().is_some_and(|w| RETRIEVE_VERBS.contains(w));
     let has_store_verb = words.iter().any(|w| {
-        [
-            "store", "save", "add", "create", "new", "remember", "keep", "note",
-        ]
-        .contains(w)
+        ["store", "save", "add", "create", "new", "remember", "keep"].contains(w)
+            || (*w == "note" && !looks_up)
     });
 
     let implicit_store = has_secret_type(full_text)
@@ -552,7 +582,16 @@ fn detect_retrieve(words: &[&str], full_text: &str) -> Option<Intent> {
         || full_text.contains(" named ")
         || full_text.contains("'s");
 
-    if !has_secret && !has_name_hint && !words.iter().any(|w| ["my", "me"].contains(w)) {
+    // "find netflix" names what to find outright; "what is the trip" and
+    // "show my trip" point at one thing with "the" or "my".
+    let explicit_find = words
+        .first()
+        .is_some_and(|w| matches!(*w, "find" | "search" | "get" | "retrieve"));
+    if !has_secret
+        && !has_name_hint
+        && !explicit_find
+        && !words.iter().any(|w| ["my", "me", "the"].contains(w))
+    {
         return None;
     }
 
@@ -958,6 +997,17 @@ fn extract_update_name(full_text: &str) -> String {
     }
 }
 
+/// "my chase account" and "the chase account" are both "chase account".
+fn strip_possessive(name: &str) -> String {
+    let lower = name.to_lowercase();
+    for lead in ["my ", "the ", "a ", "an "] {
+        if lower.starts_with(lead) {
+            return name.get(lead.len()..).unwrap_or(name).trim().to_string();
+        }
+    }
+    name.to_string()
+}
+
 #[allow(clippy::arithmetic_side_effects)]
 fn extract_retrieve_name(full_text: &str) -> String {
     let lower = full_text.to_lowercase();
@@ -969,55 +1019,50 @@ fn extract_retrieve_name(full_text: &str) -> String {
                 .chars()
                 .take_while(|c| *c != ',' && *c != '.' && *c != '!' && *c != '?')
                 .collect();
-            let name = name.trim().to_string();
+            let name = strip_possessive(name.trim());
             if !name.is_empty() {
                 return name;
             }
         }
     }
 
-    let skip_words = [
-        "find",
-        "get",
-        "retrieve",
-        "search",
-        "show",
-        "what",
-        "where",
-        "my",
-        "the",
-        "a",
-        "an",
-        "all",
-        "list",
-        "display",
-        "forgot",
-        "password",
-        "secret",
-        "credential",
-        "login",
-        "api",
-        "key",
-        "token",
-        "ssh",
-        "wifi",
-        "note",
-        "document",
-        "do",
-        "you",
-        "have",
-    ];
+    name_after_lead_words(full_text)
+}
 
-    let name_words: Vec<&str> = full_text
+/// Words that begin a lookup and are not part of the name.
+const LOOKUP_LEADS: &[&str] = &[
+    "find", "get", "retrieve", "search", "show", "what", "where", "is", "are", "does", "do", "say",
+    "says", "me", "my", "the", "a", "an", "all", "list", "display", "forgot", "you", "have",
+    "about", "in", "inside", "for", "of", "tell",
+];
+
+/// The name in a lookup: what is left after the leading question and verb
+/// words, and after a trailing kind word ("netflix password" is "netflix").
+/// Words inside the name stay, so an entry called "shopping list" or
+/// "document" can still be found.
+fn name_after_lead_words(full_text: &str) -> String {
+    let words: Vec<&str> = full_text
         .split_whitespace()
-        .filter(|w| !skip_words.contains(&w.to_lowercase().as_str()))
+        .map(|w| w.trim_matches(['?', '!', '.', ',', '"']))
+        .filter(|w| !w.is_empty())
         .collect();
-
-    if !name_words.is_empty() {
-        return name_words.join(" ");
+    let start = words
+        .iter()
+        .position(|w| !LOOKUP_LEADS.contains(&w.to_lowercase().as_str()))
+        .unwrap_or(words.len());
+    let mut name: Vec<&str> = words.get(start..).unwrap_or_default().to_vec();
+    while name.len() > 1
+        && name.last().is_some_and(|w| {
+            SECRET_TYPES.contains(&w.to_lowercase().as_str()) && !w.eq_ignore_ascii_case("note")
+        })
+    {
+        name.pop();
     }
-
-    full_text.to_string()
+    if name.is_empty() {
+        full_text.trim().to_string()
+    } else {
+        name.join(" ")
+    }
 }
 
 #[allow(clippy::arithmetic_side_effects)]
