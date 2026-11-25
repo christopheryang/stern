@@ -1,7 +1,7 @@
 # Vault Assistant
 
 - **Date Created:** 2026-11-25
-- **Status:** Design. Nothing in this document is built yet.
+- **Status:** Phase 1 built (see Phases). Phases 2 to 5 are design only.
 - **Branch:** to be created when work starts
 - **Issue:** none (personal project; tracked in this document)
 - **Decision records:** [ADR-0016](../adr/0016-Nested-Folders-Without-Showing-Secrets.md),
@@ -372,13 +372,31 @@ Entries are indexed in the background after the first unlock, newest first.
 
 ### Phases
 
-| Phase | Delivers | Needs |
-| --- | --- | --- |
-| 1 | Evaluation set; summary and keyword fields; text-only 1 MiB files; trash and undo | nothing new |
-| 2 | Structured query, date parser, filters, name and keyword search, candidate cards | phase 1 |
-| 3 | Search helper download, embedder, encrypted index, meaning search | phase 2 |
-| 4 | Summary drafts; folder suggestions; tidy up; duplicates | phase 3 |
-| 5 | Optional larger chat model tier to improve query understanding | phase 2 |
+| Phase | Delivers | Needs | State |
+| --- | --- | --- | --- |
+| 1 | Evaluation set; summary and keyword fields; text-only 1 MiB files; trash and undo | nothing new | **Built** |
+| 2 | Structured query, date parser, filters, name and keyword search, candidate cards | phase 1 | Not started |
+| 3 | Search helper download, embedder, encrypted index, meaning search | phase 2 | Not started |
+| 4 | Summary drafts; folder suggestions; tidy up; duplicates | phase 3 | Not started |
+| 5 | Optional larger chat model tier to improve query understanding | phase 2 | Not started |
+
+**Phase 1 as built.** Differences from the plan above:
+
+- The summary is typed by the user, with keywords filled from the text when
+  left empty. Model-drafted summaries come in phase 4 (ADR-0019).
+- Nothing stores `source_name` yet. The entry name is the file name, so the
+  column was not added; phase 2 can add it if search needs it.
+- The index and `entry_index` table are not built yet (phase 3).
+- The trash is a `trashed_at` column on `entries`. Deleting a stored file
+  from the older direct command also goes to the trash.
+- The evaluation set is 60 entries and 85 questions under
+  `core/stern-core/tests/eval/`. Search today, measured on 2026-11-25
+  before any search work: **23 of 85** in the top three (name questions
+  10 of 16, topic 1 of 47, time 0 of 8, folder 4 of 6, "nothing" 8 of 8).
+  Phase 2 and 3 are judged against this. Run it with
+  `cargo test -p stern-core --test eval_tests -- --nocapture`.
+- Exports still carry no folders, trash or metadata fields beyond what the
+  payload already holds; the payload now includes `summary` and `keywords`.
 
 Each phase ends with the full gate (`just fmt`, `just lint`, wasm clippy,
 `just test`), the documents updated, and a release.

@@ -64,16 +64,29 @@ and an ADR disagree, the ADR wins.
 - **One network request.** The model download is the only network
   request the app ever makes.
 
+## Files and the trash
+
+- **Text files only, at most 1 MiB.** Anything that is not valid UTF-8
+  text is refused, whatever its extension, and known binary extensions
+  (PDF, Office, images, archives) are refused by name
+  ([ADR-0017](../adr/0017-Text-Only-Files-With-A-1-MB-Limit.md)). Files
+  stored by earlier versions as binary stay readable, renamable and
+  deletable, and are marked "older file".
+- **Entries describe themselves.** Every note can carry a short summary
+  and a few keywords, stored encrypted with it. Empty keywords are filled
+  from the text, using plain words only. The summary is typed by the user
+  for now.
+- **Delete can be undone for 30 days.** Deleted entries go to a trash, stay
+  out of lists, search and counts, and keep their folder when restored. The
+  trash is purged on unlock after 30 days, or emptied on request after a
+  confirmation.
+
 ## Planned: vault assistant
 
 Agreed but not built yet. The design is
-[Vault Assistant](../design/2026-11-25%20-%20Vault-Assistant.md).
+[Vault Assistant](../design/2026-11-25%20-%20Vault-Assistant.md); phase 1
+(above) is done.
 
-- **Text files only, at most 1 MiB.** Anything that is not valid UTF-8
-  text is refused, whatever its extension
-  ([ADR-0017](../adr/0017-Text-Only-Files-With-A-1-MB-Limit.md)).
-  Until this ships, the current limit is 10 MB and binary files are
-  accepted.
 - **Find by name, topic and time.** A request can combine a name, a
   topic, a kind, a folder and a date range; results are a short list of
   candidates the user taps, never a revealed secret
@@ -85,7 +98,6 @@ Agreed but not built yet. The design is
   about" line, shown as an editable suggestion and stored encrypted. This
   is the only model-written text the app may show
   ([ADR-0019](../adr/0019-Model-Suggested-Summaries-The-User-Approves.md)).
-- **Delete can be undone for 30 days.** Deleted entries go to a trash.
 - **Organising help.** Stern may suggest a folder, propose a tidy-up, and
   point out duplicates, but changes nothing without a tap.
 

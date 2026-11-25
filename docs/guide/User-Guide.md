@@ -102,6 +102,10 @@ only things Stern masks.
 
 ![Finding a saved note](User-Guide%20-%20Find%20A%20Note.png)
 
+Under a note there are two optional lines, **What it's about** and
+**Keywords**. They help you find the note later by its subject. Leave the
+keywords empty and Stern picks some plain words from your note.
+
 ## 4. Find something you saved
 
 Type what you want to find, for example `find my shopping list`. Stern
@@ -114,11 +118,12 @@ tap the one you mean.
 
 ## 5. Save a document or a password
 
-- **A document** is a file from your computer, like a PDF, a scan or a
-  spreadsheet. Tap **Save a document** (or type `save a document`) and a
-  box opens with a button to choose the file. Stern keeps an encrypted
-  copy and tells you its name and size. The limit is 10 MB, and nothing is
-  saved until you pick a file.
+- **A document** is a plain text file from your computer, such as a
+  `.txt`, `.md`, `.html` or `.csv` file. Tap **Save a document** (or type
+  `save a document`) and a box opens with a button to choose the file.
+  Stern keeps an encrypted copy and tells you its name and size. The limit
+  is 1 MB, and nothing is saved until you pick a file. PDFs, Word and Excel
+  files and pictures cannot be saved.
 - **A password** is a username and password for a website. Tap **Save a
   password** (or type `save my GitHub password`). Stern asks for the
   website, the username, and then the password, which is private just
@@ -139,6 +144,9 @@ info. You can tap a button or type its letter.
 - **Delete:** `delete my old Netflix entry`. Stern asks you to confirm
   with **Yes, delete it** or **No, keep it**. Deleting a folder keeps
   what was inside it.
+- **Undo:** a deleted note goes to the trash for 30 days. Type `undo` to
+  bring back the last one, or `restore Netflix`. `show the trash` lists
+  what is there, and `empty the trash` removes it for good (after asking).
 
 ## 6. Settings, light and dark, and Help
 

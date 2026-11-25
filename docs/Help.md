@@ -18,7 +18,11 @@ Type "edit" followed by the note's name, for example "edit my shopping list". Th
 
 ## How do I save a document?
 
-Tap "Save a document", or type "save a document". A box opens with a button to choose a file from your computer. Pick the file and Stern keeps an encrypted copy in your vault under its own name, then tells you its name and size. A file can be up to 10 MB. If it is bigger, Stern says so and nothing is saved. If you change your mind, tap Cancel. Nothing is saved until you pick a file.
+Tap "Save a document", or type "save a document". A box opens with a button to choose a file from your computer. Stern keeps plain text files only, such as .txt, .md, .html or .csv. A file can be up to 1 MB. Pick the file and Stern keeps an encrypted copy in your vault under its own name, then tells you its name and size. PDFs, Word and Excel files, pictures and other files that are not plain text cannot be saved. If you pick one, or a file that is too big, Stern says so and nothing is saved. If a text file is in an older format, save it as a UTF-8 text file first. If you change your mind, tap Cancel. Nothing is saved until you pick a file.
+
+## What are "what it's about" and keywords?
+
+When you save a note, there are two optional lines under it. "What it's about" is a short sentence, such as "my Chase card details". Keywords are a few words you might search for, separated by commas. They help you find the note later by what it is about. If you leave the keywords empty, Stern picks some plain words from your note for you. Stern never picks a word that looks like a password, a number or a code. You can change both at any time by opening the note with "edit my" followed by its name. Both are locked with your password, like the note itself.
 
 ## How do I save a password?
 
@@ -39,6 +43,10 @@ Type "create folder Taxes" to make a folder. To make one inside another, type "c
 ## How do I rename or delete something?
 
 Type "rename Netflix to Netflix Family" to give something a new name. To rename a folder, say so, for example "rename the Taxes folder to Tax Docs". To delete something, type "delete my old Netflix entry". Stern always asks first, and you tap "Yes, delete it" or "No, keep it". Anything else you type cancels the deletion, so nothing is lost by accident. Deleting a folder does not delete what is inside it: those things move up one level.
+
+## Can I get something back after I delete it?
+
+Yes, for 30 days. A deleted note or document goes to the trash, not out of your vault. Type "undo" to bring back the one you deleted last, or "restore Netflix" to bring back a particular one. Type "show the trash" to see what is there and when it was deleted. It is kept in the same folder it was in. After 30 days, Stern removes it for good the next time you unlock. To remove everything in the trash now, type "empty the trash". Stern asks first, and this cannot be undone. Things in the trash do not show up when you look for something.
 
 ## What can I say to Stern?
 

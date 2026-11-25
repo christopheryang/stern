@@ -50,7 +50,9 @@ Stern's chat is powered by a local text generation model (downloaded after insta
 - **Folders** — "create folder Taxes", "move Lease to Home", "show my folders" (nested; each entry sits in one folder; folder names are encrypted)
 - **Rename** — "rename Netflix to Netflix Family"
 - **Update** — "change my Netflix password"
-- **Delete** — "delete my old Netflix entry" (always asks yes or no first)
+- **Delete** — "delete my old Netflix entry" (always asks yes or no first; goes to a trash for 30 days, and "undo" or "restore <name>" brings it back)
+- **Files** — "save a document" opens a picker for a plain text file (.txt, .md, .html, .csv and the like) of up to 1 MB; PDFs, Office files and pictures are not accepted
+- **Describe** — a note can carry a short "what it's about" line and keywords, kept encrypted with it
 
 Everyday wording works too ("I forgot my router password", "jot down a note"), and small talk gets a short fixed reply.
 

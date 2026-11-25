@@ -1,7 +1,7 @@
 # ADR-0017: Text-only files with a 1 MB limit
 
-- **Status:** Accepted (not yet built; see the
-  [design](../design/2026-11-25%20-%20Vault-Assistant.md))
+- **Status:** Accepted and built (phase 1 of the
+  [Vault Assistant](../design/2026-11-25%20-%20Vault-Assistant.md))
 - **Date:** 2026-11-25
 
 ## Context
@@ -52,6 +52,6 @@ find works against the goal.
 - Text in another encoding (UTF-16, Latin-1) is refused; the message
   suggests saving it as UTF-8. Supporting more encodings can be added
   later.
-- The help text, user guide and file-upload design currently say 10 MB and
-  allow binary files. They change in the same release that changes the
-  code, not before.
+- The help text and user guide now say 1 MB and plain text. The File
+  Upload design keeps its original 10 MB description as history, with a
+  note pointing here.

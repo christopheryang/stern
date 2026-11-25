@@ -5,10 +5,11 @@
 - **Branch:** `feat/22-file-upload`
 
 > **Superseded in part.** [ADR-0017](../adr/0017-Text-Only-Files-With-A-1-MB-Limit.md)
-> (planned) changes the limit from 10 MB to 1 MiB and removes binary files:
-> only plain text is accepted. The storage design below, an encrypted blob
-> per entry, stays. This page describes what is built today, until the
-> change ships.
+> changed the limit from 10 MB to 1 MiB and removed binary files: only plain
+> text is accepted. This page records the original 10 MB design as history.
+> The storage design below, an encrypted blob per entry, still holds, and
+> older binary entries are still readable. Where this page says 10 MB or
+> binary, read 1 MiB and plain text.
 
 ## Requirements
 
@@ -213,7 +214,8 @@ Implemented in `desktop/stern-tauri/src/files.rs`:
 - `save_file_to_picker(entry_id, suggested_name)` decrypts a stored file
   and writes it where the user chooses, through the native save dialog. It
   never replaces an existing file.
-- `delete_stored_file(entry_id)` removes the entry and its blob.
+- `delete_stored_file(entry_id)` moves the entry to the trash (its blob goes
+  with it when the trash is emptied or after 30 days).
 
 **Chat and the picker.** "Save a document" opens a file picker card in the
 chat (`open_file_picker`), and the picked file is stored by
