@@ -323,8 +323,40 @@ impl AiModel {
     /// [`MAX_NEW_TOKENS`] tokens or an end-of-turn token. The session
     /// lock is held for the whole generation on purpose: the session
     /// is shared state, and the lock is what serializes parses.
-    #[allow(clippy::significant_drop_tightening)]
     fn generate(&self, prompt: &str) -> Result<String, VaultError> {
+        self.generate_up_to(prompt, MAX_NEW_TOKENS)
+    }
+
+    /// Free-form chat with the model, for trying it out by hand.
+    ///
+    /// The app never calls this: its replies come from fixed text, and the
+    /// model only parses commands. `turns` is the conversation so far as
+    /// (role, text) pairs, ending with the user's message. Only the
+    /// `ChatML` prompt style is supported.
+    pub fn chat_for_experiment(
+        &self,
+        turns: &[(&str, &str)],
+        max_new_tokens: usize,
+    ) -> Result<String, VaultError> {
+        if !matches!(self.prompt_style, PromptStyle::ChatMl) {
+            return Err(VaultError::Model(
+                "free chat needs an instruction-tuned (ChatML) model".to_string(),
+            ));
+        }
+        let mut prompt = String::new();
+        for (role, text) in turns {
+            prompt.push_str("<|im_start|>");
+            prompt.push_str(role);
+            prompt.push('\n');
+            prompt.push_str(&sanitize_user_input(text));
+            prompt.push_str("<|im_end|>\n");
+        }
+        prompt.push_str("<|im_start|>assistant\n");
+        self.generate_up_to(&prompt, max_new_tokens)
+    }
+
+    #[allow(clippy::significant_drop_tightening)]
+    fn generate_up_to(&self, prompt: &str, max_new_tokens: usize) -> Result<String, VaultError> {
         let encoding = self
             .tokenizer
             .encode(prompt, false)
@@ -347,7 +379,7 @@ impl AiModel {
                 break;
             }
             generated.push(token);
-            if generated.len() >= MAX_NEW_TOKENS {
+            if generated.len() >= max_new_tokens {
                 break;
             }
             let (next, new_past) = self.run_step(&mut session, &[token], past_len, past)?;
