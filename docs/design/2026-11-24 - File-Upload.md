@@ -4,6 +4,12 @@
 - **Issue:** [#22](https://github.com/christopheryang/stern/issues/22) (deleted; recreated under a new number when filed again)
 - **Branch:** `feat/22-file-upload`
 
+> **Superseded in part.** [ADR-0017](../adr/0017-Text-Only-Files-With-A-1-MB-Limit.md)
+> (planned) changes the limit from 10 MB to 1 MiB and removes binary files:
+> only plain text is accepted. The storage design below, an encrypted blob
+> per entry, stays. This page describes what is built today, until the
+> change ships.
+
 ## Requirements
 
 ### Goal

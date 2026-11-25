@@ -107,6 +107,9 @@ full rules are in `.agents/skills/repo-skills.md`. In short:
   messages, on-device; once a guided conversation starts, its replies
   go to the deterministic state machine, never to the model, and no
   model-generated prose is ever shown to the user.
+  (Planned, ADR-0019: one exception, a model-drafted summary shown as an
+  editable suggestion and never written into a chat reply. Until it
+  ships, the rule has no exception.)
 - Key material lives in `SecretMem<T>` (mlock + zeroize). Never log,
   serialize, or clone secrets or keys into plain types.
 - Do not weaken the crypto parameters in

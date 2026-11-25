@@ -64,6 +64,31 @@ and an ADR disagree, the ADR wins.
 - **One network request.** The model download is the only network
   request the app ever makes.
 
+## Planned: vault assistant
+
+Agreed but not built yet. The design is
+[Vault Assistant](../design/2026-11-25%20-%20Vault-Assistant.md).
+
+- **Text files only, at most 1 MiB.** Anything that is not valid UTF-8
+  text is refused, whatever its extension
+  ([ADR-0017](../adr/0017-Text-Only-Files-With-A-1-MB-Limit.md)).
+  Until this ships, the current limit is 10 MB and binary files are
+  accepted.
+- **Find by name, topic and time.** A request can combine a name, a
+  topic, a kind, a folder and a date range; results are a short list of
+  candidates the user taps, never a revealed secret
+  ([ADR-0018](../adr/0018-Hybrid-Search-With-An-Encrypted-Index-In-The-Vault.md)).
+- **Search data stays in the vault.** Meaning vectors are saved only
+  encrypted, bound to their entry, and are rebuilt if they fail to
+  decrypt. Hidden fields (passwords, card numbers) are never indexed.
+- **Summaries the user approves.** The model may draft a short "what it's
+  about" line, shown as an editable suggestion and stored encrypted. This
+  is the only model-written text the app may show
+  ([ADR-0019](../adr/0019-Model-Suggested-Summaries-The-User-Approves.md)).
+- **Delete can be undone for 30 days.** Deleted entries go to a trash.
+- **Organising help.** Stern may suggest a folder, propose a tidy-up, and
+  point out duplicates, but changes nothing without a tap.
+
 ## Platform and data
 
 - **Desktop app** (Tauri): release bundles are built for macOS
